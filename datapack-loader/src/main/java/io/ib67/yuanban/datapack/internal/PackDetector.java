@@ -17,8 +17,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 
 /**
  * 判断目录中的一个条目是否是数据包，规则和原版 {@code PackDetector} 相同：
- * 含有 {@code pack.mcmeta} 的目录、文件名以 {@code .zip} 结尾的普通文件是数据包，其余条目不是。
- * 符号链接必须匹配白名单，否则抛出异常。
+ * 含有 {@code pack.mcmeta} 的目录、文件名以 {@code .zip} 结尾的普通文件是数据包，其余条目跳过。
+ * 条目本身的符号链接、以及数据包目录内部的符号链接必须匹配白名单，否则抛出异常。
  */
 @ApiStatus.Internal
 public final class PackDetector {
@@ -35,10 +35,10 @@ public final class PackDetector {
             attributes = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         }
         if (attributes.isDirectory()) {
-            validateDirectory(target, symlinkAllowList);
             if (!Files.isRegularFile(target.resolve(PackMetadataReader.FILE_NAME))) {
                 return null;
             }
+            validateDirectory(target, symlinkAllowList);
             return target.getFileSystem() == FileSystems.getDefault()
                     ? new PackRoot.Directory(target)
                     : new PackRoot.Embedded(target);

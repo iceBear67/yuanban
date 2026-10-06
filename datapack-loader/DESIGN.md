@@ -60,9 +60,9 @@ dependencies {
 
 | 包 | 内容 |
 |---|---|
-| `datapack` | `DataPackLoader`、`DataPackSession`、`LoaderSettings`、`ReloadRequest`、异常类型 |
+| `datapack` | `DataPackLoader`、`DataPackSession`、`LoaderSettings`、`ReloadRequest`、`ReloadResult`、异常类型 |
 | `datapack.pack` | `PackFormat`、`FormatRange`、`PackCompatibility`、`PackMetadata`、`OverlayEntry`、`ResourceFilter`、`FilterRule`、`Pack`、`PackInfo`、`PackOrigin`、`KnownPack`、`PackSelectionConfig`、`PackPosition`、`PackRoot` |
-| `datapack.provider` | `PackProvider`、`BuiltInPackProvider`、`FolderPackProvider` |
+| `datapack.provider` | `PackProvider`、`BuiltInPackProvider`、`FolderPackProvider`、`ZipPackProvider` |
 | `datapack.selection` | `DataPackConfig`、`SelectionRequest`、`SelectionMode`、`Selection`、`SelectionReport`、`SelectionEditor`、`Placement` |
 | `datapack.topic` | `Topic`、`TopicFiles`、`TopicLayers`、`Resource` |
 | `datapack.tag` | `TagEntry`、`TagValue`、`TagDeclaration`、`TagDeclarations` |
@@ -95,6 +95,7 @@ public final class Pack {
     public PackCompatibility compatibility();   // 由格式范围和当前格式计算，见第 6 节
     public List<String> activeOverlays();       // 当前格式下生效的 overlay 目录，保持 pack.mcmeta 中的顺序
     public PackRoot root();
+    public Optional<Set<String>> exposedNamespaces();   // 只读取的命名空间；为空表示读取 data/ 下的全部内容
     public PackInfo info();                     // id、origin、knownPack 三项
 }
 
@@ -123,14 +124,15 @@ public sealed interface PackRoot {
 - `PackSelectionConfig` 对应原版同名类型。`required` 的数据包总会出现在启用列表中；`fixedPosition` 的数据包在插入其他数据包的时候保持在自己默认位置那一端。原版 26.2 中没有 `required` 或 `fixedPosition` 的数据包，这两项留给宿主自己的数据包使用。
 - `KnownPack` 对应原版同名类型。客户端在配置阶段告诉服务端自己拥有哪些已知数据包，服务端同步注册表的时候，如果某个条目所属的数据包是客户端已有的已知数据包，就可以省略条目内容。订阅者通过 `Resource.pack().knownPack()` 拿到条目所属数据包的这项信息；宿主在配置阶段发送的已知数据包列表取自 `Selection.packs()` 中各数据包的 `knownPack()`。
 - 打开 `PackRoot.Zip` 会新建 zip 文件系统，由所在批次负责关闭。`Directory` 和 `Embedded` 不需要关闭，`Embedded` 所在的文件系统归宿主所有。
+- `exposedNamespaces` 对应原版 `VanillaPackResourcesBuilder.exposeNamespace`。设置之后，建立索引的时候 `data/` 下不在这个集合中的条目全部忽略，也不检查它们是否合法。用 `Pack.create` 的带 `exposedNamespaces` 参数的重载创建。
 
 ### 5.3 BuiltInPackProvider：原版数据
 
-构造参数：原版数据根目录（`Path`，通常是宿主用 zip 文件系统打开的 26.2 服务端 jar 的根目录，其中包含 `data/minecraft/...`）和版本名（`"26.2"`）。
+这个提供者是读取原版服务端 jar 专用的。构造参数：原版数据根目录（`Path`，通常是宿主用 zip 文件系统打开的 26.2 服务端 jar 的根目录，其中包含 `data/minecraft/...`）和版本名（`"26.2"`）。
 
 给出的数据包：
 
-1. `vanilla`：根目录就是原版数据根目录。原版 jar 中没有 `pack.mcmeta`，元数据由代码构造，内容和原版 `ServerPacksSource` 相同：描述 `{"translate":"dataPack.vanilla.description"}`，格式范围 `[当前格式, 当前主版本.任意次版本]`，特性 `minecraft:vanilla`，没有 filter 和 overlay。类别 `BUILT_IN`，选择配置 `(required=false, BOTTOM, fixedPosition=false)`，已知数据包 `minecraft:core:<版本名>`。
+1. `vanilla`：根目录就是原版数据根目录。原版 jar 中没有 `pack.mcmeta`，元数据由代码构造，内容和原版 `ServerPacksSource` 相同：描述 `{"translate":"dataPack.vanilla.description"}`，格式范围 `[当前格式, 当前主版本.任意次版本]`，特性 `minecraft:vanilla`，没有 filter 和 overlay。类别 `BUILT_IN`，选择配置 `(required=false, BOTTOM, fixedPosition=false)`，已知数据包 `minecraft:core:<版本名>`。和原版的 `exposeNamespace("minecraft")` 相同，`exposedNamespaces` 只有 `minecraft`：26.2 的 jar 在 `data/` 下还有一个普通文件 `data/.mcassetsroot`，读取的时候直接忽略。
 2. 内置特性数据包：扫描 `<根目录>/data/minecraft/datapacks/` 下的每个条目，判断规则和 5.4 相同。数据包 ID 是条目名，zip 去掉 `.zip` 后缀。26.2 中有 `minecart_improvements`、`redstone_experiments`、`trade_rebalance` 三个。类别 `FEATURE`，选择配置 `(false, TOP, false)`，已知数据包 `minecraft:<数据包 ID>:<版本名>`。根目录位于非默认文件系统中，这里遇到 zip 条目没有办法打开，直接抛出异常。
 
 ### 5.4 FolderPackProvider：世界数据包目录
@@ -140,11 +142,15 @@ public sealed interface PackRoot {
 目录不存在的时候创建它（和原版相同）。对目录下的每个条目：
 
 - 条目本身是符号链接：链接目标必须匹配白名单，否则抛出异常；之后按链接目标继续判断。
-- 目录：含有 `pack.mcmeta` 普通文件就是数据包，并且目录内部的每个符号链接（递归检查）都必须匹配白名单，否则抛出异常。目录中没有 `pack.mcmeta` 的时候跳过这个目录（原版同样跳过）。
+- 目录：目录中没有 `pack.mcmeta` 普通文件的时候跳过这个目录（原版同样跳过），不检查它内部的内容。含有 `pack.mcmeta` 的目录是数据包，并且目录内部的每个符号链接（递归检查）都必须匹配白名单，否则抛出异常。
 - 文件名以 `.zip` 结尾的普通文件是数据包，zip 里面必须有 `pack.mcmeta`，没有就抛出异常。
 - 其他文件跳过。
 
 数据包 ID 是 `file/<条目名>`（zip 保留 `.zip` 后缀），选择配置 `(false, TOP, false)`，没有已知数据包信息。
+
+### 5.5 ZipPackProvider：单个 zip 数据包
+
+给出一个 zip 数据包，`pack.mcmeta` 位于 zip 的根目录，文件名不限（`.jar` 也可以）。构造参数：zip 文件路径、数据包 ID、类别、选择配置、已知数据包信息（可以为 `null`）。zip 文件必须是默认文件系统中的普通文件；文件不存在、不是普通文件、位于其他文件系统中（例如另一个 zip 内部），或者缺少 `pack.mcmeta`，都抛出 `PackStructureException`。
 
 ## 6. pack.mcmeta
 
@@ -154,7 +160,7 @@ public sealed interface PackRoot {
 |---|---|
 | `pack` | 必需，对象。 |
 | `pack.description` | 必需，文本组件（字符串、对象或数组）。以 `JsonElement` 原样保存，由宿主转换，例如交给 Adventure 的 Gson 序列化器。 |
-| `pack.min_format`、`pack.max_format` | 两个都必需。取值是非负整数 `N`，或者长度 1 到 256 的非负整数数组（只使用前两个元素，和原版编解码器相同）。`min_format` 中 `N` 和 `[N]` 表示 `N.0`；`max_format` 中 `N` 和 `[N]` 表示主版本 `N` 下的任意次版本；`[N, M]` 表示 `N.M`。`min` 大于 `max` 的时候抛出异常。 |
+| `pack.min_format`、`pack.max_format` | 两个都必需。取值是非负整数 `N`，或者长度 1 到 256 的非负整数数组（只使用前两个元素，和原版编解码器相同）。数字和原版 `Codec.INT` 一样用 `Number.intValue()` 转换，小数截断取整，例如 `107.9` 读作 `107`。`min_format` 中 `N` 和 `[N]` 表示 `N.0`；`max_format` 中 `N` 和 `[N]` 表示主版本 `N` 下的任意次版本；`[N, M]` 表示 `N.M`。`min` 大于 `max` 的时候抛出异常。 |
 | `features.enabled` | `features` 存在的时候必需，命名空间 ID 列表。每一项都必须是 `LoaderSettings.featureFlags` 中登记过的特性开关，否则抛出异常。 |
 | `filter.block` | `filter` 存在的时候必需，列表。每一项是对象，可以有 `namespace`、`path` 两个字段，值是 Java 正则表达式；编译失败抛出异常。 |
 | `overlays.entries` | `overlays` 存在的时候必需，列表。每一项必需 `directory`（匹配 `[-_a-zA-Z0-9.]+`，和原版代码相同）、`min_format`、`max_format`（规则同上）。 |
@@ -272,9 +278,9 @@ public sealed interface Placement {
 加载开始之后，框架按选择结果打开每个数据包，并为每个数据包建立一份索引：
 
 1. 先遍历根目录下的 `data/`，再按顺序遍历每个生效 overlay 的 `<overlay>/data/`，把文件逐个放入 `Map<命名空间, NavigableMap<相对路径, 索引项>>`。后遍历的覆盖先遍历的，所以同一个路径保留优先级最高的那一份。索引项记录文件的 `Path` 和所在的 overlay 目录（根目录记为 `null`）。
-2. `data/` 下的每个直接子项都必须是目录，并且目录名是合法的命名空间，否则抛出异常。
+2. `data/` 下的每个直接子项都必须是目录，并且目录名是合法的命名空间，否则抛出异常。数据包设置了 `exposedNamespaces` 的时候，不在集合中的子项直接忽略。
 3. 相对路径由 `Path` 的各级名字用 `/` 拼接得到，和操作系统的路径分隔符无关。
-4. 遍历不跟随符号链接，符号链接本身也不进入索引，和原版列出资源的行为相同。
+4. 遍历跟随符号链接，数据包内部的符号链接在发现阶段已经用白名单校验过。命名空间目录、topic 路径中间的某一级目录、文件本身都可以是链接，和原版的行为相同（原版用会跟随链接的 `Files.isDirectory` 判断命名空间目录，链接解析由操作系统完成）。链接成环或者链接目标不存在的时候抛出异常。
 
 每个数据包只遍历一次文件系统。之后所有 topic 的查询都是对内存中的 `NavigableMap` 做前缀范围查询：`subMap(dir + "/", true, dir + "0", false)`，`'0'` 在 ASCII 中紧跟在 `'/'` 之后。各数据包的索引在执行器上并行建立。
 
@@ -512,16 +518,20 @@ public final class DataPackSession implements AutoCloseable {
     public Selection selection();                  // 当前启用的数据包、启用的特性、待持久化的 DataPackConfig、选择报告
     public SortedMap<String, Pack> available();    // 最近一次发现的全部数据包
     public SelectionEditor editor();
-    public Selection reload(ReloadRequest request);
-    public void close();                           // 关闭当前批次
+    public ReloadResult reload(ReloadRequest request);
+    public void close();                           // 关闭当前批次，以及保持打开的初始批次
 }
+
+public record ReloadResult(Selection selection, Optional<UncheckedIOException> closeFailure) {}
 ```
 
-`start` 和 `reload` 都是阻塞调用，结束的时候订阅者的 `apply` 已经全部执行完。同一个会话同一时刻只能有一个 `reload` 在执行，并发调用抛出 `IllegalStateException`。`reload` 成功之后，宿主把新的 `selection().config()` 写回存档。
+`start` 和 `reload` 都是阻塞调用，结束的时候订阅者的 `apply` 已经全部执行完。同一个会话同一时刻只能有一个 `reload` 在执行，并发调用抛出 `IllegalStateException`。`reload` 返回结果的时候新的启用列表已经生效，宿主把 `selection().config()` 写回存档。会话切换到新批次之后才关闭旧批次，关闭失败不影响重载结果，失败原因放在 `closeFailure` 中，由宿主决定如何记录。
 
 ### 10.4 批次与按需读取
 
 批次关闭之后，它打开的 zip 文件系统也随之关闭，再读取其中的 `Resource` 会抛出 `ClosedFileSystemException`。需要在运行期间按需读取文件的模块，在 `apply` 中把持有的 `TopicFiles` 换成新的，并且自己保证切换之后不再使用旧的 `TopicFiles`，例如用读写锁保护读取和切换。框架在全部 `apply` 完成之后才关闭旧批次。
+
+存在 `STARTUP` 订阅者的时候，初始批次在会话关闭之前一直保持打开。`STARTUP` 订阅者不会再执行 `apply`，它们提交到游戏中的内容、以及为 `RELOADABLE` 订阅者保留的准备结果，都可能引用初始批次中的文件。没有 `STARTUP` 订阅者的时候，初始批次和其他批次一样在第一次重载成功之后关闭。
 
 ## 11. 错误处理
 
@@ -530,9 +540,11 @@ public final class DataPackSession implements AutoCloseable {
 | 情况 | 处理 |
 |---|---|
 | 两个数据包 ID 相同 | 抛出 `PackStructureException` |
-| 符号链接不在白名单中 | 抛出 `PackStructureException` |
+| 数据包目录本身或者它内部的符号链接不在白名单中 | 抛出 `PackStructureException` |
+| 数据包内部的符号链接成环、目标不存在 | 抛出 `PackStructureException` |
 | zip 数据包缺少 `pack.mcmeta` | 抛出 `PackStructureException` |
-| 内置特性数据包是 zip 文件 | 抛出 `PackStructureException` |
+| 原版数据根目录位于非默认文件系统中，内置特性数据包是 zip 文件 | 抛出 `PackStructureException` |
+| `ZipPackProvider` 的文件不存在、不是普通文件或者位于非默认文件系统中 | 抛出 `PackStructureException` |
 | `pack.mcmeta` 语法错误、缺少必需字段、取值不合法、特性开关未登记、正则无法编译 | 抛出 `PackMetadataException`，包含数据包 ID 和字段路径 |
 | `data/` 下出现普通文件或者不合法的命名空间目录名 | 抛出 `PackStructureException` |
 | 属于某个 topic 的文件不能构成合法的资源 ID | 抛出 `PackStructureException` |
@@ -561,9 +573,9 @@ public final class DataPackSession implements AutoCloseable {
 
 - 格式版本：整数和数组写法、`min` / `max` 的次版本缺省值、三种兼容性结果、overlay 的选择。
 - `pack.mcmeta`：第 6 节每一条错误规则各一个用例，检查异常中的数据包 ID 和字段路径。
-- 发现：目录数据包、zip 数据包、没有 `pack.mcmeta` 的目录被跳过、符号链接白名单、ID 重复、内置特性数据包。
+- 发现：目录数据包、zip 数据包、没有 `pack.mcmeta` 的目录被跳过（其中的符号链接不检查）、符号链接白名单、白名单允许的符号链接能正常加载、链接目标不存在、ID 重复、内置特性数据包、原版数据只读取 `minecraft` 命名空间（含 `data/.mcassetsroot` 的 jar 能正常加载）、`ZipPackProvider` 的正常加载和各种错误。
 - 选择算法：7.3 的每一步至少一个用例，覆盖新建世界、安全模式、缺失的数据包、特性不满足、`required` 数据包插入到固定位置的数据包旁边、强制启用特性数据包、`Rescan` 和 `Select`，以及 `SelectionEditor` 的每条校验规则。
-- 叠加：同名文件覆盖、overlay 的顺序、overlay 不影响其他数据包、`filter` 只作用于低优先级数据包、`filter` 的两条原版规则（不同规则分别满足命名空间和路径、部分匹配）、分层视图被 `filter` 清空。同一组用例用目录数据包和 zip 数据包各运行一次，结果必须相同。
+- 叠加：同名文件覆盖、overlay 的顺序、`entries` 列出但不存在的 overlay 目录、overlay 不影响其他数据包、`filter` 只作用于低优先级数据包、`filter` 的两条原版规则（不同规则分别满足命名空间和路径、部分匹配）、分层视图被 `filter` 清空。同一组用例用目录数据包和 zip 数据包各运行一次，结果必须相同。
 - 标签：`replace` 和追加的顺序、overlay 中的标签文件替换根目录中的同名文件、各种条目写法、格式错误。
-- 调度：提交顺序符合依赖关系、多个订阅者共用 topic 视图、准备失败的时候没有调用任何 `apply` 并且新批次已关闭、依赖环检测、`RELOADABLE` 订阅者在重载期间读到保留的 `STARTUP` 准备结果、重载失败之后旧批次仍然可以读取。
+- 调度：提交顺序符合依赖关系、多个订阅者共用 topic 视图、准备失败的时候没有调用任何 `apply` 并且新批次已关闭、依赖环检测、`RELOADABLE` 订阅者在重载期间读到保留的 `STARTUP` 准备结果、重载失败之后旧批次仍然可以读取、存在 `STARTUP` 订阅者的时候初始批次保持打开到会话关闭、没有的时候在第一次重载之后关闭。
 - 原版数据：测试源集使用 `de.undercouch.download` 插件（5.7.0）从 Mojang 下载 26.2 服务端，按 SHA-1 `823e2250d24b3ddac457a60c92a6a941943fcd6a` 校验，取出其中的 `META-INF/versions/26.2/server-26.2.jar`。测试用 zip 文件系统打开它，构造 `BuiltInPackProvider`，以 `CREATE_WORLD` 模式启动一次，检查发现了 `vanilla` 和三个特性数据包；`recipe`、`loot_table`、`tags/block`、`worldgen/biome` 这几个 topic 的资源数量和直接用 `java.util.zip` 列出 jar 条目得到的数量相同。

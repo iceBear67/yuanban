@@ -12,6 +12,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
@@ -61,9 +62,13 @@ final class TestWorld {
     }
 
     DataPackLoader.Builder loader() {
+        return loader(path -> false);
+    }
+
+    DataPackLoader.Builder loader(PathMatcher symlinkAllowList) {
         return DataPackLoader.builder(LoaderSettings.MINECRAFT_26_2)
                 .provider(new BuiltInPackProvider(vanillaRoot, "26.2"))
-                .provider(new FolderPackProvider(datapacks, PackOrigin.WORLD, path -> false))
+                .provider(new FolderPackProvider(datapacks, PackOrigin.WORLD, symlinkAllowList))
                 .executor(ForkJoinPool.commonPool());
     }
 

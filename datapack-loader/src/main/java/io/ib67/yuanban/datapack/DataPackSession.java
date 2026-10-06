@@ -12,17 +12,24 @@ import io.ib67.yuanban.datapack.selection.SelectionRequest;
 import io.ib67.yuanban.datapack.subscribe.LoadKind;
 import io.ib67.yuanban.datapack.subscribe.SubscriberKey;
 
+import org.jetbrains.annotations.Nullable;
+
+import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.SortedMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 一个世界的数据包会话。持有当前批次，会话期间世界的特性保持不变。
+ * 存在 {@code STARTUP} 订阅者的时候，初始批次在会话关闭之前一直保持打开：
+ * 这些订阅者不会再执行 {@code apply}，它们提交的内容和保留的准备结果可能引用初始批次中的文件。
  */
 public final class DataPackSession implements AutoCloseable {
     private final DataPackLoader loader;
     private final Map<SubscriberKey<?>, Object> retained;
+    private final @Nullable Batch initialBatch;
     private final AtomicBoolean reloading = new AtomicBoolean();
     private volatile SortedMap<String, Pack> available;
     private volatile Selection selection;
@@ -37,6 +44,7 @@ public final class DataPackSession implements AutoCloseable {
         this.available = available;
         this.selection = selection;
         this.batch = batch;
+        this.initialBatch = loader.graph().hasStartupSubscribers() ? batch : null;
         this.retained = Map.copyOf(retained);
     }
 
@@ -61,12 +69,13 @@ public final class DataPackSession implements AutoCloseable {
 
     /**
      * 重新加载 {@code RELOADABLE} 订阅者。阻塞到全部 {@code apply} 执行完。
-     * 失败的时候会话保持原状；成功之后宿主把新的 {@code selection().config()} 写回存档。
+     * 失败的时候会话保持原状；返回结果之后新的启用列表已经生效，宿主把 {@code selection().config()} 写回存档。
+     * 关闭旧批次失败不影响重载结果，失败原因放在 {@link ReloadResult#closeFailure()} 中。
      *
      * @throws LoadFailedException   索引、视图或者准备任务失败，没有调用过任何 {@code apply}
      * @throws IllegalStateException 同一个会话有另一个重载正在执行
      */
-    public Selection reload(ReloadRequest request) {
+    public ReloadResult reload(ReloadRequest request) {
         Objects.requireNonNull(request, "request");
         if (!reloading.compareAndSet(false, true)) {
             throw new IllegalStateException("another reload is running");
@@ -96,18 +105,40 @@ public final class DataPackSession implements AutoCloseable {
             batch = outcome.batch();
             available = newAvailable;
             selection = newSelection;
-            previous.close();
-            return newSelection;
+            if (previous == initialBatch) {
+                return new ReloadResult(newSelection, Optional.empty());
+            }
+            try {
+                previous.close();
+                return new ReloadResult(newSelection, Optional.empty());
+            } catch (UncheckedIOException e) {
+                return new ReloadResult(newSelection, Optional.of(e));
+            }
         } finally {
             reloading.set(false);
         }
     }
 
     /**
-     * 关闭当前批次。
+     * 关闭当前批次，以及保持打开的初始批次。
      */
     @Override
     public void close() {
-        batch.close();
+        var current = batch;
+        if (initialBatch == null || initialBatch == current) {
+            current.close();
+            return;
+        }
+        try {
+            current.close();
+        } catch (UncheckedIOException e) {
+            try {
+                initialBatch.close();
+            } catch (UncheckedIOException initialFailure) {
+                e.addSuppressed(initialFailure);
+            }
+            throw e;
+        }
+        initialBatch.close();
     }
 }

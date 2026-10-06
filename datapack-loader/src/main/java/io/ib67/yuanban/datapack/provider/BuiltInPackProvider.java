@@ -26,8 +26,10 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * 原版数据，对应原版 {@code ServerPacksSource}。给出 {@code vanilla} 数据包，
+ * 原版服务端 jar 专用，对应原版 {@code ServerPacksSource}。给出 {@code vanilla} 数据包，
  * 以及 {@code data/minecraft/datapacks/} 下的内置特性数据包。
+ * 和原版 {@code exposeNamespace("minecraft")} 相同，{@code vanilla} 只读取 {@code minecraft} 命名空间，
+ * jar 中 {@code data/} 下的其他条目（例如 {@code data/.mcassetsroot}）忽略。
  */
 public final class BuiltInPackProvider implements PackProvider {
     public static final String VANILLA_ID = "vanilla";
@@ -55,7 +57,7 @@ public final class BuiltInPackProvider implements PackProvider {
         }
         output.accept(Pack.create(settings, VANILLA_ID, PackOrigin.BUILT_IN,
                 new KnownPack(Key.MINECRAFT_NAMESPACE, CORE_KNOWN_PACK_ID, versionName),
-                VANILLA_SELECTION_CONFIG, vanillaMetadata(settings), packRoot(root)));
+                VANILLA_SELECTION_CONFIG, vanillaMetadata(settings), packRoot(root), Set.of(Key.MINECRAFT_NAMESPACE)));
         var featurePacks = root.resolve("data").resolve(Key.MINECRAFT_NAMESPACE).resolve("datapacks");
         if (!Files.isDirectory(featurePacks)) {
             return;

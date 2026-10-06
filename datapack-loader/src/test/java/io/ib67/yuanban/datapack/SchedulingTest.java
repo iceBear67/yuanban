@@ -136,25 +136,26 @@ class SchedulingTest {
     void prepareFailureAppliesNothingAndClosesTheNewBatch() {
         var world = new TestWorld(tempDir);
         world.worldPack(TestPack.create().data("minecraft", "recipe/a.json", "zip content"), Layout.ZIP, "x");
+        SubscriberKey<TopicFiles> capturedKey = SubscriberKey.of("test:captured");
         var captured = new TestSubscriber<TopicFiles>(context -> context.contents(RECIPES));
+        // 依赖 captured，保证 captured 的准备阶段一定先完成
         var failing = new TestSubscriber<String>(context -> {
+            assertEquals("zip content", read(context.dependency(capturedKey).find(Key.key("minecraft:a")).orElseThrow()));
             throw new IllegalArgumentException("broken");
         });
         var loader = world.loader()
-                .subscribe(Subscription.builder(SubscriberKey.<TopicFiles>of("test:captured"), captured).lifecycle(Lifecycle.RELOADABLE).topic(RECIPES).build())
-                .subscribe(Subscription.builder(SubscriberKey.<String>of("test:failing"), failing).lifecycle(Lifecycle.RELOADABLE).build())
+                .subscribe(Subscription.builder(capturedKey, captured).lifecycle(Lifecycle.RELOADABLE).topic(RECIPES).build())
+                .subscribe(Subscription.builder(SubscriberKey.<String>of("test:failing"), failing).lifecycle(Lifecycle.RELOADABLE).after(capturedKey).build())
                 .build();
         var exception = assertThrows(LoadFailedException.class, () -> loader.start(TestWorld.createWorld()));
         assertInstanceOf(IllegalArgumentException.class, exception.getCause());
         assertTrue(exception.getMessage().contains("test:failing"), exception.getMessage());
         assertTrue(captured.applied.isEmpty());
         assertTrue(failing.applied.isEmpty());
-        // 准备阶段可能还没开始就被放弃；开始过的话，它拿到的视图所在的 zip 已经关闭
-        if (!captured.contexts.isEmpty()) {
-            var files = captured.contexts.getFirst().contents(RECIPES);
-            var resource = files.find(Key.key("minecraft:a")).orElseThrow();
-            assertThrows(ClosedFileSystemException.class, resource::readAllBytes);
-        }
+        assertEquals(1, captured.contexts.size());
+        assertEquals(1, failing.contexts.size());
+        var resource = captured.contexts.getFirst().contents(RECIPES).find(Key.key("minecraft:a")).orElseThrow();
+        assertThrows(ClosedFileSystemException.class, resource::readAllBytes);
     }
 
     @Test
@@ -162,6 +163,7 @@ class SchedulingTest {
         var world = new TestWorld(tempDir)
                 .vanilla("minecraft", "recipe/a.json", "vanilla a")
                 .vanilla("minecraft", "function/load.mcfunction", "say hi");
+        var w = world.worldPack(TestPack.create().data("minecraft", "function/w.mcfunction", "say w"), Layout.ZIP, "w");
         SubscriberKey<String> registry = SubscriberKey.of("test:registry");
         SubscriberKey<TopicFiles> recipes = SubscriberKey.of("test:recipes");
         var registryCalls = new CopyOnWriteArrayList<String>();
@@ -180,12 +182,13 @@ class SchedulingTest {
                 .subscribe(Subscription.builder(SubscriberKey.<TopicFiles>of("test:functions"), functionSubscriber).lifecycle(Lifecycle.STARTUP).topic(FUNCTIONS).build())
                 .build()
                 .start(TestWorld.createWorld())) {
-            assertEquals(List.of("vanilla"), session.selection().ids());
+            assertEquals(List.of("vanilla", w), session.selection().ids());
             assertEquals("say hi", read(functionSubscriber.last().find(Key.key("minecraft:load")).orElseThrow()));
 
             var x = world.worldPack(TestPack.create().data("minecraft", "recipe/a.json", "x a"), Layout.ZIP, "x");
-            var selection = session.reload(new ReloadRequest.Rescan());
-            assertEquals(List.of("vanilla", x), selection.ids());
+            var result = session.reload(new ReloadRequest.Rescan());
+            assertEquals(List.of("vanilla", w, x), result.selection().ids());
+            assertTrue(result.closeFailure().isEmpty());
             assertEquals(List.of("prepared"), registryCalls);
             assertEquals(1, functionSubscriber.applied.size());
             assertEquals(2, recipeSubscriber.applied.size());
@@ -193,17 +196,38 @@ class SchedulingTest {
             assertEquals("x a", read(recipeSubscriber.last().find(Key.key("minecraft:a")).orElseThrow()));
 
             var disabled = session.editor().disable(x);
-            session.reload(new ReloadRequest.Select(disabled));
-            assertEquals(List.of("vanilla"), session.selection().ids());
+            assertTrue(session.reload(new ReloadRequest.Select(disabled)).closeFailure().isEmpty());
+            assertEquals(List.of("vanilla", w), session.selection().ids());
             assertEquals(List.of(x), session.selection().config().disabled());
             assertEquals("vanilla a", read(recipeSubscriber.last().find(Key.key("minecraft:a")).orElseThrow()));
-            // 旧批次中的 zip 已经关闭
+            // 第一次重载产生的批次已经关闭
             var old = recipeSubscriber.applied.get(1).find(Key.key("minecraft:a")).orElseThrow();
             assertThrows(ClosedFileSystemException.class, old::readAllBytes);
 
             session.reload(new ReloadRequest.Select(session.editor().enable(x, new Placement.First())));
-            assertEquals(List.of(x, "vanilla"), session.selection().ids());
+            assertEquals(List.of(x, "vanilla", w), session.selection().ids());
             assertEquals("vanilla a", read(recipeSubscriber.last().find(Key.key("minecraft:a")).orElseThrow()));
+            // STARTUP 订阅者提交的内容来自初始批次，初始批次在会话关闭之前保持打开
+            assertEquals("say w", read(functionSubscriber.last().find(Key.key("minecraft:w")).orElseThrow()));
+        }
+        assertThrows(ClosedFileSystemException.class,
+                () -> functionSubscriber.last().find(Key.key("minecraft:w")).orElseThrow().readAllBytes());
+    }
+
+    @Test
+    void initialBatchIsClosedWithoutStartupSubscribers() throws IOException {
+        var world = new TestWorld(tempDir);
+        world.worldPack(TestPack.create().data("minecraft", "recipe/a.json", "x a"), Layout.ZIP, "x");
+        var subscriber = new TestSubscriber<TopicFiles>(context -> context.contents(RECIPES));
+        try (var session = world.loader()
+                .subscribe(Subscription.builder(SubscriberKey.<TopicFiles>of("test:recipes"), subscriber).lifecycle(Lifecycle.RELOADABLE).topic(RECIPES).build())
+                .build()
+                .start(TestWorld.createWorld())) {
+            var initial = subscriber.last().find(Key.key("minecraft:a")).orElseThrow();
+            assertEquals("x a", read(initial));
+            assertTrue(session.reload(new ReloadRequest.Rescan()).closeFailure().isEmpty());
+            assertThrows(ClosedFileSystemException.class, initial::readAllBytes);
+            assertEquals("x a", read(subscriber.last().find(Key.key("minecraft:a")).orElseThrow()));
         }
     }
 

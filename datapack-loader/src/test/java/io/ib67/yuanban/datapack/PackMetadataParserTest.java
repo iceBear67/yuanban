@@ -47,7 +47,8 @@ class PackMetadataParserTest {
             "[107]; [107]; 107.0; 107.*",
             "[107, 1]; [108, 3]; 107.1; 108.3",
             "[107, 1, 9]; 107; 107.1; 107.*",
-            "0; [0, 0]; 0.0; 0.0"
+            "0; [0, 0]; 0.0; 0.0",
+            "107.9; [108.5, 2.7]; 107.0; 108.2"
     })
     void formatForms(String min, String max, String expectedMin, String expectedMax) {
         var metadata = parse(pack("\"min_format\": " + min + ", \"max_format\": " + max));
@@ -105,7 +106,7 @@ class PackMetadataParserTest {
             "{\"pack\": {\"description\": \"d\", \"min_format\": 107}}; pack.max_format",
             "{\"pack\": {\"description\": \"d\", \"min_format\": 108, \"max_format\": 107}}; pack.min_format",
             "{\"pack\": {\"description\": \"d\", \"min_format\": -1, \"max_format\": 107}}; pack.min_format",
-            "{\"pack\": {\"description\": \"d\", \"min_format\": 107.5, \"max_format\": 107}}; pack.min_format",
+            "{\"pack\": {\"description\": \"d\", \"min_format\": -0.5e1, \"max_format\": 107}}; pack.min_format",
             "{\"pack\": {\"description\": \"d\", \"min_format\": \"107\", \"max_format\": 107}}; pack.min_format",
             "{\"pack\": {\"description\": \"d\", \"min_format\": [], \"max_format\": 107}}; pack.min_format",
             "{\"pack\": {\"description\": \"d\", \"min_format\": [107, -1], \"max_format\": 107}}; pack.min_format[1]",

@@ -139,6 +139,10 @@ public final class SubscriberGraph {
         return retained;
     }
 
+    public boolean hasStartupSubscribers() {
+        return applyOrder.stream().anyMatch(subscription -> subscription.lifecycle() == Lifecycle.STARTUP);
+    }
+
     public List<Subscription<?>> participants(LoadKind kind) {
         return kind == LoadKind.INITIAL
                 ? applyOrder

@@ -112,6 +112,7 @@ class LayeringTest {
                         "overlays": {"entries": [
                           {"directory": "first", "min_format": 107, "max_format": 107},
                           {"directory": "second", "min_format": 107, "max_format": 107},
+                          {"directory": "listed_but_missing", "min_format": 107, "max_format": 107},
                           {"directory": "inactive", "min_format": 200, "max_format": 200}]}""")
                 .data("minecraft", "recipe/a.json", "root a")
                 .data("minecraft", "recipe/b.json", "root b")
@@ -130,6 +131,9 @@ class LayeringTest {
                 "other:d", "second d"), contents(world, RECIPES));
         var files = load(world, RECIPES);
         assertEquals("second", files.find(Key.key("minecraft:a")).orElseThrow().overlay());
+        try (var session = world.loader().build().start(TestWorld.createWorld())) {
+            assertEquals(List.of("first", "second", "listed_but_missing"), session.selection().packs().getLast().activeOverlays());
+        }
         assertTrue(files.find(Key.key("minecraft:x")).isEmpty());
     }
 
@@ -158,8 +162,9 @@ class LayeringTest {
         var world = new TestWorld(tempDir)
                 .vanilla("minecraft", "recipe/a.json", "a")
                 .vanilla("minecraft", "recipe/b.json", "b")
-                .vanilla("other", "recipe/b.json", "other b")
                 .vanilla("minecraft", "loot_table/recipes.json", "loot");
+        // 原版数据只读取 minecraft 命名空间，other 命名空间放在优先级低于 x 的世界数据包中
+        world.worldPack(TestPack.create().data("other", "recipe/b.json", "other b"), layout, "a_other");
         // 命名空间由第一条规则满足，路径由第二条规则满足；第二条规则的 path 只是部分匹配
         world.worldPack(TestPack.create("""
                         "filter": {"block": [{"namespace": "minecraft", "path": "never"}, {"namespace": "nothing", "path": "b"}]}"""),

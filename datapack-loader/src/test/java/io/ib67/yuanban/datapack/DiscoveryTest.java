@@ -4,14 +4,22 @@ import io.ib67.yuanban.datapack.pack.KnownPack;
 import io.ib67.yuanban.datapack.pack.Pack;
 import io.ib67.yuanban.datapack.pack.PackFormat;
 import io.ib67.yuanban.datapack.pack.PackOrigin;
+import io.ib67.yuanban.datapack.pack.PackPosition;
 import io.ib67.yuanban.datapack.pack.PackRoot;
+import io.ib67.yuanban.datapack.pack.PackSelectionConfig;
 import io.ib67.yuanban.datapack.provider.BuiltInPackProvider;
 import io.ib67.yuanban.datapack.provider.FolderPackProvider;
+import io.ib67.yuanban.datapack.provider.ZipPackProvider;
+import io.ib67.yuanban.datapack.subscribe.Lifecycle;
+import io.ib67.yuanban.datapack.subscribe.SubscriberKey;
+import io.ib67.yuanban.datapack.subscribe.Subscription;
+import io.ib67.yuanban.datapack.topic.Topic;
 import net.kyori.adventure.key.Key;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ForkJoinPool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -145,6 +154,130 @@ class DiscoveryTest {
         var second = new TestWorld(tempDir.resolve("b"));
         var loader = first.loader().provider(new BuiltInPackProvider(second.vanillaRoot, "26.2")).build();
         assertThrows(PackStructureException.class, () -> loader.start(TestWorld.createWorld()));
+    }
+
+    /**
+     * 新建世界，返回 {@code recipe} topic 中每个资源 ID 对应的文件内容。
+     */
+    private static Map<String, String> recipes(DataPackLoader.Builder builder) {
+        var topic = Topic.json("recipe");
+        var subscriber = new TestSubscriber<Map<String, String>>(context -> {
+            var result = new TreeMap<String, String>();
+            for (var entry : context.contents(topic).files().entrySet()) {
+                result.put(entry.getKey().asString(), new String(entry.getValue().readAllBytes(), StandardCharsets.UTF_8));
+            }
+            return result;
+        });
+        try (var ignored = builder
+                .subscribe(Subscription.builder(SubscriberKey.<Map<String, String>>of("test:recipes"), subscriber)
+                        .lifecycle(Lifecycle.RELOADABLE)
+                        .topic(topic)
+                        .build())
+                .build()
+                .start(TestWorld.createWorld())) {
+            return subscriber.last();
+        }
+    }
+
+    @Test
+    void vanillaOnlyReadsMinecraftNamespace() throws IOException {
+        var world = new TestWorld(tempDir)
+                .vanilla("minecraft", "recipe/a.json", "vanilla a")
+                .vanilla("Not_A_Namespace", "recipe/b.json", "ignored");
+        Files.writeString(world.vanillaRoot.resolve("data").resolve(".mcassetsroot"), "");
+        assertEquals(Map.of("minecraft:a", "vanilla a"), recipes(world.loader()));
+    }
+
+    @Test
+    void vanillaJarWithMarkerFileLoads() throws IOException {
+        var jar = tempDir.resolve("server.jar");
+        TestPack.withoutMcmeta()
+                .file("data/.mcassetsroot", "")
+                .file("data/minecraft/recipe/a.json", "jar a")
+                .writeZip(jar);
+        try (var fileSystem = java.nio.file.FileSystems.newFileSystem(jar)) {
+            var root = fileSystem.getRootDirectories().iterator().next();
+            var builder = DataPackLoader.builder(SETTINGS)
+                    .provider(new BuiltInPackProvider(root, "26.2"))
+                    .executor(ForkJoinPool.commonPool());
+            assertEquals(Map.of("minecraft:a", "jar a"), recipes(builder));
+        }
+    }
+
+    @Test
+    void nonPackDirectoriesWithSymlinksAreSkipped() throws IOException {
+        var world = new TestWorld(tempDir);
+        var notes = Files.createDirectories(world.datapacks.resolve("notes"));
+        Files.createSymbolicLink(notes.resolve("link.txt"), Files.writeString(tempDir.resolve("target.txt"), "x"));
+        var packs = discover(new FolderPackProvider(world.datapacks, PackOrigin.WORLD, path -> false));
+        assertTrue(packs.isEmpty());
+    }
+
+    @Test
+    void allowedSymlinksInsidePacksAreFollowed() throws IOException {
+        var world = new TestWorld(tempDir);
+        var pack = TestPack.create().data("minecraft", "recipe/own.json", "own").writeDirectory(world.datapacks.resolve("p"));
+        // 整个命名空间目录是链接
+        var linkedNamespace = TestPack.withoutMcmeta().file("recipe/a.json", "linked namespace a")
+                .writeDirectory(tempDir.resolve("outside_namespace"));
+        Files.createSymbolicLink(pack.resolve("data").resolve("example"), linkedNamespace);
+        // topic 路径中间的一级是链接
+        var linkedDirectory = TestPack.withoutMcmeta().file("b.json", "linked directory b")
+                .writeDirectory(tempDir.resolve("outside_directory"));
+        Files.createSymbolicLink(pack.resolve("data").resolve("minecraft").resolve("recipe").resolve("nested"), linkedDirectory);
+        // 文件本身是链接
+        Files.createSymbolicLink(pack.resolve("data").resolve("minecraft").resolve("recipe").resolve("c.json"),
+                Files.writeString(tempDir.resolve("c.json"), "linked file c"));
+
+        assertEquals(Map.of(
+                "example:a", "linked namespace a",
+                "minecraft:c", "linked file c",
+                "minecraft:nested/b", "linked directory b",
+                "minecraft:own", "own"), recipes(world.loader(path -> true)));
+    }
+
+    @Test
+    void brokenSymlinksInsidePacksFail() throws IOException {
+        var world = new TestWorld(tempDir);
+        var pack = TestPack.create().data("minecraft", "recipe/own.json", "own").writeDirectory(world.datapacks.resolve("p"));
+        Files.createSymbolicLink(pack.resolve("data").resolve("minecraft").resolve("recipe").resolve("gone.json"),
+                tempDir.resolve("does_not_exist.json"));
+        var exception = assertThrows(LoadFailedException.class, () -> recipes(world.loader(path -> true)));
+        assertInstanceOf(PackStructureException.class, exception.getCause());
+    }
+
+    @Test
+    void zipProviderLoadsASingleZip() {
+        var world = new TestWorld(tempDir).vanilla("minecraft", "recipe/a.json", "vanilla a");
+        var zip = TestPack.create().data("minecraft", "recipe/a.json", "extra a").writeZip(tempDir.resolve("extra.jar"));
+        var config = new PackSelectionConfig(true, PackPosition.TOP, true);
+        var builder = world.loader().provider(new ZipPackProvider(zip, "extra", PackOrigin.BUILT_IN, config,
+                new KnownPack("example", "extra", "1")));
+        assertEquals(Map.of("minecraft:a", "extra a"), recipes(builder));
+
+        var packs = discover(new ZipPackProvider(zip, "extra", PackOrigin.BUILT_IN, config, null));
+        var pack = packs.get("extra");
+        assertInstanceOf(PackRoot.Zip.class, pack.root());
+        assertEquals(config, pack.selectionConfig());
+        assertTrue(pack.knownPack().isEmpty());
+    }
+
+    @Test
+    void zipProviderRejectsInvalidFiles() throws IOException {
+        var config = new PackSelectionConfig(false, PackPosition.TOP, false);
+        assertThrows(PackStructureException.class, () -> discover(
+                new ZipPackProvider(tempDir.resolve("missing.zip"), "x", PackOrigin.WORLD, config, null)));
+        assertThrows(PackStructureException.class, () -> discover(
+                new ZipPackProvider(Files.createDirectories(tempDir.resolve("dir.zip")), "x", PackOrigin.WORLD, config, null)));
+        var noMcmeta = TestPack.withoutMcmeta().file("data/x/recipe/a.json", "{}").writeZip(tempDir.resolve("no_mcmeta.zip"));
+        assertThrows(PackStructureException.class, () -> discover(
+                new ZipPackProvider(noMcmeta, "x", PackOrigin.WORLD, config, null)));
+
+        var outer = TestPack.withoutMcmeta().file("inner.zip", "not opened").writeZip(tempDir.resolve("outer.zip"));
+        try (var fileSystem = java.nio.file.FileSystems.newFileSystem(outer)) {
+            var inner = fileSystem.getPath("/inner.zip");
+            assertThrows(PackStructureException.class, () -> discover(new ZipPackProvider(inner, "x", PackOrigin.WORLD, config, null)));
+        }
     }
 
     @Test

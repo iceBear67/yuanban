@@ -7,20 +7,22 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
 /**
  * 一个数据包中 {@code data/} 下全部文件的索引，已经按 overlay 顺序合并：同一路径保留优先级最高的那一份。
- * 建立索引的时候只遍历一次文件系统，不跟随符号链接，符号链接本身也不进入索引。
+ * 建立索引的时候只遍历一次文件系统。遍历跟随符号链接（数据包内的符号链接在发现阶段已经用白名单校验过），
+ * 链接成环或者链接目标不存在的时候抛出异常。数据包只读取部分命名空间的时候，其余条目直接忽略。
  */
 @ApiStatus.Internal
 public final class PackIndex {
@@ -50,11 +52,14 @@ public final class PackIndex {
         if (!Files.isDirectory(dataDirectory)) {
             return;
         }
+        var exposed = pack.exposedNamespaces().orElse(null);
         try (var children = Files.newDirectoryStream(dataDirectory)) {
             for (var child : children) {
                 var name = fileName(child);
-                var attributes = Files.readAttributes(child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                if (!attributes.isDirectory()) {
+                if (exposed != null && !exposed.contains(name)) {
+                    continue;
+                }
+                if (!Files.isDirectory(child)) {
                     throw new PackStructureException("数据包 " + pack.id() + " 的 " + describe(overlay, name)
                             + " 不是目录，data/ 下只能有命名空间目录");
                 }
@@ -63,9 +68,13 @@ public final class PackIndex {
                             + " 不是合法的命名空间，命名空间只能包含 [a-z0-9_.-]");
                 }
                 var files = namespaces.computeIfAbsent(name, ignored -> new TreeMap<>());
-                Files.walkFileTree(child, new SimpleFileVisitor<>() {
+                Files.walkFileTree(child, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<>() {
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        // 跟随链接的时候仍然拿到链接自身的属性，说明链接目标不存在
+                        if (attrs.isSymbolicLink()) {
+                            throw new PackStructureException("数据包 " + pack.id() + " 中的符号链接 " + file + " 指向的目标不存在");
+                        }
                         if (attrs.isRegularFile()) {
                             files.put(relativePath(child, file), new IndexedFile(file, overlay));
                         }

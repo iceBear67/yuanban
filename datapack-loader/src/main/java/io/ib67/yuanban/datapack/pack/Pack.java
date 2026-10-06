@@ -6,6 +6,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 一个已发现的数据包。数据包以 ID 区分。
@@ -19,6 +20,7 @@ public final class Pack {
     private final PackCompatibility compatibility;
     private final List<String> activeOverlays;
     private final PackRoot root;
+    private final @Nullable Set<String> exposedNamespaces;
     private final PackInfo info;
 
     private Pack(String id,
@@ -28,7 +30,8 @@ public final class Pack {
                  PackMetadata metadata,
                  PackCompatibility compatibility,
                  List<String> activeOverlays,
-                 PackRoot root) {
+                 PackRoot root,
+                 @Nullable Set<String> exposedNamespaces) {
         this.id = id;
         this.origin = origin;
         this.knownPack = knownPack;
@@ -37,11 +40,13 @@ public final class Pack {
         this.compatibility = compatibility;
         this.activeOverlays = activeOverlays;
         this.root = root;
+        this.exposedNamespaces = exposedNamespaces;
         this.info = new PackInfo(id, origin, Optional.ofNullable(knownPack));
     }
 
     /**
      * 创建数据包，按 {@link LoaderSettings#dataFormat()} 计算兼容性和生效的 overlay 目录。
+     * 数据包 {@code data/} 下的全部内容都会被读取。
      */
     public static Pack create(LoaderSettings settings,
                               String id,
@@ -50,6 +55,23 @@ public final class Pack {
                               PackSelectionConfig selectionConfig,
                               PackMetadata metadata,
                               PackRoot root) {
+        return create(settings, id, origin, knownPack, selectionConfig, metadata, root, null);
+    }
+
+    /**
+     * 创建只读取部分命名空间的数据包，对应原版 {@code VanillaPackResourcesBuilder.exposeNamespace}。
+     * {@code data/} 下不在 {@code exposedNamespaces} 中的条目全部忽略，不检查它们是否合法。
+     *
+     * @param exposedNamespaces 读取的命名空间；{@code null} 表示读取全部内容
+     */
+    public static Pack create(LoaderSettings settings,
+                              String id,
+                              PackOrigin origin,
+                              @Nullable KnownPack knownPack,
+                              PackSelectionConfig selectionConfig,
+                              PackMetadata metadata,
+                              PackRoot root,
+                              @Nullable Set<String> exposedNamespaces) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(origin, "origin");
         Objects.requireNonNull(selectionConfig, "selectionConfig");
@@ -61,7 +83,8 @@ public final class Pack {
                 .map(OverlayEntry::directory)
                 .toList();
         return new Pack(id, origin, knownPack, selectionConfig, metadata,
-                PackCompatibility.of(metadata.formats(), current), overlays, root);
+                PackCompatibility.of(metadata.formats(), current), overlays, root,
+                exposedNamespaces == null ? null : Set.copyOf(exposedNamespaces));
     }
 
     public String id() {
@@ -97,6 +120,13 @@ public final class Pack {
 
     public PackRoot root() {
         return root;
+    }
+
+    /**
+     * 只读取的命名空间；为空表示读取 {@code data/} 下的全部内容。
+     */
+    public Optional<Set<String>> exposedNamespaces() {
+        return Optional.ofNullable(exposedNamespaces);
     }
 
     public PackInfo info() {

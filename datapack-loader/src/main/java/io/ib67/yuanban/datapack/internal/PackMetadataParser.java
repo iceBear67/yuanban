@@ -17,7 +17,6 @@ import net.kyori.adventure.key.Key;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -86,16 +85,14 @@ public final class PackMetadataParser {
         return PackFormat.of(nonNegativeInt(element, path), defaultMinor);
     }
 
+    /**
+     * 和原版 {@code Codec.INT} 相同，数字用 {@link Number#intValue()} 转换：小数截断取整。
+     */
     private int nonNegativeInt(JsonElement element, String path) {
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isNumber()) {
             throw error(path, "必须是非负整数");
         }
-        int value;
-        try {
-            value = new BigDecimal(primitive.getAsString()).intValueExact();
-        } catch (ArithmeticException | NumberFormatException e) {
-            throw error(path, "必须是 int 范围内的整数", e);
-        }
+        var value = primitive.getAsNumber().intValue();
         if (value < 0) {
             throw error(path, "必须是非负整数");
         }
