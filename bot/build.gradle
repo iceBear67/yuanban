@@ -1,0 +1,3 @@
+dependencies {
+    implementation("org.geysermc.mcprotocollib:protocol:26.2-SNAPSHOT")
+}
