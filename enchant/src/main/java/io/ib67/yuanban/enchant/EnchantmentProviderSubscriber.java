@@ -83,34 +83,21 @@ public final class EnchantmentProviderSubscriber implements Subscriber<Enchantme
             return error("Not an object: " + json);
         }
 
-        String type;
-        try {
-            var element = object.get("type");
-            if (element == null) {
-                return error("Missing type, expected to find a string");
-            }
-            type = Key.key(element.getAsString()).value();
-        } catch (IllegalArgumentException e) {
-            return error("Invalid type: " + object.get("type"));
+        var decoded = EnchantmentCodecs.decodeProvider(registries, object);
+        if (decoded instanceof Result.Error<ProviderEntry> decodeError) {
+            return error(decodeError.message());
         }
-        if (!EnchantmentCodecs.isKnownProviderType(type)) {
-            return error("Unknown enchantment provider type: " + type);
-        }
+        var provider = ((Result.Ok<ProviderEntry>) decoded).value();
 
-        var validated = EnchantmentCodecs.validateProvider(registries, type, object);
-        if (validated instanceof Result.Error<Void> fieldError) {
-            return error(fieldError.message());
-        }
-
-        var enchantment = EnchantmentCodecs.referencedEnchantment(object);
+        var enchantment = provider.referencedEnchantment();
         if (enchantment != null && !enchantments.enchantments().containsKey(enchantment)) {
             return error("Missing enchantment: '" + enchantment.asString() + "'");
         }
-        var enchantmentTag = EnchantmentCodecs.referencedEnchantmentTag(object);
+        var enchantmentTag = provider.referencedEnchantmentTag();
         if (enchantmentTag != null && !tags.tags().containsKey(enchantmentTag)) {
             return error("Missing enchantment tag: '" + enchantmentTag.asString() + "'");
         }
-        return new Result.Ok<>(new ProviderEntry(type, object));
+        return new Result.Ok<>(provider);
     }
 
     private static Result<ProviderEntry> error(String message) {

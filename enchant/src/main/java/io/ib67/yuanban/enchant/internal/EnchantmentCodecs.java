@@ -4,11 +4,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import io.ib67.yuanban.enchant.EnchantmentMut;
+import io.ib67.yuanban.enchant.ProviderEntry;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.codec.Codec;
 import net.minestom.server.codec.Result;
-import net.minestom.server.codec.StructCodec;
 import net.minestom.server.codec.Transcoder;
 import net.minestom.server.component.DataComponent;
 import net.minestom.server.entity.EquipmentSlotGroup;
@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
+import java.util.function.BiFunction;
 
 /**
  * 附魔定义和附魔提供器的 JSON 解码。附魔按字段逐个解码，标签引用字段只取出 ID，
@@ -35,7 +35,6 @@ public final class EnchantmentCodecs {
     public static final String SINGLE = "single";
     public static final String BY_COST = "by_cost";
     public static final String BY_COST_WITH_DIFFICULTY = "by_cost_with_difficulty";
-    private static final Set<String> PROVIDER_TYPES = Set.of(SINGLE, BY_COST, BY_COST_WITH_DIFFICULTY);
 
     /**
      * 原版 {@code EnchantmentDefinition.CODEC} 的范围检查：weight 在 [1, 1024]，max_level 在 [1, 255]，
@@ -46,14 +45,20 @@ public final class EnchantmentCodecs {
     private static final int MIN_LEVEL = 1;
     private static final int MAX_LEVEL = 255;
 
-    private EnchantmentCodecs() {
-    }
+    /**
+     * 原版 {@code EnchantmentProviderByCostWithDifficulty} 的范围检查：
+     * {@code min_cost} 用 {@code intRange(1, 10000)}，{@code max_cost_span} 用 {@code intRange(0, 10000)}。
+     */
+    private static final int MIN_PROVIDER_COST = 1;
+    private static final int MAX_PROVIDER_COST = 10000;
+    private static final int MAX_PROVIDER_COST_SPAN = 10000;
 
     /**
-     * 判断 {@code type} 是否是三个原版提供器类型之一。
+     * 整数提供器对象的 {@code type} 字段目前只有 {@code minecraft:uniform} 一种取值。
      */
-    public static boolean isKnownProviderType(String type) {
-        return PROVIDER_TYPES.contains(type);
+    private static final String UNIFORM = "uniform";
+
+    private EnchantmentCodecs() {
     }
 
     /**
@@ -139,54 +144,143 @@ public final class EnchantmentCodecs {
     }
 
     /**
-     * 按类型检查一个附魔提供器文件的结构是否合法。
-     * 提供器定义存有它引用的附魔 ID 集合，由订阅者检查存在性。
+     * 按类型解码一个附魔提供器文件为 {@link ProviderEntry}。
+     * 类型分派、字段解码、范围校验（{@code min_cost} 在 [1, 10000]、{@code max_cost_span} 在 [0, 10000]）
+     * 和引用信息提取都在这里完成；引用存在性检查由订阅者通过
+     * {@link ProviderEntry#referencedEnchantment()} 和 {@link ProviderEntry#referencedEnchantmentTag()} 做。
      */
-    public static Result<Void> validateProvider(Registries registries, String type, JsonObject definition) {
-        var codec = switch (type) {
-            case SINGLE -> StructCodec.struct(
-                    "enchantment", Codec.KEY, ignored -> null,
-                    "level", Codec.INT, ignored -> null,
-                    (enchantment, level) -> Boolean.TRUE);
-            case BY_COST -> StructCodec.struct(
-                    "enchantments", Codec.STRING, ignored -> null,
-                    "cost", Codec.INT, ignored -> null,
-                    (enchantments, cost) -> Boolean.TRUE);
-            case BY_COST_WITH_DIFFICULTY -> StructCodec.struct(
-                    "enchantments", Codec.STRING, ignored -> null,
-                    "min_cost", Codec.INT, ignored -> null,
-                    "max_cost_span", Codec.INT, ignored -> null,
-                    (enchantments, minCost, maxCostSpan) -> Boolean.TRUE);
-            default -> null;
+    public static Result<ProviderEntry> decodeProvider(Registries registries, JsonObject definition) {
+        var coder = new RegistryTranscoder<>(Transcoder.JSON, registries);
+        var typeElement = definition.get("type");
+        if (typeElement == null) {
+            return new Result.Error<>("Missing type, expected to find a string");
+        }
+        if (!(typeElement instanceof JsonPrimitive typePrimitive) || !typePrimitive.isString()) {
+            return new Result.Error<>("Invalid type: " + typeElement);
+        }
+        String typeValue;
+        try {
+            typeValue = Key.key(typePrimitive.getAsString()).value();
+        } catch (IllegalArgumentException e) {
+            return new Result.Error<>("Invalid type: " + typeElement);
+        }
+        return switch (typeValue) {
+            case SINGLE -> {
+                var enchantment = requiredField(definition, "enchantment", Codec.KEY, coder);
+                if (enchantment instanceof Result.Error<Key> error) {
+                    yield fieldError("enchantment", error.message());
+                }
+                var level = requiredField(definition, "level", coder, EnchantmentCodecs::decodeIntProvider);
+                if (level instanceof Result.Error<ProviderEntry.IntProvider> error) {
+                    yield fieldError("level", error.message());
+                }
+                yield new Result.Ok<>(new ProviderEntry.Single(
+                        ((Result.Ok<Key>) enchantment).value(),
+                        ((Result.Ok<ProviderEntry.IntProvider>) level).value()));
+            }
+            case BY_COST -> {
+                var enchantments = decodeEnchantmentTagReference(definition);
+                if (enchantments instanceof Result.Error<Key> error) {
+                    yield fieldError("enchantments", error.message());
+                }
+                var cost = requiredField(definition, "cost", coder, EnchantmentCodecs::decodeIntProvider);
+                if (cost instanceof Result.Error<ProviderEntry.IntProvider> error) {
+                    yield fieldError("cost", error.message());
+                }
+                yield new Result.Ok<>(new ProviderEntry.ByCost(
+                        ((Result.Ok<Key>) enchantments).value(),
+                        ((Result.Ok<ProviderEntry.IntProvider>) cost).value()));
+            }
+            case BY_COST_WITH_DIFFICULTY -> {
+                var enchantments = decodeEnchantmentTagReference(definition);
+                if (enchantments instanceof Result.Error<Key> error) {
+                    yield fieldError("enchantments", error.message());
+                }
+                var minCost = requiredField(definition, "min_cost", Codec.INT, coder);
+                if (minCost instanceof Result.Error<Integer> error) {
+                    yield fieldError("min_cost", error.message());
+                }
+                var minCostValue = ((Result.Ok<Integer>) minCost).value();
+                if (minCostValue < MIN_PROVIDER_COST || minCostValue > MAX_PROVIDER_COST) {
+                    yield fieldError("min_cost", "value must be in range [1, 10000]: " + minCostValue);
+                }
+                var maxCostSpan = requiredField(definition, "max_cost_span", Codec.INT, coder);
+                if (maxCostSpan instanceof Result.Error<Integer> error) {
+                    yield fieldError("max_cost_span", error.message());
+                }
+                var maxCostSpanValue = ((Result.Ok<Integer>) maxCostSpan).value();
+                if (maxCostSpanValue < 0 || maxCostSpanValue > MAX_PROVIDER_COST_SPAN) {
+                    yield fieldError("max_cost_span", "value must be in range [0, 10000]: " + maxCostSpanValue);
+                }
+                yield new Result.Ok<>(new ProviderEntry.ByCostWithDifficulty(
+                        ((Result.Ok<Key>) enchantments).value(), minCostValue, maxCostSpanValue));
+            }
+            default -> new Result.Error<>("Unknown enchantment provider type: " + typeValue);
         };
-        if (codec == null) {
-            return new Result.Error<>("Unknown enchantment provider type: " + type);
-        }
-        var decoded = codec.decodeFromMap(new RegistryTranscoder<>(Transcoder.JSON, registries), mapOf(definition));
-        if (decoded instanceof Result.Error<?> error) {
-            return new Result.Error<>(error.message());
-        }
-        return new Result.Ok<>(null);
     }
 
     /**
-     * {@code single} 的 {@code enchantment} 字段引用的附魔 ID。
+     * 解码 {@code by_cost*} 的 {@code enchantments} 字段：附魔标签引用（{@code #namespace:path}），
+     * 返回去掉 {@code #} 之后的标签 ID。
      */
-    public static @Nullable Key referencedEnchantment(JsonObject definition) {
-        var element = definition.get("enchantment");
-        return element == null ? null : Key.key(element.getAsString());
-    }
-
-    /**
-     * {@code by_cost*} 的 {@code enchantments} 字段引用的附魔标签 ID；不是 {@code #tag} 形式时返回 {@code null}。
-     */
-    public static @Nullable Key referencedEnchantmentTag(JsonObject definition) {
+    private static Result<Key> decodeEnchantmentTagReference(JsonObject definition) {
         var element = definition.get("enchantments");
-        if (element == null || element.isJsonArray()) {
-            return null;
+        if (element == null) {
+            return new Result.Error<>("No value for field: enchantments");
         }
-        var reference = element.getAsString();
-        return reference.startsWith("#") ? Key.key(reference.substring(1)) : null;
+        if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
+            return new Result.Error<>("expected a tag reference (#namespace:path)");
+        }
+        var reference = primitive.getAsString();
+        if (!reference.startsWith("#")) {
+            return new Result.Error<>("expected a tag reference (#namespace:path)");
+        }
+        try {
+            return new Result.Ok<>(Key.key(reference.substring(1)));
+        } catch (IllegalArgumentException e) {
+            return new Result.Error<>("Not a valid tag id: " + reference);
+        }
+    }
+
+    /**
+     * 解码一个整数提供器：整数字面量解码为常量；对象按 {@code type} 字段分派，
+     * 目前只有 {@code minecraft:uniform}（{@code min_inclusive} / {@code max_inclusive}）。
+     */
+    private static Result<ProviderEntry.IntProvider> decodeIntProvider(RegistryTranscoder<JsonElement> coder, JsonElement element) {
+        if (element instanceof JsonPrimitive primitive && primitive.isNumber()) {
+            try {
+                return new Result.Ok<>(new ProviderEntry.IntProvider.ConstantInt(primitive.getAsInt()));
+            } catch (NumberFormatException e) {
+                return new Result.Error<>("Not an integer: " + element);
+            }
+        }
+        if (element instanceof JsonObject object) {
+            var typeElement = object.get("type");
+            if (typeElement == null) {
+                return new Result.Error<>("Missing type, expected to find a string");
+            }
+            String type;
+            try {
+                type = Key.key(typeElement.getAsString()).value();
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return new Result.Error<>("Invalid type: " + typeElement);
+            }
+            if (!UNIFORM.equals(type)) {
+                return new Result.Error<>("Unknown int provider type: " + type);
+            }
+            var minInclusive = requiredField(object, "min_inclusive", Codec.INT, coder);
+            if (minInclusive instanceof Result.Error<Integer> error) {
+                return new Result.Error<>("min_inclusive: " + error.message());
+            }
+            var maxInclusive = requiredField(object, "max_inclusive", Codec.INT, coder);
+            if (maxInclusive instanceof Result.Error<Integer> error) {
+                return new Result.Error<>("max_inclusive: " + error.message());
+            }
+            return new Result.Ok<>(new ProviderEntry.IntProvider.UniformInt(
+                    ((Result.Ok<Integer>) minInclusive).value(),
+                    ((Result.Ok<Integer>) maxInclusive).value()));
+        }
+        return new Result.Error<>("Not an integer or an object: " + element);
     }
 
     /**
@@ -240,31 +334,16 @@ public final class EnchantmentCodecs {
     }
 
     /**
-     * 把现成的 {@link JsonObject} 交给 StructCodec 按字段解码。
+     * 从 JSON 对象中取一个必需字段并按解码函数解码。字段不存在或者不匹配的时候返回错误。
      */
-    private static Transcoder.MapLike<JsonElement> mapOf(JsonObject object) {
-        return new Transcoder.MapLike<>() {
-            @Override
-            public Set<String> keys() {
-                return object.keySet();
-            }
-
-            @Override
-            public boolean hasValue(String key) {
-                return object.has(key);
-            }
-
-            @Override
-            public Result<JsonElement> getValue(String key) {
-                var value = object.get(key);
-                return value == null ? new Result.Error<>("No such key: " + key) : new Result.Ok<>(value);
-            }
-
-            @Override
-            public int size() {
-                return object.size();
-            }
-        };
+    private static <T> Result<T> requiredField(JsonObject object, String field,
+                                               RegistryTranscoder<JsonElement> coder,
+                                               BiFunction<RegistryTranscoder<JsonElement>, JsonElement, Result<T>> decoder) {
+        var value = object.get(field);
+        if (value == null) {
+            return new Result.Error<>("No value for field: " + field);
+        }
+        return decoder.apply(coder, value);
     }
 
     /**

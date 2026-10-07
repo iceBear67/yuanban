@@ -155,10 +155,90 @@ class EnchantmentDecodingTest {
             var data = providers.current();
             assertEquals(Set.of(Key.key("minecraft:pick"), Key.key("minecraft:raid/vindicator")),
                     data.providers().keySet());
-            var pick = data.providers().get(Key.key("minecraft:pick"));
-            assertEquals("single", pick.type());
-            assertEquals("minecraft:sharpness", pick.definition().get("enchantment").getAsString());
-            assertEquals(3, pick.definition().get("level").getAsInt());
+            var pick = assertInstanceOf(ProviderEntry.Single.class, data.providers().get(Key.key("minecraft:pick")));
+            assertEquals(Key.key("minecraft:sharpness"), pick.enchantment());
+            var level = assertInstanceOf(ProviderEntry.IntProvider.ConstantInt.class, pick.level());
+            assertEquals(3, level.value());
+            assertEquals(3, level.sample());
+            var vindicator = assertInstanceOf(ProviderEntry.Single.class, data.providers().get(Key.key("minecraft:raid/vindicator")));
+            assertEquals(Key.key("minecraft:sharpness"), vindicator.enchantment());
+        }
+    }
+
+    @Test
+    void decodesAllProviderTypes(Env env) {
+        var world = new EnchantWorld(tempDir)
+                .vanilla("enchantment/sharpness.json", """
+                        {"description": "S", "supported_items": "#minecraft:enchantable/sword",
+                         "weight": 1, "max_level": 1, "min_cost": {"base": 1, "per_level_above_first": 1},
+                         "max_cost": {"base": 1, "per_level_above_first": 1}, "anvil_cost": 1, "slots": ["mainhand"]}
+                        """)
+                .vanilla("tags/item/enchantable/sword.json", """
+                        {"values": ["minecraft:iron_sword"]}
+                        """)
+                .vanilla("tags/enchantment/mob_equipment.json", """
+                        {"values": ["minecraft:sharpness"]}
+                        """)
+                .vanilla("enchantment_provider/single_fixed.json", """
+                        {"type": "minecraft:single", "enchantment": "minecraft:sharpness", "level": 2}
+                        """)
+                .vanilla("enchantment_provider/single_uniform.json", """
+                        {"type": "minecraft:single", "enchantment": "minecraft:sharpness",
+                         "level": {"type": "minecraft:uniform", "min_inclusive": 5, "max_inclusive": 10}}
+                        """)
+                .vanilla("enchantment_provider/by_cost_uniform.json", """
+                        {"type": "minecraft:by_cost", "enchantments": "#minecraft:mob_equipment",
+                         "cost": {"type": "minecraft:uniform", "min_inclusive": 5, "max_inclusive": 10}}
+                        """)
+                .vanilla("enchantment_provider/by_cost_flat.json", """
+                        {"type": "minecraft:by_cost", "enchantments": "#minecraft:mob_equipment", "cost": 7}
+                        """)
+                .vanilla("enchantment_provider/by_cost_difficulty.json", """
+                        {"type": "minecraft:by_cost_with_difficulty", "enchantments": "#minecraft:mob_equipment",
+                         "min_cost": 5, "max_cost_span": 17}
+                        """);
+        var process = env.process();
+        var enchantments = new EnchantmentSubscriber(process);
+        var enchantmentTags = new EnchantmentTagSubscriber(process);
+        var providers = new EnchantmentProviderSubscriber(process);
+        try (var session = world.loader(process, enchantments, enchantmentTags, providers).start(EnchantWorld.createWorld())) {
+            var data = providers.current();
+            assertEquals(5, data.providers().size());
+
+            var singleFixed = assertInstanceOf(ProviderEntry.Single.class,
+                    data.providers().get(Key.key("minecraft:single_fixed")));
+            assertEquals(Key.key("minecraft:sharpness"), singleFixed.enchantment());
+            var singleFixedLevel = assertInstanceOf(ProviderEntry.IntProvider.ConstantInt.class, singleFixed.level());
+            assertEquals(2, singleFixedLevel.value());
+            assertEquals(2, singleFixedLevel.sample());
+
+            var singleUniform = assertInstanceOf(ProviderEntry.Single.class,
+                    data.providers().get(Key.key("minecraft:single_uniform")));
+            assertEquals(Key.key("minecraft:sharpness"), singleUniform.enchantment());
+            var singleUniformLevel = assertInstanceOf(ProviderEntry.IntProvider.UniformInt.class, singleUniform.level());
+            assertEquals(5, singleUniformLevel.minInclusive());
+            assertEquals(10, singleUniformLevel.maxInclusive());
+            for (var i = 0; i < 16; i++) {
+                var value = singleUniformLevel.sample();
+                assertTrue(value >= 5 && value <= 10, "sample: " + value);
+            }
+
+            var byCost = assertInstanceOf(ProviderEntry.ByCost.class,
+                    data.providers().get(Key.key("minecraft:by_cost_uniform")));
+            assertEquals(Key.key("minecraft:mob_equipment"), byCost.enchantments());
+            var byCostCost = assertInstanceOf(ProviderEntry.IntProvider.UniformInt.class, byCost.cost());
+            assertEquals(5, byCostCost.minInclusive());
+            assertEquals(10, byCostCost.maxInclusive());
+
+            var byCostFlat = assertInstanceOf(ProviderEntry.ByCost.class,
+                    data.providers().get(Key.key("minecraft:by_cost_flat")));
+            assertEquals(new ProviderEntry.IntProvider.ConstantInt(7), byCostFlat.cost());
+
+            var byCostDifficulty = assertInstanceOf(ProviderEntry.ByCostWithDifficulty.class,
+                    data.providers().get(Key.key("minecraft:by_cost_difficulty")));
+            assertEquals(Key.key("minecraft:mob_equipment"), byCostDifficulty.enchantments());
+            assertEquals(5, byCostDifficulty.minCost());
+            assertEquals(17, byCostDifficulty.maxCostSpan());
         }
     }
 

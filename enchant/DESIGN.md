@@ -70,7 +70,17 @@ public record EnchantmentProviderData(
     NavigableMap<Key, ProviderEntry> providers
 ) {}
 
-public record ProviderEntry(String type, JsonObject definition) {}
+public sealed interface ProviderEntry {
+    record Single(Key enchantment, IntProvider level) implements ProviderEntry {}
+    record ByCost(Key enchantments, IntProvider cost) implements ProviderEntry {}
+    record ByCostWithDifficulty(Key enchantments, int minCost, int maxCostSpan) implements ProviderEntry {}
+
+    sealed interface IntProvider {
+        int sample();
+        record ConstantInt(int value) implements IntProvider {}
+        record UniformInt(int minInclusive, int maxInclusive) implements IntProvider {}
+    }
+}
 
 public final class EnchantmentException extends DataPackException {}
 ```
@@ -146,13 +156,13 @@ Minestom 的 `ValueEffect.RemoveBinomial.apply` 抛出 `UnsupportedOperationExce
 
 | 类型 | 字段 | 原版使用处 |
 |---|---|---|
-| `single` | `enchantment`（附魔 ID）+ `level`（1-255） | 6 个文件，如 `pillager_spawn_crossbow` 给弩加 `piercing 1` |
+| `single` | `enchantment`（附魔 ID）+ `level`（整数提供器） | 6 个文件，如 `pillager_spawn_crossbow` 给弩加 `piercing 1` |
 | `by_cost` | `enchantments`（附魔标签引用）+ `cost`（整数提供器） | 0 个文件 |
 | `by_cost_with_difficulty` | `enchantments`（附魔标签引用）+ `min_cost` + `max_cost_span` | 1 个文件（`mob_spawn_equipment`） |
 
 原版把提供器作为动态注册表加载（`LootDataType` 之一），在怪物生成和村民交易代码中被调用，给一个物品添加上下文相关的附魔组合。Minestom 没有提供器注册表。本模块在准备阶段按类型解码 JSON，提交阶段建立提供器 ID 到 `ProviderEntry` 的映射。提供器的原版行为（按经验等级选取附魔组合）在 Minestom 中的代码和怪物生成、村民交易等系统在一起，这些系统在本仓库中还没有对应模块。
 
-`ProviderEntry` 的 `type` 字段是三选一：`single`、`by_cost`、`by_cost_with_difficulty`。`definition` 保存原始的 JSON 对象。准备阶段检查 `enchantment` 字段引用的附魔在当批次中存在，不存在抛出 `EnchantmentException`。
+`ProviderEntry` 是 sealed interface，三个实现对应三个原版类型：`Single`（附魔 ID 加等级整数提供器）、`ByCost`（附魔标签 ID 加消耗整数提供器）、`ByCostWithDifficulty`（附魔标签 ID 加 `minCost` 和 `maxCostSpan`，范围按原版的 `intRange(1, 10000)` 和 `intRange(0, 10000)` 校验）。`by_cost*` 的 `enchantments` 字段在解码时剥掉 `#` 前缀，保存标签 ID。整数提供器有两种实现：`ConstantInt`（JSON 整数字面量）和 `UniformInt`（`{"type": "minecraft:uniform", "min_inclusive": ..., "max_inclusive": ...}`）；只提供无参 `sample()`，原版的 `sample(RandomSource)` 用 `ThreadLocalRandom` 代替。准备阶段检查 `Single` 引用的附魔和 `ByCost*` 引用的附魔标签在当批次中存在，不存在抛出 `EnchantmentException`。
 
 ## 6. 附魔标签
 

@@ -24,6 +24,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -84,7 +85,35 @@ class VanillaDataTest {
             // 43 个附魔全部注册进注册表
             var registrySize = process.enchantment().values().size();
             assertEquals(expectedEnchantmentCount, registrySize);
+
+            // 7 个提供器全部成为结构化数据，抽查字段和数据包一致
+            var providerData = providers.current().providers();
+            assertEquals(7, providerData.size());
+            assertVanillaProvider(providerData.get(Key.key("minecraft:enderman_loot_drop")),
+                    "minecraft:silk_touch", 1);
+            assertVanillaProvider(providerData.get(Key.key("minecraft:pillager_spawn_crossbow")),
+                    "minecraft:piercing", 1);
+            assertVanillaProvider(providerData.get(Key.key("minecraft:raid/pillager_post_wave_3")),
+                    "minecraft:quick_charge", 1);
+            assertVanillaProvider(providerData.get(Key.key("minecraft:raid/pillager_post_wave_5")),
+                    "minecraft:quick_charge", 2);
+            assertVanillaProvider(providerData.get(Key.key("minecraft:raid/vindicator")),
+                    "minecraft:sharpness", 1);
+            assertVanillaProvider(providerData.get(Key.key("minecraft:raid/vindicator_post_wave_5")),
+                    "minecraft:sharpness", 2);
+            var mobSpawnByCost = assertInstanceOf(ProviderEntry.ByCostWithDifficulty.class,
+                    providerData.get(Key.key("minecraft:mob_spawn_equipment")));
+            assertEquals(Key.key("minecraft:on_mob_spawn_equipment"), mobSpawnByCost.enchantments());
+            assertEquals(5, mobSpawnByCost.minCost());
+            assertEquals(17, mobSpawnByCost.maxCostSpan());
         }
+    }
+
+    private static void assertVanillaProvider(ProviderEntry entry, String enchantment, int level) {
+        var single = assertInstanceOf(ProviderEntry.Single.class, entry);
+        assertEquals(Key.key(enchantment), single.enchantment());
+        assertEquals(new ProviderEntry.IntProvider.ConstantInt(level), single.level());
+        assertEquals(level, single.level().sample());
     }
 
     private static int countJsonFiles(Path server, String prefix) throws IOException {
