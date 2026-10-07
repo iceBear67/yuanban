@@ -12,34 +12,34 @@ import com.mojang.serialization.JsonOps;
 import com.mojang.serialization.Keyable;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import io.ib67.yuanban.crafting.recipe.BannerDuplicateRecipe;
+import io.ib67.yuanban.crafting.recipe.BookCloningRecipe;
+import io.ib67.yuanban.crafting.recipe.CookingBookInfo;
+import io.ib67.yuanban.crafting.recipe.CookingCategory;
+import io.ib67.yuanban.crafting.recipe.CookingKind;
+import io.ib67.yuanban.crafting.recipe.CookingRecipe;
+import io.ib67.yuanban.crafting.recipe.CraftingBookInfo;
+import io.ib67.yuanban.crafting.recipe.CraftingCategory;
+import io.ib67.yuanban.crafting.recipe.DecoratedPotRecipe;
+import io.ib67.yuanban.crafting.recipe.DyeRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkRocketRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkStarFadeRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkStarRecipe;
+import io.ib67.yuanban.crafting.recipe.ImbueRecipe;
+import io.ib67.yuanban.crafting.recipe.IntBounds;
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.MapExtendingRecipe;
+import io.ib67.yuanban.crafting.recipe.Recipe;
+import io.ib67.yuanban.crafting.recipe.RepairItemRecipe;
+import io.ib67.yuanban.crafting.recipe.ShapedRecipe;
+import io.ib67.yuanban.crafting.recipe.ShapelessRecipe;
+import io.ib67.yuanban.crafting.recipe.ShieldDecorationRecipe;
+import io.ib67.yuanban.crafting.recipe.SmithingTransformRecipe;
+import io.ib67.yuanban.crafting.recipe.SmithingTrimRecipe;
+import io.ib67.yuanban.crafting.recipe.StonecutterRecipe;
+import io.ib67.yuanban.crafting.recipe.TransmuteRecipe;
 import io.ib67.yuanban.itemtag.ItemTags;
-import io.ib67.yuanban.recipe.definition.CookingCategory;
-import io.ib67.yuanban.recipe.definition.CookingKind;
-import io.ib67.yuanban.recipe.definition.CraftingCategory;
-import io.ib67.yuanban.recipe.definition.IntBounds;
-import io.ib67.yuanban.recipe.definition.ItemIngredient;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.BannerDuplicateRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.BookCloningRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CommonInfo;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CookingBookInfo;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CookingRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CraftingBookInfo;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.DecoratedPotRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.DyeRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.FireworkRocketRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.FireworkStarFadeRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.FireworkStarRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ImbueRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.MapExtendingRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.RepairItemRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ShapedRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ShapelessRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ShieldDecorationRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.SmithingTransformRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.SmithingTrimRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.StonecutterRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.TransmuteRecipe;
 import net.kyori.adventure.key.InvalidKeyException;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.ServerProcess;
@@ -47,7 +47,6 @@ import net.minestom.server.codec.Result;
 import net.minestom.server.codec.Transcoder;
 import net.minestom.server.component.DataComponent;
 import net.minestom.server.component.DataComponentMap;
-import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.item.armor.TrimPattern;
 import net.minestom.server.item.component.FireworkExplosion;
@@ -78,12 +77,11 @@ public final class RecipeCodecs {
 
     private final Codec<Material> item;
     private final Codec<ItemIngredient> ingredient;
-    private final Codec<ItemStack> result;
-    private final MapCodec<CommonInfo> common;
+    private final Codec<ItemStackTemplate> result;
     private final MapCodec<CraftingBookInfo> craftingBook;
     private final MapCodec<CookingBookInfo> cookingBook;
-    private final Map<Key, MapCodec<? extends RecipeDefinition>> serializers = new LinkedHashMap<>();
-    private final Codec<RecipeDefinition> recipe;
+    private final Map<Key, MapCodec<? extends Recipe<?>>> serializers = new LinkedHashMap<>();
+    private final Codec<Recipe<?>> recipe;
 
     /**
      * @param tags    本次加载展开的物品标签，标签原料在这里查找
@@ -95,13 +93,13 @@ public final class RecipeCodecs {
 
         this.item = ID.comapFlatMap(RecipeCodecs::lookupItem, Material::key);
         this.ingredient = Codec.either(TAG_REFERENCE, compactList(item)).comapFlatMap(this::toIngredient, RecipeCodecs::fromIngredient);
-        MapCodec<ItemStack> fullResult = RecordCodecBuilder.mapCodec(i -> i.group(
-                item.fieldOf("id").forGetter(ItemStack::material),
-                intRange(1, 99).optionalFieldOf("count", 1).forGetter(ItemStack::amount),
-                minestom(DataComponent.PATCH_CODEC).optionalFieldOf("components", DataComponentMap.EMPTY).forGetter(ItemStack::componentPatch)
-        ).apply(i, ItemStack::of));
-        this.result = Codec.withAlternative(fullResult.codec(), item, ItemStack::of);
-        this.common = Codec.BOOL.optionalFieldOf("show_notification", true).xmap(CommonInfo::new, CommonInfo::showNotification);
+        // 结果模板原样保存组件补丁，与物品原型相同的条目也保留
+        MapCodec<ItemStackTemplate> fullResult = RecordCodecBuilder.mapCodec(i -> i.group(
+                item.fieldOf("id").forGetter(ItemStackTemplate::material),
+                intRange(1, 99).optionalFieldOf("count", 1).forGetter(ItemStackTemplate::count),
+                minestom(DataComponent.PATCH_CODEC).optionalFieldOf("components", DataComponentMap.EMPTY).forGetter(ItemStackTemplate::components)
+        ).apply(i, ItemStackTemplate::new));
+        this.result = Codec.withAlternative(fullResult.codec(), item, ItemStackTemplate::of);
         this.craftingBook = RecordCodecBuilder.mapCodec(i -> i.group(
                 enumCodec(CraftingCategory.values()).optionalFieldOf("category", CraftingCategory.MISC).forGetter(CraftingBookInfo::category),
                 Codec.STRING.optionalFieldOf("group", "").forGetter(CraftingBookInfo::group)
@@ -118,46 +116,52 @@ public final class RecipeCodecs {
         this.recipe = type.dispatch("type", RecipeCodecs::typeOf, serializers::get);
     }
 
-    public DataResult<RecipeDefinition> decode(JsonElement json) {
+    public DataResult<Recipe<?>> decode(JsonElement json) {
         return recipe.parse(JsonOps.INSTANCE, json);
     }
 
+    /**
+     * 原版 {@code Recipe.CommonInfo.MAP_CODEC}：检查 {@code show_notification}（缺省为 {@code true}）。
+     * 配方解锁时才使用这个字段，全部配方对全部玩家已知，所以只解码、不保存。
+     */
+    private static <R> MapCodec<R> withCommonInfo(MapCodec<R> codec) {
+        return RecordCodecBuilder.mapCodec(i -> i.group(
+                Codec.BOOL.optionalFieldOf("show_notification", true).forGetter(_ -> true),
+                codec.forGetter(r -> r)
+        ).apply(i, (_, r) -> r));
+    }
+
     private void registerSerializers() {
-        serializers.put(Key.key("crafting_shaped"), RecordCodecBuilder.<ShapedRecipe>mapCodec(i -> i.group(
-                common.forGetter(ShapedRecipe::common),
+        serializers.put(Key.key("crafting_shaped"), withCommonInfo(RecordCodecBuilder.<ShapedRecipe>mapCodec(i -> i.group(
                 craftingBook.forGetter(ShapedRecipe::book),
                 shapedPattern().forGetter(r -> new ShapedPattern(r.width(), r.height(), r.ingredients())),
                 result.fieldOf("result").forGetter(ShapedRecipe::result)
-        ).apply(i, (c, b, p, r) -> new ShapedRecipe(c, b, p.width(), p.height(), p.ingredients(), r))));
-        serializers.put(Key.key("crafting_shapeless"), RecordCodecBuilder.<ShapelessRecipe>mapCodec(i -> i.group(
-                common.forGetter(ShapelessRecipe::common),
+        ).apply(i, (b, p, r) -> new ShapedRecipe(b, p.width(), p.height(), p.ingredients(), r)))));
+        serializers.put(Key.key("crafting_shapeless"), withCommonInfo(RecordCodecBuilder.<ShapelessRecipe>mapCodec(i -> i.group(
                 craftingBook.forGetter(ShapelessRecipe::book),
                 result.fieldOf("result").forGetter(ShapelessRecipe::result),
                 ingredient.listOf(1, 9).fieldOf("ingredients").forGetter(ShapelessRecipe::ingredients)
-        ).apply(i, ShapelessRecipe::new)));
-        serializers.put(Key.key("crafting_dye"), RecordCodecBuilder.<DyeRecipe>mapCodec(i -> i.group(
-                common.forGetter(DyeRecipe::common),
+        ).apply(i, ShapelessRecipe::new))));
+        serializers.put(Key.key("crafting_dye"), withCommonInfo(RecordCodecBuilder.<DyeRecipe>mapCodec(i -> i.group(
                 craftingBook.forGetter(DyeRecipe::book),
                 ingredient.fieldOf("target").forGetter(DyeRecipe::target),
                 ingredient.fieldOf("dye").forGetter(DyeRecipe::dye),
                 result.fieldOf("result").forGetter(DyeRecipe::result)
-        ).apply(i, DyeRecipe::new)));
-        serializers.put(Key.key("crafting_imbue"), RecordCodecBuilder.<ImbueRecipe>mapCodec(i -> i.group(
-                common.forGetter(ImbueRecipe::common),
+        ).apply(i, DyeRecipe::new))));
+        serializers.put(Key.key("crafting_imbue"), withCommonInfo(RecordCodecBuilder.<ImbueRecipe>mapCodec(i -> i.group(
                 craftingBook.forGetter(ImbueRecipe::book),
                 ingredient.fieldOf("source").forGetter(ImbueRecipe::source),
                 ingredient.fieldOf("material").forGetter(ImbueRecipe::material),
                 result.fieldOf("result").forGetter(ImbueRecipe::result)
-        ).apply(i, ImbueRecipe::new)));
-        serializers.put(Key.key("crafting_transmute"), RecordCodecBuilder.<TransmuteRecipe>mapCodec(i -> i.group(
-                common.forGetter(TransmuteRecipe::common),
+        ).apply(i, ImbueRecipe::new))));
+        serializers.put(Key.key("crafting_transmute"), withCommonInfo(RecordCodecBuilder.<TransmuteRecipe>mapCodec(i -> i.group(
                 craftingBook.forGetter(TransmuteRecipe::book),
                 ingredient.fieldOf("input").forGetter(TransmuteRecipe::input),
                 ingredient.fieldOf("material").forGetter(TransmuteRecipe::material),
                 bounds(1, 8).optionalFieldOf("material_count", IntBounds.exactly(1)).forGetter(TransmuteRecipe::materialCount),
                 result.fieldOf("result").forGetter(TransmuteRecipe::result),
                 Codec.BOOL.optionalFieldOf("add_material_count_to_result", false).forGetter(TransmuteRecipe::addMaterialCountToResult)
-        ).apply(i, TransmuteRecipe::new)));
+        ).apply(i, TransmuteRecipe::new))));
         serializers.put(Key.key("crafting_decorated_pot"), RecordCodecBuilder.<DecoratedPotRecipe>mapCodec(i -> i.group(
                 ingredient.fieldOf("back").forGetter(DecoratedPotRecipe::back),
                 ingredient.fieldOf("left").forGetter(DecoratedPotRecipe::left),
@@ -208,37 +212,33 @@ public final class RecipeCodecs {
         ).apply(i, ShieldDecorationRecipe::new)));
         serializers.put(Key.key("crafting_special_repairitem"), MapCodec.unit(new RepairItemRecipe()));
         for (var kind : CookingKind.values()) {
-            serializers.put(Key.key(kind.type()), RecordCodecBuilder.<CookingRecipe>mapCodec(i -> i.group(
-                    common.forGetter(CookingRecipe::common),
+            serializers.put(Key.key(kind.type()), withCommonInfo(RecordCodecBuilder.<CookingRecipe>mapCodec(i -> i.group(
                     cookingBook.forGetter(CookingRecipe::book),
                     ingredient.fieldOf("ingredient").forGetter(CookingRecipe::ingredient),
                     result.fieldOf("result").forGetter(CookingRecipe::result),
                     Codec.FLOAT.optionalFieldOf("experience", 0.0F).forGetter(CookingRecipe::experience),
                     Codec.INT.optionalFieldOf("cookingtime", kind.defaultCookingTime()).forGetter(CookingRecipe::cookingTime)
-            ).apply(i, (c, b, in, r, experience, time) -> new CookingRecipe(kind, c, b, in, r, experience, time))));
+            ).apply(i, (b, in, r, experience, time) -> new CookingRecipe(kind, b, in, r, experience, time)))));
         }
-        serializers.put(Key.key("stonecutting"), RecordCodecBuilder.<StonecutterRecipe>mapCodec(i -> i.group(
-                common.forGetter(StonecutterRecipe::common),
+        serializers.put(Key.key("stonecutting"), withCommonInfo(RecordCodecBuilder.<StonecutterRecipe>mapCodec(i -> i.group(
                 ingredient.fieldOf("ingredient").forGetter(StonecutterRecipe::ingredient),
                 result.fieldOf("result").forGetter(StonecutterRecipe::result)
-        ).apply(i, StonecutterRecipe::new)));
-        serializers.put(Key.key("smithing_transform"), RecordCodecBuilder.<SmithingTransformRecipe>mapCodec(i -> i.group(
-                common.forGetter(SmithingTransformRecipe::common),
+        ).apply(i, StonecutterRecipe::new))));
+        serializers.put(Key.key("smithing_transform"), withCommonInfo(RecordCodecBuilder.<SmithingTransformRecipe>mapCodec(i -> i.group(
                 ingredient.optionalFieldOf("template").forGetter(SmithingTransformRecipe::template),
                 ingredient.fieldOf("base").forGetter(SmithingTransformRecipe::base),
                 ingredient.optionalFieldOf("addition").forGetter(SmithingTransformRecipe::addition),
                 result.fieldOf("result").forGetter(SmithingTransformRecipe::result)
-        ).apply(i, SmithingTransformRecipe::new)));
-        serializers.put(Key.key("smithing_trim"), RecordCodecBuilder.<SmithingTrimRecipe>mapCodec(i -> i.group(
-                common.forGetter(SmithingTrimRecipe::common),
+        ).apply(i, SmithingTransformRecipe::new))));
+        serializers.put(Key.key("smithing_trim"), withCommonInfo(RecordCodecBuilder.<SmithingTrimRecipe>mapCodec(i -> i.group(
                 ingredient.fieldOf("template").forGetter(SmithingTrimRecipe::template),
                 ingredient.fieldOf("base").forGetter(SmithingTrimRecipe::base),
                 ingredient.fieldOf("addition").forGetter(SmithingTrimRecipe::addition),
                 minestom(TrimPattern.CODEC).fieldOf("pattern").forGetter(SmithingTrimRecipe::pattern)
-        ).apply(i, SmithingTrimRecipe::new)));
+        ).apply(i, SmithingTrimRecipe::new))));
     }
 
-    private static Key typeOf(RecipeDefinition definition) {
+    private static Key typeOf(Recipe<?> definition) {
         return switch (definition) {
             case ShapedRecipe _ -> Key.key("crafting_shaped");
             case ShapelessRecipe _ -> Key.key("crafting_shapeless");

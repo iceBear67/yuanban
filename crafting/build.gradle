@@ -1,0 +1,33 @@
+plugins {
+    id("java-test-fixtures")
+}
+
+repositories {
+    // 测试依赖 item-recipe，它使用的 DataFixerUpper 只在这个仓库中
+    maven {
+        name = "minecraft"
+        url = "https://libraries.minecraft.net"
+    }
+}
+
+dependencies {
+    api("net.minestom:minestom:2026.10.05-26.2")
+    // 与 Minestom 运行时使用的版本相同
+    implementation("it.unimi.dsi:fastutil:8.5.19")
+    // 原版计算收纳袋重量使用的 Fraction，版本取自原版 26.2 的 META-INF/libraries.list
+    implementation("org.apache.commons:commons-lang3:3.20.0")
+    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    // 测试中的配方经过 item-recipe 的真实解码流程得到
+    testImplementation(project(":item-recipe"))
+    // 测试直接使用 item-recipe 的解码器，它的结果类型来自 DataFixerUpper
+    testImplementation("com.mojang:datafixerupper:10.0.21")
+    testImplementation(testFixtures(project(":item-tag")))
+}
+
+tasks.test {
+    dependsOn(":item-recipe:extractVanillaServer")
+    // net.minestom:testing 在平台线程上创建玩家，需要关闭 Minestom 的虚拟线程断言
+    systemProperty("minestom.inside-test", "true")
+    systemProperty("yuanban.vanilla-server",
+            project(":item-recipe").layout.buildDirectory.file("vanilla/server/server-26.2.jar").get().asFile.absolutePath)
+}

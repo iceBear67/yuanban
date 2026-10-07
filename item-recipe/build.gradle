@@ -11,9 +11,11 @@ repositories {
 
 dependencies {
     api(project(":item-tag"))
+    api(project(":crafting"))
     implementation("com.mojang:datafixerupper:10.0.21")
     testImplementation("net.minestom:testing:2026.10.05-26.2")
     testImplementation(testFixtures(project(":item-tag")))
+    testImplementation(testFixtures(project(":crafting")))
 }
 
 def vanillaBundle = layout.buildDirectory.file("vanilla/server-26.2-bundle.jar")

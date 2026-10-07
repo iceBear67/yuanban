@@ -1,40 +1,45 @@
 package io.ib67.yuanban.recipe;
 
 import com.google.gson.JsonParser;
+import io.ib67.yuanban.crafting.recipe.BannerDuplicateRecipe;
+import io.ib67.yuanban.crafting.recipe.BookCloningRecipe;
+import io.ib67.yuanban.crafting.recipe.CookingCategory;
+import io.ib67.yuanban.crafting.recipe.CookingKind;
+import io.ib67.yuanban.crafting.recipe.CookingRecipe;
+import io.ib67.yuanban.crafting.recipe.CraftingBookInfo;
+import io.ib67.yuanban.crafting.recipe.CraftingCategory;
+import io.ib67.yuanban.crafting.recipe.DecoratedPotRecipe;
+import io.ib67.yuanban.crafting.recipe.DyeRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkRocketRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkStarFadeRecipe;
+import io.ib67.yuanban.crafting.recipe.FireworkStarRecipe;
+import io.ib67.yuanban.crafting.recipe.ImbueRecipe;
+import io.ib67.yuanban.crafting.recipe.IntBounds;
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.MapExtendingRecipe;
+import io.ib67.yuanban.crafting.recipe.Recipe;
+import io.ib67.yuanban.crafting.recipe.RepairItemRecipe;
+import io.ib67.yuanban.crafting.recipe.ShapedRecipe;
+import io.ib67.yuanban.crafting.recipe.ShapelessRecipe;
+import io.ib67.yuanban.crafting.recipe.ShieldDecorationRecipe;
+import io.ib67.yuanban.crafting.recipe.SmithingTransformRecipe;
+import io.ib67.yuanban.crafting.recipe.SmithingTrimRecipe;
+import io.ib67.yuanban.crafting.recipe.StonecutterRecipe;
+import io.ib67.yuanban.crafting.recipe.TransmuteRecipe;
 import io.ib67.yuanban.itemtag.ItemTags;
-import io.ib67.yuanban.recipe.definition.CookingCategory;
-import io.ib67.yuanban.recipe.definition.CookingKind;
-import io.ib67.yuanban.recipe.definition.CraftingCategory;
-import io.ib67.yuanban.recipe.definition.IntBounds;
-import io.ib67.yuanban.recipe.definition.ItemIngredient;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.BookCloningRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CommonInfo;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CookingRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.CraftingBookInfo;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.DecoratedPotRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.DyeRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.FireworkStarRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ImbueRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.RepairItemRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ShapedRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.ShapelessRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.SmithingTransformRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.SmithingTrimRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.StonecutterRecipe;
-import io.ib67.yuanban.recipe.definition.RecipeDefinition.TransmuteRecipe;
+import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import io.ib67.yuanban.recipe.internal.RecipeCodecs;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.component.DataComponentMap;
 import net.minestom.server.component.DataComponents;
-import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.item.component.FireworkExplosion;
 import net.minestom.server.registry.RegistryKey;
 import net.minestom.testing.Env;
-import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import net.minestom.testing.EnvTest;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.List;
 import java.util.Map;
@@ -62,12 +67,11 @@ class RecipeDecodingTest {
                 {"type": "minecraft:crafting_shaped", "group": "sticks", "key": {"#": "#minecraft:planks", "s": ["stone", "minecraft:dirt"]},
                  "pattern": ["   ", " # ", " s "], "result": {"count": 4, "id": "minecraft:stick"}}
                 """));
-        assertEquals(new CommonInfo(true), recipe.common());
         assertEquals(new CraftingBookInfo(CraftingCategory.MISC, "sticks"), recipe.book());
         assertEquals(1, recipe.width());
         assertEquals(2, recipe.height());
         assertEquals(List.of(Optional.of(PLANKS), Optional.of(new ItemIngredient.OfItems(List.of(Material.STONE, Material.DIRT)))), recipe.ingredients());
-        assertEquals(ItemStack.of(Material.STICK, 4), recipe.result());
+        assertEquals(new ItemStackTemplate(Material.STICK, 4, DataComponentMap.EMPTY), recipe.result());
     }
 
     @Test
@@ -77,10 +81,9 @@ class RecipeDecodingTest {
                  "key": {"#": "minecraft:stone"}, "pattern": ["# #", "###"], "result": "minecraft:stone_bricks"}
                 """));
         var stone = Optional.<ItemIngredient>of(new ItemIngredient.OfItems(List.of(Material.STONE)));
-        assertEquals(new CommonInfo(false), recipe.common());
         assertEquals(CraftingCategory.BUILDING, recipe.book().category());
         assertEquals(List.of(stone, Optional.empty(), stone, stone, stone, stone), recipe.ingredients());
-        assertEquals(ItemStack.of(Material.STONE_BRICKS), recipe.result());
+        assertEquals(ItemStackTemplate.of(Material.STONE_BRICKS), recipe.result());
     }
 
     @Test
@@ -90,7 +93,20 @@ class RecipeDecodingTest {
                  "result": {"id": "minecraft:stone", "components": {"minecraft:max_stack_size": 16}}}
                 """));
         assertEquals(List.of(new ItemIngredient.OfItems(List.of(Material.STONE)), PLANKS), recipe.ingredients());
-        assertEquals(16, recipe.result().get(DataComponents.MAX_STACK_SIZE));
+        assertEquals(16, recipe.result().components().get(DataComponents.MAX_STACK_SIZE));
+    }
+
+    /**
+     * 原版 {@code ItemStackTemplate} 原样保存组件补丁：与物品原型相同的条目也保留，产出时用来覆盖输入物品的组件。
+     */
+    @Test
+    void resultKeepsComponentsEqualToPrototype(Env env) {
+        var recipe = assertInstanceOf(TransmuteRecipe.class, decode(env, """
+                {"type": "crafting_transmute", "input": "minecraft:stone", "material": "minecraft:dirt",
+                 "result": {"id": "minecraft:stone", "components": {"minecraft:max_stack_size": 64, "!minecraft:food": {}}}}
+                """));
+        assertEquals(64, recipe.result().components().get(DataComponents.MAX_STACK_SIZE));
+        assertEquals(2, recipe.result().components().entrySet().size());
     }
 
     @Test
@@ -123,7 +139,7 @@ class RecipeDecodingTest {
         var imbue = assertInstanceOf(ImbueRecipe.class, decode(env, """
                 {"type": "crafting_imbue", "source": "minecraft:lingering_potion", "material": "minecraft:arrow", "result": {"id": "minecraft:tipped_arrow", "count": 8}}
                 """));
-        assertEquals(8, imbue.result().amount());
+        assertEquals(8, imbue.result().count());
     }
 
     @Test
@@ -148,24 +164,26 @@ class RecipeDecodingTest {
         assertEquals(Map.of(
                 FireworkExplosion.Shape.LARGE_BALL, new ItemIngredient.OfItems(List.of(Material.FIRE_CHARGE)),
                 FireworkExplosion.Shape.CREEPER, new ItemIngredient.OfItems(List.of(Material.CREEPER_HEAD))), star.shapes());
+        // 查找爆炸类型时按配方文件中的顺序
+        assertEquals(List.of(FireworkExplosion.Shape.LARGE_BALL, FireworkExplosion.Shape.CREEPER), List.copyOf(star.shapes().keySet()));
 
         assertEquals(new RepairItemRecipe(), decode(env, """
                 {"type": "crafting_special_repairitem"}
                 """));
-        assertInstanceOf(RecipeDefinition.MapExtendingRecipe.class, decode(env, """
+        assertInstanceOf(MapExtendingRecipe.class, decode(env, """
                 {"type": "crafting_special_mapextending", "map": "minecraft:filled_map", "material": "minecraft:paper", "result": "minecraft:filled_map"}
                 """));
-        assertInstanceOf(RecipeDefinition.FireworkRocketRecipe.class, decode(env, """
+        assertInstanceOf(FireworkRocketRecipe.class, decode(env, """
                 {"type": "crafting_special_firework_rocket", "shell": "minecraft:paper", "fuel": "minecraft:gunpowder",
                  "star": "minecraft:firework_star", "result": "minecraft:firework_rocket"}
                 """));
-        assertInstanceOf(RecipeDefinition.FireworkStarFadeRecipe.class, decode(env, """
+        assertInstanceOf(FireworkStarFadeRecipe.class, decode(env, """
                 {"type": "crafting_special_firework_star_fade", "target": "minecraft:firework_star", "dye": "minecraft:red_dye", "result": "minecraft:firework_star"}
                 """));
-        assertInstanceOf(RecipeDefinition.BannerDuplicateRecipe.class, decode(env, """
+        assertInstanceOf(BannerDuplicateRecipe.class, decode(env, """
                 {"type": "crafting_special_bannerduplicate", "banner": "minecraft:white_banner", "result": "minecraft:white_banner"}
                 """));
-        assertInstanceOf(RecipeDefinition.ShieldDecorationRecipe.class, decode(env, """
+        assertInstanceOf(ShieldDecorationRecipe.class, decode(env, """
                 {"type": "crafting_special_shielddecoration", "banner": "minecraft:white_banner", "target": "minecraft:shield", "result": "minecraft:shield"}
                 """));
     }
@@ -200,7 +218,7 @@ class RecipeDecodingTest {
         var stonecutter = assertInstanceOf(StonecutterRecipe.class, decode(env, """
                 {"type": "stonecutting", "ingredient": "minecraft:stone", "result": {"id": "minecraft:stone_slab", "count": 2}}
                 """));
-        assertEquals(2, stonecutter.result().amount());
+        assertEquals(2, stonecutter.result().count());
 
         var transform = assertInstanceOf(SmithingTransformRecipe.class, decode(env, """
                 {"type": "smithing_transform", "base": "minecraft:diamond_sword", "result": "minecraft:netherite_sword"}
@@ -229,6 +247,9 @@ class RecipeDecodingTest {
                 "List must have contents");
         assertError(env, "{\"type\": \"stonecutting\", \"ingredient\": \"minecraft:stone\", \"result\": {\"id\": \"minecraft:stone\", \"count\": 100}}",
                 "Value must be within range [1;99]: 100");
+        // show_notification 不保存，但仍然按原版检查类型
+        assertError(env, "{\"type\": \"stonecutting\", \"show_notification\": \"yes\", \"ingredient\": \"minecraft:stone\", \"result\": \"minecraft:stone\"}",
+                "Not a boolean");
         assertError(env, shaped("[\"#\",\"#\",\"#\",\"#\"]", "{\"#\": \"minecraft:stone\"}"), "Invalid pattern: too many rows, 3 is maximum");
         assertError(env, shaped("[]", "{\"#\": \"minecraft:stone\"}"), "Invalid pattern: empty pattern not allowed");
         assertError(env, shaped("[\"####\"]", "{\"#\": \"minecraft:stone\"}"), "Invalid pattern: too many columns, 3 is maximum");
@@ -266,7 +287,7 @@ class RecipeDecodingTest {
         return "{\"type\": \"crafting_shaped\", \"pattern\": " + pattern + ", \"key\": " + key + ", \"result\": \"minecraft:stone\"}";
     }
 
-    private static RecipeDefinition decode(Env env, String json) {
+    private static Recipe<?> decode(Env env, String json) {
         return new RecipeCodecs(TAGS, env.process()).decode(JsonParser.parseString(json)).getOrThrow();
     }
 

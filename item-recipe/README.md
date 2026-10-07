@@ -1,20 +1,19 @@
 # item-recipe
 
-`item-recipe`（库）是 [datapack-loader](../datapack-loader/DESIGN.md) 的订阅者。它从数据包读取配方（`data/<namespace>/recipe/**.json`），按本次加载的物品标签解码原版 26.2 的全部 21 种配方，然后：
+`item-recipe`（库）是 [datapack-loader](../datapack-loader/DESIGN.md) 的订阅者。它从数据包读取配方（`data/<namespace>/recipe/**.json`），按本次加载的物品标签解码原版 26.2 的全部 21 种配方，提交阶段交给 [crafting](../crafting/README.md) 模块的 `RecipeManager`。
 
-- 把配方注册到 Minestom 的 `RecipeManager`，客户端因此能看到配方书、熔炉等方块的输入物品、切石机配方；
-- 以不可变的数据类型提供每个配方的完整内容，给实现合成逻辑的模块使用。
-
-Minestom 只负责把配方信息发给客户端，没有配方的数据类型，也没有判断物品能否合成、合成出什么的逻辑。本模块同样不实现合成逻辑，只提供合成逻辑所需的配方数据。
+配方的类型、匹配与产出、配方书、发给客户端的配方数据、工作台和背包合成格都由 `crafting` 提供。本模块只负责从数据包得到配方。
 
 实现细节和与原版的差异见 [DESIGN.md](DESIGN.md)。
 
 ## 注册
 
-本模块依赖 [item-tag](../item-tag/README.md)，两个订阅都需要注册：
+本模块依赖 [item-tag](../item-tag/README.md) 和 [crafting](../crafting/README.md)：
 
 ```java
-RecipeSubscriber recipes = new RecipeSubscriber(process);
+Crafting crafting = new Crafting(process, maps);
+process.eventHandler().addChild(crafting.eventNode());
+RecipeSubscriber recipes = new RecipeSubscriber(process, crafting.recipes());
 
 DataPackLoader loader = DataPackLoader.builder(LoaderSettings.MINECRAFT_26_2)
         .provider(new BuiltInPackProvider(vanillaRoot, "26.2"))
@@ -35,43 +34,43 @@ DataPackSession session = loader.start(selectionRequest);
 | 读取的 topic | `RecipeSubscriber.TOPIC`，即 `Topic.json("recipe")` |
 | 依赖 | `ItemTagSubscriber.KEY` |
 
-提交之后，全部配方对全部玩家可见（不处理原版的配方解锁），在线玩家会重新收到配方数据和配方书。
+提交之后，`crafting` 的 `RecipeManager` 持有新配方，在线玩家会重新收到配方数据和配方书。
 
 ## 在其他模块中使用配方
 
-### 游戏运行期间：`current()`
+### 游戏运行期间
+
+匹配配方、查询配方书条目使用 `crafting` 的 `RecipeManager`，见 [crafting/README.md](../crafting/README.md)。`current()` 返回最近一次提交的解码结果，提交之前是 `RecipeSet.EMPTY`；重载失败时不变。返回的对象不可修改，可以在任何线程读取。
 
 ```java
 RecipeSet set = recipes.current();
-RecipeDefinition stick = set.recipes().get(Key.key("minecraft:stick"));
+Recipe<?> stick = set.recipes().get(Key.key("minecraft:stick"));
 ```
-
-`current()` 返回最近一次提交的配方，提交之前是 `RecipeSet.EMPTY`。重载成功之后它返回新的 `RecipeSet`；重载失败时不变。返回的对象不可修改，可以在任何线程读取。
 
 ### 加载期间：读取准备结果
 
-需要在每次重载时根据配方重建数据的模块（例如按原料建立查找索引），声明依赖 `RecipeSubscriber.KEY`，在 `prepare` 中读取本次加载解码出的配方：
+需要在每次重载时根据配方重建数据的模块，声明依赖 `RecipeSubscriber.KEY`，在 `prepare` 中读取本次加载解码出的配方：
 
 ```java
-static final SubscriberKey<CraftingIndex> CRAFTING = SubscriberKey.of("example:crafting");
+static final SubscriberKey<CookingIndex> COOKING = SubscriberKey.of("example:cooking");
 
-final class CraftingIndexSubscriber implements Subscriber<CraftingIndex> {
-    private volatile CraftingIndex index = CraftingIndex.EMPTY;
+final class CookingIndexSubscriber implements Subscriber<CookingIndex> {
+    private volatile CookingIndex index = CookingIndex.EMPTY;
 
     @Override
-    public CraftingIndex prepare(PrepareContext context) {
+    public CookingIndex prepare(PrepareContext context) {
         RecipeSet set = context.dependency(RecipeSubscriber.KEY);
-        CraftingIndex.Builder builder = CraftingIndex.builder();
+        CookingIndex.Builder builder = CookingIndex.builder();
         set.recipes().forEach((id, recipe) -> {
-            if (recipe instanceof RecipeDefinition.ShapedRecipe shaped) {
-                builder.addShaped(id, shaped.width(), shaped.height(), shaped.ingredients(), shaped.result());
+            if (recipe instanceof CookingRecipe cooking) {
+                builder.add(id, cooking.kind(), cooking.ingredient(), cooking.result());
             }
         });
         return builder.build();
     }
 
     @Override
-    public void apply(CraftingIndex prepared) {
+    public void apply(CookingIndex prepared) {
         index = prepared;
     }
 }
@@ -79,7 +78,7 @@ final class CraftingIndexSubscriber implements Subscriber<CraftingIndex> {
 loaderBuilder
         .subscribe(ItemTagSubscriber.subscription(process))
         .subscribe(recipes.subscription())
-        .subscribe(Subscription.builder(CRAFTING, new CraftingIndexSubscriber())
+        .subscribe(Subscription.builder(COOKING, new CookingIndexSubscriber())
                 .lifecycle(Lifecycle.RELOADABLE)
                 .after(RecipeSubscriber.KEY)
                 .build());
@@ -92,22 +91,20 @@ loaderBuilder
 `RecipeSet`：
 
 ```java
-public record RecipeSet(NavigableMap<Key, RecipeDefinition> recipes) {
+public record RecipeSet(NavigableMap<Key, Recipe<?>> recipes) {
     public static final RecipeSet EMPTY;
 }
 ```
 
-键是配方 ID（`data/minecraft/recipe/stick.json` 的 ID 是 `minecraft:stick`），按自然顺序排列。
+键是配方 ID（`data/minecraft/recipe/stick.json` 的 ID 是 `minecraft:stick`），按自然顺序排列。配方的类型在 `crafting` 模块的 `io.ib67.yuanban.crafting.recipe` 包中，都是不可变的 record：
 
-`io.ib67.yuanban.recipe.definition` 包中的类型都是 record，内容不可修改：
-
-| `type` | `RecipeDefinition` 的实现 |
+| `type` | `Recipe` 的实现 |
 |---|---|
-| `crafting_shaped` | `ShapedRecipe(common, book, width, height, ingredients, result)`，`ingredients` 按行排列，空位为 `Optional.empty()` |
-| `crafting_shapeless` | `ShapelessRecipe(common, book, result, ingredients)` |
-| `crafting_transmute` | `TransmuteRecipe(common, book, input, material, materialCount, result, addMaterialCountToResult)` |
-| `crafting_dye` | `DyeRecipe(common, book, target, dye, result)` |
-| `crafting_imbue` | `ImbueRecipe(common, book, source, material, result)` |
+| `crafting_shaped` | `ShapedRecipe(book, width, height, ingredients, result)`，`ingredients` 按行排列，空位为 `Optional.empty()` |
+| `crafting_shapeless` | `ShapelessRecipe(book, result, ingredients)` |
+| `crafting_transmute` | `TransmuteRecipe(book, input, material, materialCount, result, addMaterialCountToResult)` |
+| `crafting_dye` | `DyeRecipe(book, target, dye, result)` |
+| `crafting_imbue` | `ImbueRecipe(book, source, material, result)` |
 | `crafting_decorated_pot` | `DecoratedPotRecipe(back, left, right, front, result)` |
 | `crafting_special_bookcloning` | `BookCloningRecipe(source, material, allowedGenerations, result)` |
 | `crafting_special_mapextending` | `MapExtendingRecipe(map, material, result)` |
@@ -117,18 +114,19 @@ public record RecipeSet(NavigableMap<Key, RecipeDefinition> recipes) {
 | `crafting_special_bannerduplicate` | `BannerDuplicateRecipe(banner, result)` |
 | `crafting_special_shielddecoration` | `ShieldDecorationRecipe(banner, target, result)` |
 | `crafting_special_repairitem` | `RepairItemRecipe()` |
-| `smelting`、`blasting`、`smoking`、`campfire_cooking` | `CookingRecipe(kind, common, book, ingredient, result, experience, cookingTime)`，`kind` 区分四种烧炼方块 |
-| `stonecutting` | `StonecutterRecipe(common, ingredient, result)` |
-| `smithing_transform` | `SmithingTransformRecipe(common, template, base, addition, result)`，`template`、`addition` 可以为空 |
-| `smithing_trim` | `SmithingTrimRecipe(common, template, base, addition, pattern)` |
+| `smelting`、`blasting`、`smoking`、`campfire_cooking` | `CookingRecipe(kind, book, ingredient, result, experience, cookingTime)`，`kind` 区分四种烧炼方块 |
+| `stonecutting` | `StonecutterRecipe(ingredient, result)` |
+| `smithing_transform` | `SmithingTransformRecipe(template, base, addition, result)`，`template`、`addition` 可以为空 |
+| `smithing_trim` | `SmithingTrimRecipe(template, base, addition, pattern)` |
 
 公共的字段：
 
-- `common`：`CommonInfo(showNotification)`。
 - `book`：合成配方为 `CraftingBookInfo(category, group)`，烧炼配方为 `CookingBookInfo(category, group)`。
-- `result`：Minestom 的 `ItemStack`，包含数量和组件。
+- `result`：`ItemStackTemplate(material, count, components)`，`components` 是配方文件中的组件补丁。
 - `materialCount`、`allowedGenerations`：`IntBounds(min, max)`，两端都可以为空。
 - `pattern`：Minestom 的 `Holder<TrimPattern>`。
+
+配方文件中的 `show_notification` 按原版检查类型，但不保存：它只用于配方解锁时的提示，`crafting` 让全部玩家已知全部配方。
 
 原料是 `ItemIngredient`：
 
@@ -140,13 +138,7 @@ public sealed interface ItemIngredient {
 }
 ```
 
-`OfTag.items()` 是这个标签在本次加载中展开得到的物品，和同一次加载中 `item-tag` 的结果一致，可能为空。原料没有使用 Minestom 的 `Ingredient`，因为准备阶段新标签还没有写进 Minestom 注册表。
-
-判断一个物品能否放进某个原料：
-
-```java
-boolean accepts = ingredient.items().contains(itemStack.material());
-```
+`OfTag.items()` 是这个标签在本次加载中展开得到的物品，和同一次加载中 `item-tag` 的结果一致，可能为空。判断一个物品能否放进某个原料使用 `ingredient.test(itemStack)`。
 
 ## 错误
 
@@ -158,15 +150,6 @@ Couldn't parse data file 'example:foo' from [file/pack] data/example/recipe/foo.
 
 原版只记录日志并跳过这些文件。
 
-## 使用限制
-
-以下限制来自 Minestom 的问题，详见根目录 [README.md](../README.md) 和 [MINESTOM-BUG-REPORT.md](../MINESTOM-BUG-REPORT.md)：
-
-- 锻造纹饰配方没有配方书条目（M2）。
-- 原料列出多个物品的切石机配方不会出现在客户端的切石机中（M3）。
-- 配方书条目没有分组（M4）。
-- Minestom 必须位于 classpath 上（Gradle 默认的运行方式），刷新配方数据包用到了反射（M1）。
-
 ## 测试
 
-测试会从 Mojang 下载 26.2 服务端 jar（约 60 MB，按 SHA-1 校验，下载一次之后保存在 `build/vanilla/`），用它验证原版全部配方都能解码。测试类使用 item-tag 提供的 `ResetItemTags` 扩展，见 [item-tag/README.md](../item-tag/README.md)。
+测试会从 Mojang 下载 26.2 服务端 jar（约 60 MB，按 SHA-1 校验，下载一次之后保存在 `build/vanilla/`），用它验证原版全部配方都能解码。测试类使用 item-tag 提供的 `ResetItemTags` 扩展，见 [item-tag/README.md](../item-tag/README.md)；地图数据使用 crafting 的 testFixtures 中的 `InMemoryMaps`。

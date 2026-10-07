@@ -1,3 +1,5 @@
 dependencies {
-    implementation("org.geysermc.mcprotocollib:protocol:26.2-SNAPSHOT")
+    api("net.minestom:minestom:2026.10.05-26.2")
+    implementation("it.unimi.dsi:fastutil:8.5.19")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
 }

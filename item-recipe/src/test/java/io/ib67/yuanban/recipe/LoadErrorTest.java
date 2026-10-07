@@ -1,5 +1,7 @@
 package io.ib67.yuanban.recipe;
 
+import io.ib67.yuanban.crafting.Crafting;
+import io.ib67.yuanban.crafting.testing.InMemoryMaps;
 import io.ib67.yuanban.datapack.LoadFailedException;
 import net.minestom.server.item.Material;
 import net.minestom.server.registry.TagKey;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -41,7 +44,8 @@ class LoadErrorTest {
                 .pack("broken", "example", "recipe/unknown_type.json", """
                         {"type": "minecraft:brewing"}
                         """);
-        var subscriber = new RecipeSubscriber(env.process());
+        var crafting = new Crafting(env.process(), new InMemoryMaps());
+        var subscriber = new RecipeSubscriber(env.process(), crafting.recipes());
         var loader = world.loader(env.process(), subscriber);
 
         var exception = assertInstanceOf(RecipeException.class,
@@ -54,6 +58,6 @@ class LoadErrorTest {
         // 加载失败的时候没有调用任何 apply
         assertNotNull(Material.staticRegistry().getTag(TagKey.of("minecraft:logs")));
         assertEquals(RecipeSet.EMPTY, subscriber.current());
-        assertEquals(0, env.process().recipe().getRecipes().size());
+        assertEquals(Map.of(), crafting.recipes().recipes());
     }
 }
