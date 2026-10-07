@@ -96,7 +96,7 @@ public record RecipeSet(NavigableMap<Key, Recipe<?>> recipes) {
 }
 ```
 
-键是配方 ID（`data/minecraft/recipe/stick.json` 的 ID 是 `minecraft:stick`），按自然顺序排列。配方的类型在 `crafting` 模块的 `io.ib67.yuanban.crafting.recipe` 包中，都是不可变的 record：
+键是配方 ID（`data/minecraft/recipe/stick.json` 的 ID 是 `minecraft:stick`），按自然顺序排列。配方的类型在 `crafting` 模块的 `io.ib67.yuanban.crafting.recipe` 包与它的 `kind` 子包中，都是不可变的 record：
 
 | `type` | `Recipe` 的实现 |
 |---|---|

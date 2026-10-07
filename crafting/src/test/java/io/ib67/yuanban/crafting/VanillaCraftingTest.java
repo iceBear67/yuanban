@@ -2,9 +2,9 @@ package io.ib67.yuanban.crafting;
 
 import io.ib67.yuanban.crafting.recipe.CraftingInput;
 import io.ib67.yuanban.crafting.recipe.CraftingRecipe;
-import io.ib67.yuanban.crafting.recipe.ShapedRecipe;
-import io.ib67.yuanban.crafting.recipe.ShapelessRecipe;
-import io.ib67.yuanban.crafting.recipe.TransmuteRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.ShapedRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.ShapelessRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.TransmuteRecipe;
 import io.ib67.yuanban.crafting.testing.InMemoryMaps;
 import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import net.minestom.server.item.ItemStack;

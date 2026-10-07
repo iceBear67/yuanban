@@ -1,5 +1,7 @@
 package io.ib67.yuanban.crafting.recipe;
 
+import io.ib67.yuanban.crafting.recipe.kind.crafting.CraftingCategory;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.CraftingRemainders;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.recipe.RecipeBookCategory;
@@ -11,8 +13,7 @@ import java.util.List;
 /**
  * 原版 {@code CraftingRecipe}：在工作台和背包合成格中使用的配方。
  */
-public sealed interface CraftingRecipe extends Recipe<CraftingInput>
-        permits ShapedRecipe, ShapelessRecipe, TransmuteRecipe, DyeRecipe, ImbueRecipe, SpecialCraftingRecipe {
+public interface CraftingRecipe extends Recipe<CraftingInput> {
     SlotDisplay CRAFTING_TABLE = new SlotDisplay.Item(Material.CRAFTING_TABLE);
 
     @Override

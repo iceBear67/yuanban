@@ -9,7 +9,7 @@ import java.util.Optional;
 /**
  * 原版 {@code SmithingRecipe}：在锻造台中使用的配方。
  */
-public sealed interface SmithingRecipe extends Recipe<SmithingRecipeInput> permits SmithingTransformRecipe, SmithingTrimRecipe {
+public interface SmithingRecipe extends Recipe<SmithingRecipeInput> {
     SlotDisplay SMITHING_TABLE = new SlotDisplay.Item(Material.SMITHING_TABLE);
 
     @Override

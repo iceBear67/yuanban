@@ -73,7 +73,7 @@ recipes.getRecipeFor(RecipeType.SMELTING, ore, null);
 - `assemble` 的结果经过原版的合法性检查，不合法时为 `ItemStack.AIR`。
 - `replaceRecipes` 替换全部配方，并给在线玩家发送新的配方数据和配方书。查询方法可以在任何线程调用。
 
-配方类型都在 `io.ib67.yuanban.crafting.recipe` 包中，是不可变的 record，表格见 [item-recipe/README.md](../item-recipe/README.md#数据类型)。
+配方接口与配方管理在 `io.ib67.yuanban.crafting.recipe` 包中，配方 record 按种类放在 `io.ib67.yuanban.crafting.recipe.kind` 的子包中，都是不可变的 record，表格见 [item-recipe/README.md](../item-recipe/README.md#数据类型)。
 
 ## 与原版的主要差异
 

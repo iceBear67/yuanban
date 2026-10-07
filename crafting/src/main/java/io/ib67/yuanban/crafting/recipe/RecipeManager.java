@@ -1,6 +1,9 @@
 package io.ib67.yuanban.crafting.recipe;
 
 import io.ib67.yuanban.crafting.MapDataAccess;
+import io.ib67.yuanban.crafting.recipe.kind.cooking.CookingKind;
+import io.ib67.yuanban.crafting.recipe.kind.cooking.CookingRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.stonecutter.StonecutterRecipe;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.ServerProcess;
 import net.minestom.server.entity.Player;
@@ -181,6 +184,7 @@ public final class RecipeManager {
                 }).addAll(cooking.ingredient().items());
                 case CraftingRecipe _, StonecutterRecipe _ -> {
                 }
+                default -> throw new IllegalStateException("Unknown recipe type: " + recipe.getClass());
             }
         }
 

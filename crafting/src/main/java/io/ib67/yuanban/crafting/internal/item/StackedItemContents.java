@@ -1,7 +1,7 @@
 package io.ib67.yuanban.crafting.internal.item;
 
 import io.ib67.yuanban.crafting.recipe.ItemIngredient;
-import io.ib67.yuanban.crafting.recipe.PlacementInfo;
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import org.jetbrains.annotations.ApiStatus;

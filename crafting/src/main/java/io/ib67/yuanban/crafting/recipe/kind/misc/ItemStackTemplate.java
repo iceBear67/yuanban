@@ -1,4 +1,4 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.misc;
 
 import io.ib67.yuanban.crafting.internal.item.ItemValidation;
 import net.minestom.server.component.DataComponent;

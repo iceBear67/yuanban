@@ -1,6 +1,12 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.special;
 
 import io.ib67.yuanban.crafting.internal.item.BannerColors;
+import io.ib67.yuanban.crafting.recipe.CraftingInput;
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.SpecialCraftingRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.misc.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.CraftingRemainders;
 import net.minestom.server.color.DyeColor;
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.ItemStack;

@@ -67,7 +67,7 @@ DataPackLoader loader = DataPackLoader.builder(LoaderSettings.MINECRAFT_26_2)
         .build();
 ```
 
-配方的数据类型在 `crafting` 模块的 `io.ib67.yuanban.crafting.recipe` 包中，全部是不可变的 record。`ItemIngredient.OfTag.items()` 是这个标签在本次加载中展开得到的物品。配方结果的类型是 `ItemStackTemplate(material, count, components)`，`components` 原样保存配方文件中的组件补丁。
+配方的数据类型在 `crafting` 模块的 `io.ib67.yuanban.crafting.recipe` 包与它的 `kind` 子包中，全部是不可变的 record。`ItemIngredient.OfTag.items()` 是这个标签在本次加载中展开得到的物品。配方结果的类型是 `ItemStackTemplate(material, count, components)`，`components` 原样保存配方文件中的组件补丁。
 
 ## 4. 配方格式
 

@@ -2,9 +2,9 @@ package io.ib67.yuanban.crafting.internal.menu;
 
 import io.ib67.yuanban.crafting.internal.item.StackedItemContents;
 import io.ib67.yuanban.crafting.recipe.CraftingRecipe;
-import io.ib67.yuanban.crafting.recipe.PlacementInfo;
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import io.ib67.yuanban.crafting.recipe.RecipeHolder;
-import io.ib67.yuanban.crafting.recipe.ShapedRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.crafting.ShapedRecipe;
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;

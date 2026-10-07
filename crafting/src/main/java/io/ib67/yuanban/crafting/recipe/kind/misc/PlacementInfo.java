@@ -1,4 +1,6 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.misc;
+
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
 
 import java.util.ArrayList;
 import java.util.List;

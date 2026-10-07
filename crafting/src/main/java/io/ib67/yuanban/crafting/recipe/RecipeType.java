@@ -1,5 +1,7 @@
 package io.ib67.yuanban.crafting.recipe;
 
+import io.ib67.yuanban.crafting.recipe.kind.cooking.CookingRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.stonecutter.StonecutterRecipe;
 import net.kyori.adventure.key.Key;
 
 /**

@@ -1,4 +1,4 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.crafting;
 
 import net.minestom.server.item.Material;
 import org.jetbrains.annotations.Nullable;

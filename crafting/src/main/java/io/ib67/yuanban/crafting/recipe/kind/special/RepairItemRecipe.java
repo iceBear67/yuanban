@@ -1,6 +1,9 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.special;
 
 import io.ib67.yuanban.crafting.internal.item.ItemStacks;
+import io.ib67.yuanban.crafting.recipe.CraftingInput;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.SpecialCraftingRecipe;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.component.DataComponent;
 import net.minestom.server.component.DataComponents;

@@ -1,5 +1,11 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.smithing;
 
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.SmithingRecipe;
+import io.ib67.yuanban.crafting.recipe.SmithingRecipeInput;
+import io.ib67.yuanban.crafting.recipe.kind.misc.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.recipe.display.RecipeDisplay;
 import net.minestom.server.recipe.display.SlotDisplay;

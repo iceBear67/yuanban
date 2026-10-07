@@ -69,10 +69,10 @@ public interface MapDataAccess {
 
 `createScaledCopy` 按原版 `MapItemSavedData.scaled()` 复制地图数据：缩放等级加一（最大为 4），按新的缩放等级以 `createFresh` 重新计算中心坐标，保留追踪设置和维度，分配新的地图 ID。`MapDataAccess` 的方法在玩家所在实例的线程上调用。
 
-包 `io.ib67.yuanban.crafting.recipe`：
+配方接口与配方管理在包 `io.ib67.yuanban.crafting.recipe`，各个配方 record 按种类放在 `io.ib67.yuanban.crafting.recipe.kind` 的子包中。
 
 ```java
-public sealed interface Recipe<I extends RecipeInput> permits CraftingRecipe, CookingRecipe, StonecutterRecipe, SmithingRecipe {
+public interface Recipe<I extends RecipeInput> {
     RecipeType<?> type();
     boolean matches(I input, RecipeContext context);
     ItemStack assemble(I input, RecipeContext context);
@@ -83,12 +83,12 @@ public sealed interface Recipe<I extends RecipeInput> permits CraftingRecipe, Co
     RecipeBookCategory recipeBookCategory();
 }
 
-public sealed interface CraftingRecipe extends Recipe<CraftingInput> {
+public interface CraftingRecipe extends Recipe<CraftingInput> {
     CraftingCategory category();
     default List<ItemStack> remainingItems(CraftingInput input);
 }
-public sealed interface SpecialCraftingRecipe extends CraftingRecipe {}  // 原版 CustomRecipe
-public sealed interface SmithingRecipe extends Recipe<SmithingRecipeInput> {}
+public interface SpecialCraftingRecipe extends CraftingRecipe {}  // 原版 CustomRecipe
+public interface SmithingRecipe extends Recipe<SmithingRecipeInput> {}
 
 public interface RecipeContext { Registries registries(); MapDataAccess maps(); }
 
@@ -104,7 +104,16 @@ public final class RecipeManager {
 }
 ```
 
-其余公开类型：18 个配方 record（第 5 节）、`RecipeInput` 与 `CraftingInput`、`SingleRecipeInput`、`SmithingRecipeInput`、`RecipeType`、`RecipeHolder`、`RecipeDisplayInfo`、`PlacementInfo`、`ItemIngredient`、`ItemStackTemplate`、`IntBounds`、`CraftingBookInfo`、`CookingBookInfo`、`CraftingCategory`、`CookingCategory`、`CookingKind`、`CraftingRemainders`。
+配方 record 按种类放在这些子包中：
+
+- `kind.crafting`：`ShapedRecipe`、`ShapelessRecipe`、`TransmuteRecipe`、`DyeRecipe`、`ImbueRecipe`，以及它们的值类型 `CraftingCategory`、`CraftingBookInfo`、`CraftingRemainders`。
+- `kind.cooking`：`CookingRecipe`，以及它的值类型 `CookingCategory`、`CookingBookInfo`、`CookingKind`。
+- `kind.smithing`：`SmithingTransformRecipe`、`SmithingTrimRecipe`。
+- `kind.stonecutter`：`StonecutterRecipe`。
+- `kind.special`：`DecoratedPotRecipe`、`BookCloningRecipe`、`MapExtendingRecipe`、`FireworkRocketRecipe`、`FireworkStarRecipe`、`FireworkStarFadeRecipe`、`BannerDuplicateRecipe`、`ShieldDecorationRecipe`、`RepairItemRecipe`。
+- `kind.misc`：配方共用的值类型 `ItemStackTemplate`、`PlacementInfo`、`IntBounds`。
+
+其余公开类型在 `io.ib67.yuanban.crafting.recipe`：`RecipeInput` 与 `CraftingInput`、`SingleRecipeInput`、`SmithingRecipeInput`、`RecipeType`、`RecipeHolder`、`RecipeDisplayInfo`、`ItemIngredient`、`RecipeContext`、`RecipeManager`。
 
 ## 5. 配方类型
 

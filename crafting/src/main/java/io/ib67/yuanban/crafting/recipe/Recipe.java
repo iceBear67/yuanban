@@ -1,5 +1,6 @@
 package io.ib67.yuanban.crafting.recipe;
 
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.recipe.RecipeBookCategory;
 import net.minestom.server.recipe.display.RecipeDisplay;
@@ -11,7 +12,7 @@ import java.util.List;
  *
  * @param <I> 匹配时读取的输入
  */
-public sealed interface Recipe<I extends RecipeInput> permits CraftingRecipe, CookingRecipe, StonecutterRecipe, SmithingRecipe {
+public interface Recipe<I extends RecipeInput> {
     RecipeType<?> type();
 
     boolean matches(I input, RecipeContext context);

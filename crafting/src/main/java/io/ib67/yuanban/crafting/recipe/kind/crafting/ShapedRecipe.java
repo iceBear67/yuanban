@@ -1,5 +1,11 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.crafting;
 
+import io.ib67.yuanban.crafting.recipe.CraftingInput;
+import io.ib67.yuanban.crafting.recipe.CraftingRecipe;
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.kind.misc.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.recipe.display.RecipeDisplay;
 import net.minestom.server.recipe.display.SlotDisplay;
@@ -27,7 +33,7 @@ public record ShapedRecipe(CraftingBookInfo book, int width, int height, List<Op
     /**
      * 原版 {@code ShapedRecipePattern.matches}：原料数和尺寸都相同；图案不对称时先试左右翻转。
      */
-    static boolean matches(int width, int height, List<Optional<ItemIngredient>> ingredients, CraftingInput input) {
+    public static boolean matches(int width, int height, List<Optional<ItemIngredient>> ingredients, CraftingInput input) {
         long ingredientCount = ingredients.stream().filter(Optional::isPresent).count();
         if (input.ingredientCount() != ingredientCount || input.width() != width || input.height() != height) {
             return false;

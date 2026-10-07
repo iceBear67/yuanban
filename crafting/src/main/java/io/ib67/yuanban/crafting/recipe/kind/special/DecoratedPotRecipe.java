@@ -1,5 +1,10 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.special;
 
+import io.ib67.yuanban.crafting.recipe.CraftingInput;
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.SpecialCraftingRecipe;
+import io.ib67.yuanban.crafting.recipe.kind.misc.ItemStackTemplate;
 import net.minestom.server.component.DataComponentMap;
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.ItemStack;

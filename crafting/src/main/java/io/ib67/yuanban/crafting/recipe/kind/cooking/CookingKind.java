@@ -1,5 +1,6 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.cooking;
 
+import io.ib67.yuanban.crafting.recipe.RecipeType;
 import net.minestom.server.item.Material;
 
 /**

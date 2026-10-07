@@ -1,5 +1,12 @@
-package io.ib67.yuanban.crafting.recipe;
+package io.ib67.yuanban.crafting.recipe.kind.stonecutter;
 
+import io.ib67.yuanban.crafting.recipe.ItemIngredient;
+import io.ib67.yuanban.crafting.recipe.Recipe;
+import io.ib67.yuanban.crafting.recipe.RecipeContext;
+import io.ib67.yuanban.crafting.recipe.RecipeType;
+import io.ib67.yuanban.crafting.recipe.SingleRecipeInput;
+import io.ib67.yuanban.crafting.recipe.kind.misc.ItemStackTemplate;
+import io.ib67.yuanban.crafting.recipe.kind.misc.PlacementInfo;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.recipe.RecipeBookCategory;

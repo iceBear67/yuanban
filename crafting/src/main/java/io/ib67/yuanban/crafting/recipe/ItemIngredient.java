@@ -1,5 +1,6 @@
 package io.ib67.yuanban.crafting.recipe;
 
+import io.ib67.yuanban.crafting.recipe.kind.crafting.CraftingRemainders;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
@@ -52,14 +53,14 @@ public sealed interface ItemIngredient {
     /**
      * 原版 {@code Ingredient.testOptionalIngredient}：没有原料的位置只接受空物品。
      */
-    static boolean testOptional(Optional<ItemIngredient> ingredient, ItemStack stack) {
+    public static boolean testOptional(Optional<ItemIngredient> ingredient, ItemStack stack) {
         return ingredient.map(value -> value.test(stack)).orElseGet(stack::isAir);
     }
 
     /**
      * 原版 {@code Ingredient.optionalIngredientToDisplay}。
      */
-    static SlotDisplay displayOptional(Optional<ItemIngredient> ingredient) {
+    public static SlotDisplay displayOptional(Optional<ItemIngredient> ingredient) {
         return ingredient.map(ItemIngredient::display).orElse(SlotDisplay.Empty.INSTANCE);
     }
 
