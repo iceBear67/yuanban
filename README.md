@@ -18,7 +18,7 @@ in code with `FIXME(Minestom M<n>)`; the details and suggested upstream fixes ar
 | M9 | `item-tag`, `ItemTagSubscriber.apply` | Calls the `@ApiStatus.Internal` `ConnectionManager.invalidateTags()` after replacing the item tags | Depends on an internal Minestom method |
 | M10 | `bot`, `decode.TcpInbound` | Reads the block entities of Chunk Data itself; the block of each entry is the block at that position in the section palette | Depends on the internal `PacketVanilla` and on the Chunk Data layout |
 | M11 | `bot`, `decode.TcpInbound` | Frames, decompresses and parses server packets itself with the vanilla client limits instead of `PacketReading` | Depends on the internal `PacketVanilla` |
-| M12 | `bot`, `movement.RidingSeat` | Hard-coded vanilla 26.2 baby and sitting dimensions and attachments of rideable entities | Only correct for 26.2 |
+| M12 | `bot`, `movement.RidingSeat`, `entity.EntityDimensions` | Hard-coded vanilla 26.2 baby and sitting dimensions and attachments of rideable entities, and the baby and player pose dimensions of entity bounding boxes | Only correct for 26.2 |
 | M13 | `bot` tests, `TestServer.profile` | Initializes `Codec` before constructing a `GameProfile` | Code that initializes `GameProfile`, `LoginSuccessPacket` or `ResolvableProfile` before any other Minestom class still fails |
 | M14 | `crafting`, `internal.menu.CraftingStats` | Finds the statistic entry with the same category and id by iterating `Player.getStatisticValueMap()` | None |
 | M15 | `crafting`, `internal.menu.CraftingTableInventory.removeViewer` | Puts the cursor item back into the player inventory before calling `super.removeViewer` | Other inventories still drop the cursor item |

@@ -141,16 +141,20 @@ itself with the vanilla client rules, using `PacketVanilla.SERVER_PACKET_PARSER`
 
 ## M12. Entity type data has no baby or pose-specific dimensions and attachments
 
-`EntityType.entityAttachments` exposes the attachment points of the default adult dimensions only. Vanilla entity
+`EntityType.width`, `height` and `entityAttachments` describe the default adult dimensions only. Vanilla entity
 classes replace the dimensions of babies (for example `Horse.BABY_DIMENSIONS` with a passenger attachment at
-`height - 0.125` scaled by 0.7, `Pig.BABY_DIMENSIONS`, `Llama.BABY_DIMENSIONS`) and of some poses (camel sitting
-dimensions), so a client cannot compute where a passenger sits on such an entity from Minestom's data.
+`height - 0.125` scaled by 0.7, `Pig.BABY_DIMENSIONS`, `Llama.BABY_DIMENSIONS`, `Zombie.BABY_DIMENSIONS`) and of some
+poses (camel sitting dimensions, the `Avatar.POSES` of players and mannequins, including the fixed dying dimensions that
+the scale attribute does not affect), so a client cannot compute where a passenger sits on such an entity, or the
+bounding box of a baby or of a crouching player, from Minestom's data.
 
-**Suggested fix:** include the baby and pose-specific dimensions with their attachments in the generated entity data.
+**Suggested fix:** include the baby and pose-specific dimensions with their attachments, and whether they are fixed, in
+the generated entity data.
 
 **yuanban workaround:** the bot's riding position (`movement.RidingSeat`) contains the vanilla 26.2 values for the
 vehicle types it supports (horse, skeleton horse, zombie horse, donkey, mule, llama, pig, strider, nautilus, chicken,
-camel, happy ghast).
+camel, happy ghast), and its entity bounding boxes (`entity.EntityDimensions`) contain the vanilla 26.2 baby dimensions
+of every entity class that can be a baby and the pose dimensions of players and mannequins.
 
 ## M13. Class initialization cycle between `GameProfile.Property`, `Codec` and `ResolvableProfile`
 
