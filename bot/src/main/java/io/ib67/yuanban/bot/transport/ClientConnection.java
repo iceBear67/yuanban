@@ -22,7 +22,8 @@ public interface ClientConnection {
     /**
      * 只由调度线程调用；本轮的数据包一次交出，保持顺序。
      *
-     * @return 数据包交给连接之后完成：TCP 连接在写出到套接字之后，对象级连接在放进服务端入站队列之后；
+     * @return 数据包交给连接之后完成：TCP 连接在写出到套接字之后，对象级连接在交给服务端之后
+     * （还没有玩家时由监听器处理完毕，之后放进玩家的数据包队列）；
      * 连接在写出之前关闭时以异常完成
      */
     CompletableFuture<Void> send(List<ClientPacket> packets);

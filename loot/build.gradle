@@ -1,0 +1,17 @@
+plugins {
+    id("java-test-fixtures")
+}
+
+repositories {
+    maven {
+        name = "minecraft"
+        url = "https://libraries.minecraft.net"
+    }
+}
+
+dependencies {
+    api("net.kyori:adventure-key:5.2.0")
+    api("net.minestom:minestom:2026.10.05-26.2")
+    implementation("com.mojang:datafixerupper:10.0.21")
+    testImplementation("net.minestom:testing:2026.10.05-26.2")
+}

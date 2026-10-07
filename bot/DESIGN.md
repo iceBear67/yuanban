@@ -86,7 +86,8 @@ dependencies {
         └────────────────────────────────────────────────────────────────┘
                 ▲ 已解码的数据包                    │ 待发送的 ClientPacket
                 │                                  ▼
-        入站线程（每个连接一个虚拟线程）       出站（TCP：写线程；对象级：服务端入站线程）
+        入站（TCP：入站线程；                出站（TCP：写线程；
+        对象级：发送数据包的服务端线程）     对象级：调度线程直接交给服务端）
         TCP：字节 → ServerPacket                    │
         区段解码与共享                              ▼
                 ▲                         TcpTransport / EmbeddedTransport
@@ -122,7 +123,7 @@ io.ib67.yuanban.bot
 │                ObservationHost、RegistrationCheck、ObserverFailure
 ├── transport/   Transport、ClientConnection、InboundSink、TcpTransport、TcpConnection、TransportResolver
 ├── transport/embedded/
-│                EmbeddedTransport、EmbeddedPlayerConnection、ServerSideInbound
+│                EmbeddedTransport、EmbeddedPlayerConnection
 ├── scheduler/   Scheduler、BotInstance（Bot 的实现）、BotState、BotTicker、ActionImpl、StateReaderImpl、
 │                BotViewImpl、ObserverHandleImpl、ObservedActionImpl、Waits、WaitPump
 ├── protocol/    ProtocolMachine、Outbox、InboundPacket、BundleBuffer、ChunkBatchTracker、CookieStore
@@ -152,13 +153,15 @@ net.minestom.server.registry
 | 线程 | 数量 | 职责 |
 |---|---|---|
 | 调度线程（平台线程，名为 `yuanban-bot-scheduler-<序号>`） | 每个 `BotRuntime` 一个 | 修改全部 bot 的状态：应用数据包、执行请求、tick、注册与关闭 observer、调用 observer 回调 |
-| 入站线程（虚拟线程） | 每个连接一个 | TCP：从套接字读取并解码数据包；对象级：按 socket 连接写线程的处理顺序处理服务端发出的数据包，服务端的 `PlayerPacketOutEvent` 监听器在这个线程上执行（4.3）；两种连接都做区段解码与共享；结果放进 bot 的入站队列 |
+| 入站线程（虚拟线程） | 每个 TCP 连接一个 | 从套接字读取并解码数据包，做区段解码与共享，结果放进 bot 的入站队列 |
 | TCP 写线程（虚拟线程） | 每个 TCP 连接一个 | 编码待发送的数据包并写入套接字 |
-| 服务端入站线程（虚拟线程） | 每个对象级连接一个 | 在服务端一侧处理 bot 发出的数据包；bot 关闭连接时在这个线程上断开，见 4.3 |
+| 对象级连接的虚拟线程 | 用完就退出，连接没有常驻线程 | 创建玩家（每次登录一个，调度线程等待它结束）；配置（每次登录一个，相当于 Minestom 的 `executeConfig`）；bot 关闭连接时的断开（每次关闭一个）。见 4.3 |
 | 寻路线程（虚拟线程） | 每次寻路一个，算完结束 | 在世界快照上计算路径，见 8.4 |
 | Transfer 线程（虚拟线程） | 每次 Transfer 一个，连接打开后结束 | 打开新连接（TCP 的连接建立会阻塞），见 5.2 |
 
 调度线程为守护线程。`BotRuntime.connect` 在调用线程上打开第一条连接。
+
+对象级连接没有入站线程与写线程：服务端发出的数据包在服务端调用 `sendPacket` 的线程上做区段解码与共享，放进 bot 的入站队列；bot 发出的数据包由调度线程直接交给服务端（4.3）。
 
 #### 3.2 调度循环
 
@@ -171,7 +174,7 @@ net.minestom.server.registry
    - 有新的动作请求、查询、observer 注册或关闭；
    - `BotRuntime` 关闭。
 
-   入站线程与提交请求的线程在放入任务后唤醒调度线程（`LockSupport.unpark`）。
+   入站线程（对象级连接为发送数据包的服务端线程）与提交请求的线程在放入任务后唤醒调度线程（`LockSupport.unpark`）。
 2. **按 bot 的创建顺序处理每个 bot**：
    1. 处理排队中的 observer 注册与关闭（见 11.4）。
    2. 取出入站队列中的全部数据包，按到达顺序交给 `ProtocolMachine` 与世界模型。Bundle 内的数据包一次性处理（见 5.4）。每个数据包（或整个 bundle）处理完后，投递它产生的观察记录（见 11.2）。
@@ -212,7 +215,8 @@ net.minestom.server.registry
 
 ```java
 public interface Transport {
-    /// 打开连接。inbound 接收入站线程解码出的数据包与连接关闭通知。
+    /// 打开连接。inbound 接收连接交出的数据包与连接关闭通知（TCP 连接由入站线程解码后交出，
+    /// 对象级连接在发送数据包的服务端线程上交出）。
     ClientConnection open(String username, InboundSink inbound);
 }
 
@@ -222,8 +226,8 @@ public interface ClientConnection {
     int serverPort();
 
     /// 只由调度线程调用；本轮的数据包一次交出，保持顺序。
-    /// 返回的 future 在数据包交给连接之后完成：TCP 连接在写出到套接字之后，对象级连接在放进服务端入站队列之后；
-    /// 连接在写出之前关闭时以异常完成
+    /// 返回的 future 在数据包交给连接之后完成：TCP 连接在写出到套接字之后，对象级连接在交给服务端之后
+    /// （还没有玩家时由监听器处理完毕，之后放进玩家的数据包队列）；连接在写出之前关闭时以异常完成
     CompletableFuture<Void> send(List<ClientPacket> packets);
 
     /// 关闭连接，不等待对端读取：已经交出的数据包按顺序写出，写到连接不能再立即接受数据为止，没有写出的部分被丢弃，
@@ -232,20 +236,22 @@ public interface ClientConnection {
 }
 
 public interface InboundSink {
-    /// 入站线程按到达顺序交出一个数据包；返回之后 registries() 反映这个数据包带来的注册表变化
+    /// 按到达顺序交出一个数据包，调用不会并发：TCP 连接在入站线程上调用；对象级连接在发送数据包的服务端线程上调用，
+    /// 由连接的锁保证不并发。返回之后 registries() 反映这个数据包带来的注册表变化
     void accept(ServerPacket packet);
 
     /// TCP 编解码数据包时设置到 NetworkBuffer 上的注册表：Finish Configuration 之后为 ClientRegistries，之前为原版注册表。
-    /// 由入站线程与写线程调用
+    /// 由 TCP 连接的入站线程与写线程调用
     Registries registries();
 
-    /// 连接关闭，只调用一次；error 为入站线程或写线程上的异常，正常关闭时为 null
+    /// 连接关闭，只调用一次；error 在 TCP 连接中为入站线程或写线程上的异常，在对象级连接中为 accept 抛出的异常，
+    /// 正常关闭时为 null
     void closed(@Nullable Throwable error);
 }
 ```
 
 - 两种实现：`TcpTransport` 与 `EmbeddedTransport`。
-- bot 给每条连接一个 `InboundSink`：它在入站线程上调用 `DecodeContext`（4.4），把数据包与附加数据放进 bot 的入站队列。Transfer 之后旧连接的数据包与关闭通知被忽略。
+- bot 给每条连接一个 `InboundSink`：它调用 `DecodeContext`（4.4；TCP 连接在入站线程上，对象级连接在发送数据包的服务端线程上），把数据包与附加数据放进 bot 的入站队列。Transfer 之后旧连接的数据包与关闭通知被忽略。
 - `ProtocolMachine` 只面对 `ClientPacket` 与 `ServerPacket` 对象，两种连接共用同一个协议状态机。
 - `TransportResolver` 的接口为 `Transport resolve(String host, int port)`，处理 Transfer 时使用。默认返回 `TcpTransport`，测试可以把特定地址映射到别的 Transport。
 
@@ -278,7 +284,11 @@ public interface InboundSink {
 
 #### 4.3 对象级进程内连接
 
-适用于同一 JVM 中的 Minestom 服务端。连接打开时检查以下前提，不满足立即抛出异常：
+适用于同一 JVM 中的 Minestom 服务端，只用于游戏阶段的玩法测试。登录与配置只保证 bot 能正常进入游戏：重新配置、资源包、Cookie、Login Plugin Request、登录阶段的服务端停止都不在范围内，没有专门处理的代码，也没有验证。bot 照常参与登录与配置，由数据包构建注册表，与 TCP 连接共用核心的登录与配置代码：跳过登录同样要依赖 Minestom 的 `@Internal` 方法，还要修改核心（从配置完成开始的入口、不构建注册表、由连接把 Client Information 交给服务端）；直接读取服务端的注册表时，动态注册表的重新加载与 bot 的读取并发，bot 也会立刻看到原版客户端要等重新配置才能看到的条目。
+
+每条连接没有常驻线程：服务端发出的数据包在服务端调用 `sendPacket` 的线程上处理，bot 发出的数据包在 bot 的调度线程上交给服务端，其余只有用完就退出的虚拟线程（见下文的「线程」）。
+
+连接打开时检查以下前提，不满足立即抛出异常：
 
 - `MinecraftServer.process()` 不为空；
 - `MinecraftServer.process().auth()` 为 `Auth.Offline`；
@@ -289,61 +299,87 @@ public interface InboundSink {
 | 方法 | 实现 |
 |---|---|
 | `getRemoteAddress()` | 返回回环地址加连接序号作为端口 |
-| `getServerAddress()` / `getServerPort()` / `getProtocolVersion()` | 返回 bot 在 Handshake 中发送的值。`PlayerSocketConnection` 在握手时记录这三个值，其它连接类型使用服务端的地址，所以这里自己保存 |
-| `sendPacket(SendablePacket)` | 与 `PlayerSocketConnection.sendPacket` 相同，只把数据包放进队列，不加锁；bot 一侧的入站线程逐个取出，照搬 `PlayerSocketConnection.writePacketSync` 的处理顺序，见下文 |
-| `disconnect()` | 调用 `super.disconnect()`（它负责从 `ConnectionManager` 移除玩家；服务端阶段不是游戏阶段时，它在调用的线程上触发 `PlayerDisconnectEvent`），停止服务端入站线程，然后通知 bot 连接关闭（关闭通知排在已经发出的数据包之后）。服务端断开连接（踢出、超时等）时在服务端的线程上调用；bot 一侧关闭连接的处理见下文 |
+| `sendPacket(SendablePacket)` | 在服务端调用它的线程上照搬 `PlayerSocketConnection.writePacketSync` 的处理顺序，然后持有连接的锁交给 bot，见下文 |
+| `disconnect()` | 调用 `super.disconnect()`（它负责从 `ConnectionManager` 移除玩家；服务端阶段为游戏阶段时安排下一 tick 移除玩家，其它阶段在调用的线程上触发 `PlayerDisconnectEvent`），然后持有连接的锁通知 bot 连接关闭，只通知一次。服务端断开连接（踢出、超时、`ConnectionManager.shutdown`）时在服务端的线程上调用：踢出时的 Disconnect 数据包已经由 `sendPacket` 交给 bot，排在关闭通知之前。bot 一侧关闭连接的处理见下文 |
 | `requestKnownPacks` / `receiveKnownPacksResponse` | 先记下等待回应的 future，再发送 Known Packs 请求（M19，见下文） |
 
-**服务端发出的数据包**：`sendPacket` 只把交来的 `SendablePacket` 放进队列。bot 一侧的入站线程（相当于 socket 连接的写线程）逐个取出，照搬 `writePacketSync` 的处理顺序：
+`getServerAddress()`、`getServerPort()`、`getProtocolVersion()` 不重写，返回 Minestom 对 socket 以外的连接的默认值（服务端自己的地址与端口、服务端的协议号）。
 
-1. 用 `SendablePacket.extractServerPacket(serverState, packet)` 取出 `ServerPacket`；结果为 `null`（`BufferedPacket`）时出错。
-2. 有玩家对象时：有 `PlayerPacketOutEvent` 监听器则触发事件，事件被取消则丢弃这个数据包；`ServerProperties.AUTOMATIC_COMPONENT_TRANSLATION` 开启、并且交来的数据包本身是 `ServerPacket.ComponentHolding` 时翻译文本组件。从 `CachedPacket`、`FramedPacket` 中取出的数据包不翻译，与 `writePacketSync` 的判断相同。
-3. 交来的数据包本身是 `ServerPacket` 时，按 `PacketVanilla.nextServerState` 更新 `serverState`（`setServerState` 为公开方法）；从 `CachedPacket`、`FramedPacket` 中取出的数据包不更新阶段，与 `writePacketSync` 相同（它只在 `ServerPacket` 的分支中更新）。
-4. 数据包为 Login Success 时记录其中的档案。
-5. 把 `ServerPacket` 交给 `InboundSink`。
+**服务端发出的数据包**：`sendPacket` 在服务端调用它的线程上依次执行：
 
-阶段更新只在这一个线程上按队列顺序进行，不需要锁。`PlayerPacketOutEvent` 监听器在这个线程上执行，执行时不持有任何连接的锁：监听器中发给其它连接的数据包只是放进那个连接的队列，两个连接的监听器互相发送数据包不会死锁；发给同一个连接的数据包排在触发它的数据包之后。第 1 到 4 步抛出的异常与 socket 连接的写线程相同：交给 `ExceptionManager`，然后关闭连接（监听器自己抛出的异常由 Minestom 的事件系统交给 `ExceptionManager`，连接不受影响）。
+1. bot 已经收到关闭通知时丢弃。
+2. 当前线程正在为这个连接触发 `PlayerPacketOutEvent` 时（监听器在同一线程上发给同一连接），放进这次触发的暂存列表，然后返回。每个连接用一个 `ThreadLocal` 按线程记录是否正在为它触发事件，以及这次触发的暂存列表。
+3. 用 `SendablePacket.extractServerPacket(serverState, packet)` 取出 `ServerPacket`；结果为 `null`（`BufferedPacket`）时出错。
+4. 有玩家对象时：有 `PlayerPacketOutEvent` 监听器则触发事件，事件被取消则丢弃这个数据包；`ServerProperties.AUTOMATIC_COMPONENT_TRANSLATION` 开启、并且交来的数据包本身是 `ServerPacket.ComponentHolding` 时翻译文本组件。从 `CachedPacket`、`FramedPacket` 中取出的数据包不翻译，与 `writePacketSync` 的判断相同。
+5. 交来的数据包本身是 `ServerPacket` 时，按 `PacketVanilla.nextServerState` 更新 `serverState`（`setServerState` 为公开方法）；从 `CachedPacket`、`FramedPacket` 中取出的数据包不更新阶段，与 `writePacketSync` 相同（它只在 `ServerPacket` 的分支中更新）。数据包为 Login Success 时记录其中的档案。
+6. 持有连接的锁调用 `InboundSink.accept`（解码上下文与区段解码在这里执行，见 4.4）；bot 已经收到关闭通知时丢弃。这把锁只保护交给 bot 的这一步与关闭标记，持有它时不调用任何服务端代码，也不等待任何东西。
+7. 依次处理暂存列表中的数据包，每个都从第 1 步开始（触发它的数据包被取消时同样处理）。监听器在同一线程上发给这个连接的数据包因此排在触发它的数据包之后，与 socket 连接的写线程相同。
 
-**bot 关闭连接**：`ClientConnection.close()` 在服务端入站线程的队列末尾放一个关闭标记，服务端入站线程处理完之前收到的数据包之后调用 `disconnect()`，与 socket 连接中服务端的读取线程读到连接结束时相同。所以 `PlayerDisconnectEvent` 等服务端监听器在服务端入站线程上执行，不在 bot 的调度线程上执行。原因：配置阶段 `disconnect()` 在调用的线程上触发 `PlayerDisconnectEvent`；监听器在调度线程上执行时，如果它等待手动推进的服务端，而推进服务端的测试线程正在等待 bot，两边就互相等待。bot 不等待这个关闭完成。
+`PlayerPacketOutEvent` 监听器执行时不持有任何连接的锁：监听器中发给其它连接的数据包在同一线程上按上面的步骤交给那个连接，两个连接的监听器互相发送数据包不会死锁。第 3 到 5 步抛出的异常与 socket 连接的写线程相同：交给 `ExceptionManager`，然后 `disconnect()`（监听器自己抛出的异常由 Minestom 的事件系统交给 `ExceptionManager`，连接不受影响）。第 6 步 bot 一侧的异常以这个异常结束 bot（`InboundSink.closed(error)`），然后在锁外 `disconnect()`，不交给 `ExceptionManager`。
 
-**服务端进程停止**：Minestom 停止时（`ServerProcess.stop`）只踢出已经创建玩家的连接（`ConnectionManager.shutdown` 遍历 `connectionPlayerMap`）。socket 连接在 Login Acknowledged 之前没有玩家，服务端停止时它的读写线程退出，套接字不被关闭，原版客户端靠 30 秒的读取超时断开；对象级连接没有读取超时，bot 会一直等待。所以 `EmbeddedTransport` 为每个服务端进程登记一个关闭任务（`SchedulerManager.buildShutdownTask`，进程停止时在 `ConnectionManager.shutdown` 之前执行），记录这个进程中还没有关闭的对象级连接：
-
-- 关闭任务执行时，还没有创建玩家的连接被关闭，bot 以连接关闭断开；已经创建玩家的连接仍由 `ConnectionManager.shutdown` 以 `Server shutting down` 踢出。
-- 创建玩家（下文登录流程的第 2 步）与关闭任务互斥：关闭任务执行之后收到的 Login Acknowledged 不再创建玩家，连接被关闭。
-- 关闭任务执行之后在同一个进程中打开的连接立即被关闭。
-- 进程停止之前没有打开过对象级连接时，本库没有为它登记关闭任务，也无法从 Minestom 得知它已经停止（没有调用 `start` 的进程，例如 `net.minestom:testing` 的进程，`isAlive` 始终为 false），之后打开的连接不会被关闭。
+**bot 关闭连接**：`ClientConnection.close()` 在调度线程上持有连接的锁设置关闭标记，调用一次 `InboundSink.closed(null)`，之后服务端发来的数据包都丢弃；然后启动虚拟线程 `yuanban-bot-embedded-disconnect-<序号>` 调用 `disconnect()`。bot 已经收到关闭通知时（服务端先断开，或者交给 bot 时出错）什么都不做，`disconnect()` 已经或者将要由关闭连接的一方调用。游戏阶段 `disconnect()` 安排下一 tick 移除玩家，`PlayerDisconnectEvent` 在 tick 线程上触发。调度线程上不执行服务端代码，原因：配置阶段 `disconnect()` 在调用的线程上触发 `PlayerDisconnectEvent`；监听器在调度线程上执行时，如果它等待手动推进的服务端，而推进服务端的测试线程正在等待 bot，两边就互相等待。bot 不等待这个断开完成。
 
 **Minestom 的缺陷（M19）**：`PlayerConnection.requestKnownPacks` 先发送 Known Packs 请求，再给记录等待回应的字段（不是 volatile）赋值。回应由另一个线程交给 `receiveKnownPacksResponse`，在赋值之前到达时它读到空值，回应被丢弃，`ConnectionManager.doConfiguration` 等到 `KNOWN_PACKS_RESPONSE_TIMEOUT`（默认 5 分钟）之后断开连接。对象级连接重写这两个方法：先记下等待回应的 future，再发送请求（代码标注 `FIXME(Minestom M19)`）。TCP 连接的服务端一侧是 Minestom 的 `PlayerSocketConnection`，本库无法避开：回应要经过服务端的写线程、网络与 bot 的调度线程，通常晚于赋值到达，但没有保证。
 
-**服务端入站线程（`ServerSideInbound`）**：逐个取出 bot 发出的 `ClientPacket`，照搬 `PlayerSocketConnection.processPackets` 的分派规则：
+**bot 发出的数据包**：`ClientConnection.send` 在调度线程上按顺序处理这一批中的每个数据包，处理完之后返回已经完成的 future；连接已经关闭（bot 已经收到关闭通知）时返回以 `ClosedChannelException` 完成的 future，与 TCP 连接相同。每个数据包照搬 `PlayerSocketConnection.processPackets` 与 `readClientPacket` 的分派：
 
-1. 玩家处于创造模式以外的模式时丢弃 `ClientCreativeInventoryActionPacket`（照搬 `readClientPacket`）。
-2. 类型在 `IMMEDIATE_PROCESS_PACKETS` 集合中的数据包交给 `MinecraftServer.getPacketListenerManager().processClientPacket(packet, connection)` 立即处理。这个集合是私有常量，复制为本库的常量。
-3. 其余数据包交给 `player.addPacketToQueue(packet)`，在服务端 tick 中处理。
-4. 处理中抛出的异常照搬 `processPackets`：交给 `ExceptionManager`（受 `SUPPRESS_MISUSED_PACKET_ERROR_LEVEL` 约束），`REJECT_MISUSED_PACKET` 开启时断开连接。
+1. 没有玩家，或者玩家处于创造模式以外的模式时，丢弃 `ClientCreativeInventoryActionPacket`（照搬 `readClientPacket`）。
+2. 还没有玩家时（握手与 LOGIN 阶段）：LOGIN 阶段的 Login Acknowledged 按下文的登录流程处理；其余数据包（Handshake、Login Start 等）交给 `MinecraftServer.getPacketListenerManager().processClientPacket(packet, connection)` 立即处理。socket 连接中这个阶段的数据包同样全部立即处理。
+3. 有玩家之后，交给 `player.addPacketToQueue(packet)`，在服务端 tick 中处理：配置阶段由 `ConnectionManager.tick` 处理 `configurationPlayers` 的数据包队列，游戏阶段由玩家自己的 tick 处理。socket 连接在读取线程上立即处理的 Keep Alive、Cookie Response、Select Known Packs、Finish Configuration 在这里同样放进队列（见下文的已知弱点）。
+4. 第 2、3 步抛出的异常照搬 `processPackets`：开始处理这个数据包时的阶段高于 `SUPPRESS_MISUSED_PACKET_ERROR_LEVEL` 时交给 `ExceptionManager`，`REJECT_MISUSED_PACKET` 开启时 `disconnect()`。
 
 `clientState` 不在这里更新：`processClientPacket` 按收到时的阶段查找监听器，并在调用监听器之前自己更新 `clientState`；队列中的数据包在服务端 tick 中经过同一个方法。`PlayerSocketConnection` 同样不直接设置 `clientState`。
 
 **登录流程**：
 
-- Handshake 与 Login Start 走正常的监听器：`HandshakeListener` 只在 socket 连接上做代理转发与地址记录（本库在交给监听器之前记录握手中的地址、端口与协议号）；`LoginListener.loginStartListener` 在离线模式下调用 `transitionLoginToConfig`，向连接发送 Login Success。
-- LOGIN 阶段收到的 `ClientLoginAcknowledgedPacket` 必须拦截：`LoginListener.loginAckListener` 遇到 `PlayerSocketConnection` 以外的连接类型时抛出 `UnsupportedOperationException("Only socket")`。`processClientPacket` 按收到时的阶段查找监听器，Login Acknowledged 只在 LOGIN 阶段有监听器；其它阶段收到时照常交给 `processClientPacket`，与 Minestom 相同：它按 `nextClientState` 把 `clientState` 改为配置阶段（这个方法不看当前阶段），找不到监听器，只记一条警告。LOGIN 阶段收到时，服务端入站线程照搬 `processClientPacket` 的阶段更新与 `loginAckListener` 的逻辑：
+- Handshake 与 Login Start 在调度线程上走正常的监听器：`HandshakeListener` 只在 socket 连接上做代理转发与地址记录；`LoginListener.loginStartListener` 在离线模式下启动 Minestom 自己的虚拟线程调用 `transitionLoginToConfig`（`enterConfig`），它触发 `AsyncPlayerPreLoginEvent`，然后向连接发送 Login Success。
+- LOGIN 阶段收到的 `ClientLoginAcknowledgedPacket` 必须拦截：`LoginListener.loginAckListener` 遇到 `PlayerSocketConnection` 以外的连接类型时抛出 `UnsupportedOperationException("Only socket")`。`processClientPacket` 按收到时的阶段查找监听器，Login Acknowledged 只在 LOGIN 阶段有监听器；其它阶段收到时照常处理，与 Minestom 相同：`processClientPacket` 按 `nextClientState` 把 `clientState` 改为配置阶段（这个方法不看当前阶段），找不到监听器，只记一条警告。LOGIN 阶段收到时，在调度线程上照搬 `processClientPacket` 的阶段更新与 `loginAckListener`、`executeConfig` 的逻辑：
   1. `setClientState(CONFIGURATION)`；
-  2. 用 bot 一侧的入站线程记录的 Login Success 档案调用 `ConnectionManager.createPlayer(connection, profile)`（`@Internal`）；服务端进程已经停止时不创建玩家，关闭连接（见上文的服务端进程停止）；
-  3. 在新的虚拟线程中调用 `ConnectionManager.doConfiguration(player, true)`（`@Internal`），与 `LoginListener.executeConfig` 相同；
-  4. 出错时与 `loginAckListener` 相同：交给 `ExceptionManager`，以 `Error during login!` 踢出。
-- 之后的配置阶段（Known Packs、Registry Data、Finish Configuration）与进入游戏阶段全部走 Minestom 的正常流程，Known Packs 的请求与回应经过本库重写的两个方法（M19）。
+  2. 在虚拟线程 `yuanban-bot-embedded-login-<序号>` 上用 `sendPacket` 记录的 Login Success 档案调用 `ConnectionManager.createPlayer(connection, profile)`（`@Internal`），调度线程等待这个线程结束。`createPlayer` 断言在虚拟线程上调用；等待结束之后玩家已经存在，处理下一个数据包时与 socket 连接在读取线程上直接创建玩家的顺序相同；
+  3. 启动虚拟线程 `yuanban-bot-embedded-config-<序号>` 调用 `ConnectionManager.doConfiguration(player, true)`（`@Internal`），与 `LoginListener.executeConfig` 相同（配置过程会等待 bot 的回应）；
+  4. 出错时与 `loginAckListener` 相同：交给 `ExceptionManager`，以 `Error during login!` 踢出；配置线程上的异常与 `executeConfig` 相同处理。
+- 之后的配置阶段走 Minestom 的正常流程：Known Packs 的请求经过本库重写的 `requestKnownPacks`（M19）；bot 的回应、brand、Client Information、Finish Configuration 都放进玩家的数据包队列，由 `ConnectionManager.tick` 处理。服务端推进之后 bot 进入游戏。
+
+**线程**：每条连接没有常驻线程。剩下的都是用完就退出的虚拟线程：
+
+- 创建玩家（每次登录一个，调度线程等待它结束）；
+- 配置（每次登录一个，相当于 Minestom 的 `executeConfig`）；
+- bot 关闭连接时的断开（每次关闭一个）；
+- Minestom 自己在 `enterConfig` 中启动的虚拟线程不变。
+
+**服务端代码所在的线程**：
+
+| 服务端代码 | 对象级连接 | socket 连接 |
+|---|---|---|
+| `AsyncPlayerPreLoginEvent` | Minestom 的 `enterConfig` 虚拟线程 | 相同 |
+| `PlayerProvider`（创建玩家） | 本库的创建玩家虚拟线程，调度线程等待 | 读取线程 |
+| `AsyncPlayerConfigurationEvent` | 本库的配置虚拟线程 | Minestom 的 `executeConfig` 虚拟线程 |
+| `PlayerPacketOutEvent` | 调用 `sendPacket` 的线程 | 写线程 |
+| LOGIN 阶段数据包的监听器（`HandshakeListener`、`loginStartListener` 等） | bot 的调度线程 | 读取线程 |
+| 有玩家之后的数据包监听器与 `PlayerPacketEvent` | 服务端 tick 线程 | Keep Alive、Cookie Response、Select Known Packs、Finish Configuration 在读取线程上，其余在 tick 线程上 |
+| `PlayerDisconnectEvent`（游戏阶段） | tick 线程 | 相同 |
+
+**已知弱点**：
+
+1. `PlayerPacketOutEvent` 监听器在发送数据包的线程上执行。发送方持有锁时，监听器在锁内执行；socket 连接中监听器在写线程上，不受发送方的锁影响。
+2. 有玩家之后 bot 发出的数据包全部在服务端 tick 中处理，socket 连接立即处理的数据包因此推迟：Keep Alive 测得的延迟多出至多一个 tick；Select Known Packs 与 Finish Configuration 让进入游戏多用一到两个 tick。进入游戏需要服务端推进，手动推进的服务端要设置 `waitPump`（3.4）或者由测试推进。
+3. LOGIN 阶段数据包的服务端监听器在 bot 的调度线程上执行。
+4. 创建玩家时调度线程等待 `PlayerProvider` 执行完；使用者的 `PlayerProvider` 阻塞时，同一个 `BotRuntime` 中的全部 bot 停住。
+5. 区段解码在服务端发送区块数据的线程上执行（通常是 tick 线程），占用服务端的时间（`SectionPool` 命中时只是查表）；解码期间持有连接的锁，同时给同一个玩家发送数据包的其它服务端线程要等待。
+6. 连接的阶段在各个发送线程上读取与更新，没有同步。游戏阶段中连接的阶段不变；登录与配置期间只有一个线程发送 `CachedPacket` 时阶段才可靠，正常的登录与配置满足这个条件。
+7. 服务端进程在玩家创建之前停止时，连接不会被关闭，bot 一直等待，直到使用者的等待超时或者关闭 `BotRuntime`。玩家创建之后由 `ConnectionManager.shutdown` 以 `Server shutting down` 踢出。
+8. 不在范围内的功能（重新配置、资源包、Cookie、Login Plugin Request）没有专门处理，也没有验证。
+9. 其它前提与差别：`minestom.viewable-packet=false`、`Auth.Offline`；没有编码、帧格式与压缩，序列化问题在这种连接下不会出现；`getServerAddress`、`getServerPort`、`getProtocolVersion` 返回 Minestom 对 socket 以外的连接的默认值。
 
 **bot 一侧**：
 
-- `EmbeddedPlayerConnection.sendPacket` 在服务端的线程上被调用（tick 线程、配置线程等）。为了不占用服务端线程，它只把数据包放进队列，由 bot 一侧的入站线程取出、按上文处理之后交给 `InboundSink`，再放进 bot 的入站队列。
+- `EmbeddedPlayerConnection.sendPacket` 在服务端的线程上被调用（tick 线程、配置线程等），按上文处理之后交给 `InboundSink`，由它放进 bot 的入站队列。
 - 握手中的服务端地址与端口为 `localhost` 与 25565。
-- 对象级连接没有编码、帧格式与压缩，序列化问题在这种连接下不会出现。
 - 服务端是否推进由测试负责（`MinecraftServer.start` 或手动 tick，见 3.4）。
 
 #### 4.4 解码上下文
 
-`DecodeContext` 属于入站线程，按数据包到达顺序维护以下内容。数据包到达调度线程之前，入站线程需要这些信息：
+`DecodeContext` 属于入站线程，按数据包到达顺序维护以下内容。对象级连接没有入站线程：`DecodeContext` 在发送数据包的服务端线程上执行（`InboundSink.accept`，4.3 的第 6 步），由连接的锁保证按到达顺序执行、不并发；本文其它地方所说在入站线程上进行的解码与构建，对象级连接都在这些线程上进行。数据包到达调度线程之前，入站线程需要这些信息：
 
 | 内容 | 用途 | 更新时机 |
 |---|---|---|
@@ -885,7 +921,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 | `inventory().clickButton(int)` / `inventory().close()` | Click Container Button / Close Container（关闭玩家物品栏时窗口编号为 0）；`close` 同时在本地关闭打开的窗口，产生 `WindowClosed`（原版客户端行为） |
 | `send(ClientPacket)` | 任意数据包，用于本库没有封装的操作 |
 
-一次性请求在数据包交给连接（TCP 写出到套接字，对象级交给服务端入站队列）时执行完毕。
+一次性请求在数据包交给连接（TCP 写出到套接字，对象级交给服务端：还没有玩家时由监听器处理完毕，之后放进玩家的数据包队列）时执行完毕。
 
 **快捷栏同步**：手部控制器记录已经发送的快捷栏槽位（原版 `MultiPlayerGameMode.carriedIndex`），每个 tick 开始时与本地的快捷栏槽位比较，不同时发送 Set Held Item（原版 `ensureHasSentCarriedItem`，在 `MultiPlayerGameMode.tick` 中、Player Loaded 之前）。所以服务端用 Set Held Item 改变快捷栏槽位之后，bot 在下一 tick 发回同一个槽位；Respawn 之后快捷栏槽位为 0 时发送 Set Held Item(0)（7.5）。已经发送的槽位在 Login (play) 时归零，Respawn 时不变。
 
@@ -1484,7 +1520,7 @@ assertTrue(damage.observer().damages().isEmpty());
   - 之后对该 bot 的调用（提交动作、注册 observer、查询、等待）立即抛出 `BotFailureException(cause)`。
 
   调度线程是所有 bot 共用的，异常不能让它退出。
-- **入站线程与写线程的异常**（解码失败、注册表构建失败、套接字错误）以同样的方式结束 bot；TCP 读到 EOF 属于正常关闭，按下文的服务端断开处理。寻路线程上的异常在移动动作取回结果时抛出，Transfer 打开新连接失败时在下一轮抛出，同样结束 bot。
+- **连接交出数据包时的异常**（TCP 连接的入站线程与写线程上的解码失败、注册表构建失败、套接字错误；对象级连接在发送数据包的服务端线程上的解码失败与注册表构建失败）以同样的方式结束 bot；TCP 读到 EOF 属于正常关闭，按下文的服务端断开处理。寻路线程上的异常在移动动作取回结果时抛出，Transfer 打开新连接失败时在下一轮抛出，同样结束 bot。
 - observer 的 `onClose` 在连接结束时抛出异常：其余 observer 照常关闭，异常记录为 bot 的失败原因（`Bot.failure()`）。observer 在动作之前关闭（11.4），所以未结束的动作与之后的调用一样，都得到 `BotFailureException`；断开原因仍然记录在 `Bot.disconnectReason()` 中。
 - **服务端断开**：这属于游戏中可能发生的结果，不算程序错误。
   - Disconnect 的原因记录在 `Bot.disconnectReason()` 与各动作 `future()` 的 `BotDisconnectedException` 中；
@@ -1497,7 +1533,7 @@ assertTrue(damage.observer().damages().isEmpty());
 **线程**
 
 - 每个 `BotRuntime` 一个平台线程。
-- 每个 bot 两个虚拟线程（TCP：入站、写；对象级：bot 一侧入站、服务端一侧入站）。
+- 使用 TCP 连接的每个 bot 两个虚拟线程（入站、写）。对象级连接没有常驻线程，只有用完就退出的虚拟线程：每次登录创建玩家与配置各一个，bot 每次关闭连接时断开一个（4.3）。
 - TCP 连接使用 JDK 的 `AsynchronousSocketChannel`，异步读写的完成由 JDK 默认异步通道组的线程处理，整个 JVM 共用这一组线程。
 - 不使用 Netty。
 
@@ -1512,7 +1548,7 @@ assertTrue(damage.observer().damages().isEmpty());
 
 **CPU**
 
-- 帧解码与区段解码在各自的入站线程上完成，调度线程只应用结果。
+- 帧解码与区段解码在调度线程以外完成：TCP 连接在各自的入站线程上，对象级连接的区段解码在发送区块数据的服务端线程上（4.3 的已知弱点 5）。调度线程只应用结果。
 - 寻路在虚拟线程上计算，不占用调度线程。
 - 没有 observer 订阅的观察记录不创建对象（11.11）。
 
@@ -1559,7 +1595,7 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 
 ### 15. 测试
 
-README 规定本库只编写单元测试，不编写端到端测试。对象级连接（4.3 中服务端一侧的处理，包括数据包的处理线程、bot 关闭连接、服务端进程停止与 Known Packs；构造 `EmbeddedPlayerConnection` 就需要服务端进程）与 TCP 连接接入真实服务端的验证不在本库测试中；`VanillaReference` 与服务端进程的先后（6.1）需要在测试 JVM 中创建服务端进程，而其它测试已经让它构造了自己的实例，同样不在本库测试中。测试使用真实输入：
+README 规定本库只编写单元测试，不编写端到端测试。对象级连接（4.3 中服务端一侧的处理，包括 bot 关闭连接与 Known Packs；构造 `EmbeddedPlayerConnection` 就需要服务端进程）与 TCP 连接接入真实服务端的验证不在本库测试中；`VanillaReference` 与服务端进程的先后（6.1）需要在测试 JVM 中创建服务端进程，而其它测试已经让它构造了自己的实例，同样不在本库测试中。测试使用真实输入：
 
 - 数据包为 Minestom 的 record，需要字节时用 Minestom 的序列化器生成（区块数据用 Minestom 的调色板与 `ChunkData.Section` 序列化器生成）；
 - 静态数据与原版注册表取自 Minestom（`VanillaReference`）；

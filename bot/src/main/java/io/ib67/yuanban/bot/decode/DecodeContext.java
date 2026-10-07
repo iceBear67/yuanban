@@ -21,8 +21,9 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 /**
- * 属于入站线程，按数据包到达顺序维护数据包到达调度线程之前需要的信息：
- * 注册表、标签、当前维度的高度与最低 y。
+ * 属于一条连接，按数据包到达顺序维护数据包到达调度线程之前需要的信息：
+ * 注册表、标签、当前维度的高度与最低 y。调用不会并发：TCP 连接在入站线程上调用，
+ * 对象级连接在发送数据包的服务端线程上调用（见 {@link io.ib67.yuanban.bot.transport.InboundSink}）。
  */
 public final class DecodeContext {
     private final ClientRegistriesBuilder builder = new ClientRegistriesBuilder();

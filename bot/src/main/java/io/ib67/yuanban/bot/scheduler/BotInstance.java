@@ -1152,7 +1152,8 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     /**
-     * 一条连接的入站入口：在入站线程上做解码上下文的处理，然后放进 bot 的入站队列
+     * 一条连接的入站入口：做解码上下文的处理，然后放进 bot 的入站队列。调用不会并发，按到达顺序：
+     * TCP 连接在入站线程上调用；对象级连接在发送数据包的服务端线程上调用，由连接的锁保证不并发
      */
     private final class Sink implements InboundSink {
         private final int target;

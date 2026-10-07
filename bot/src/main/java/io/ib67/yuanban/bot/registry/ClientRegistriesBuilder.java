@@ -16,7 +16,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 累积配置阶段的 Registry Data，在收到 Finish Configuration 时构建 {@link ClientRegistries}。在入站线程上使用。
+ * 累积配置阶段的 Registry Data，在收到 Finish Configuration 时构建 {@link ClientRegistries}。
+ * 由解码上下文使用（TCP 连接在入站线程上，对象级连接在发送数据包的服务端线程上）。
  */
 public final class ClientRegistriesBuilder {
     private final Map<Key, List<RegistryDataPacket.Entry>> pending = new LinkedHashMap<>();
