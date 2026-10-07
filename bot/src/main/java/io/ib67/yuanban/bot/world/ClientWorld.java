@@ -9,6 +9,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.nbt.CompoundBinaryTag;
+import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.entity.EntityType;
@@ -355,6 +356,33 @@ public final class ClientWorld implements Block.Getter {
             }
         }
         return block;
+    }
+
+    /**
+     * 包围盒放在 position 时是否与方块的碰撞箱相交（原版 {@code BlockCollisions}）：碰撞箱可以超出所在的格子（例如栅栏），
+     * 所以向四周多检查一格；未加载的区块中没有方块
+     */
+    public boolean collidesWithBlocks(Point position, BoundingBox box) {
+        var minX = (int) Math.floor(position.x() + box.minX()) - 1;
+        var minY = (int) Math.floor(position.y() + box.minY()) - 1;
+        var minZ = (int) Math.floor(position.z() + box.minZ()) - 1;
+        var maxX = (int) Math.floor(position.x() + box.maxX()) + 1;
+        var maxY = (int) Math.floor(position.y() + box.maxY()) + 1;
+        var maxZ = (int) Math.floor(position.z() + box.maxZ()) + 1;
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (!chunkLoaded(x >> 4, z >> 4)) {
+                    continue;
+                }
+                for (int y = minY; y <= maxY; y++) {
+                    var block = getBlock(x, y, z, Condition.TYPE);
+                    if (block.collisionShape().intersectBox(position.sub(x, y, z), box)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**

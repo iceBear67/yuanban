@@ -31,8 +31,12 @@ import net.minestom.server.crypto.FilterMask;
 import net.minestom.server.crypto.LastSeenMessages;
 import net.minestom.server.crypto.MessageSignature;
 import net.minestom.server.crypto.SignedMessageBody;
+import net.minestom.server.collision.BoundingBox;
+import net.minestom.server.entity.EntityPose;
 import net.minestom.server.entity.EntityType;
 import net.minestom.server.entity.GameMode;
+import net.minestom.server.entity.Metadata;
+import net.minestom.server.entity.MetadataDef;
 import net.minestom.server.entity.RelativeFlags;
 import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
@@ -50,6 +54,9 @@ import net.minestom.server.network.packet.server.play.ChunkBiomesPacket;
 import net.minestom.server.network.packet.server.play.DeleteChatPacket;
 import net.minestom.server.network.packet.server.play.DisguisedChatPacket;
 import net.minestom.server.network.packet.server.play.DisplayScoreboardPacket;
+import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
+import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
+import net.minestom.server.network.packet.server.play.EntityPositionSyncPacket;
 import net.minestom.server.network.packet.server.play.EntityTeleportPacket;
 import net.minestom.server.network.packet.server.play.EntityVelocityPacket;
 import net.minestom.server.network.packet.server.play.MultiBlockChangePacket;
@@ -749,5 +756,67 @@ class WorldPacketsTest {
             peer.barrier();
             assertEquals(-90, bot.view().entity(100).position().pitch());
         });
+    }
+
+    @Test
+    void teleportEntityIgnoresTheVelocityAndLocallyControlledEntities() {
+        withBot((peer, bot) -> {
+            // 原版 handleEntityPositionSync：位置、朝向与是否着地取数据包的值，速度不变
+            peer.push(new SpawnEntityPacket(100, UUID.randomUUID(), EntityType.PIG, new Pos(2.5, 0, 2.5), 0, 0, new Vec(0, 0, 1)));
+            peer.push(new EntityPositionSyncPacket(100, new Vec(5, 0, 5), new Vec(1, 1, 1), 30, 10, true));
+            peer.barrier();
+            var pig = bot.view().entity(100);
+            assertEquals(new Pos(5, 0, 5, 30, 10), pig.position());
+            assertTrue(pig.onGround());
+            assertEquals(new Vec(0, 0, 1), pig.velocity());
+
+            // 本地玩家控制的船（原版 isLocalInstanceAuthoritative）不改变；下船之后照常应用
+            var boat = new Pos(1.5, 0, 0.5);
+            peer.push(new SpawnEntityPacket(101, UUID.randomUUID(), EntityType.OAK_BOAT, boat, 0, 0, Vec.ZERO),
+                    new SetPassengersPacket(101, List.of(TestServer.ENTITY_ID)));
+            peer.push(new EntityPositionSyncPacket(101, new Vec(9, 0, 9), Vec.ZERO, 45, 0, true));
+            peer.barrier();
+            assertEquals(boat, bot.view().entity(101).position());
+            assertFalse(bot.view().entity(101).onGround());
+            peer.push(new SetPassengersPacket(101, List.of()),
+                    new EntityPositionSyncPacket(101, new Vec(9, 0, 9), Vec.ZERO, 45, 0, true));
+            peer.barrier();
+            assertEquals(new Pos(9, 0, 9, 45, 0), bot.view().entity(101).position());
+        });
+    }
+
+    @Test
+    void entityBoundingBoxesFollowBabiesAndFixedSizes() {
+        withBot((peer, bot) -> {
+            var scaled = List.of(new EntityAttributesPacket.Property(Attribute.SCALE, 2, List.of()));
+            // 幼年僵尸（原版 Zombie.BABY_DIMENSIONS）；幼年牛按 Cow.BABY_DIMENSIONS 再乘以 scale；
+            // 史莱姆不会是幼年（原版 canBeABaby 为 false），幼年标记被忽略
+            peer.push(spawn(100, EntityType.ZOMBIE), new EntityMetaDataPacket(100, Map.of(MetadataDef.Zombie.IS_BABY.index(), Metadata.Boolean(true))));
+            peer.push(spawn(101, EntityType.COW), new EntityMetaDataPacket(101, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true))),
+                    new EntityAttributesPacket(101, scaled));
+            peer.push(spawn(102, EntityType.SLIME), new EntityMetaDataPacket(102, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true))));
+            // 幼年骆驼坐下（原版 Camel.BABY_SITTING_DIMENSIONS）
+            peer.push(spawn(103, EntityType.CAMEL), new EntityMetaDataPacket(103, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true),
+                    MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SITTING))));
+            // scale 为 2 的玩家：潜行的尺寸乘以 scale，死亡与睡觉为固定尺寸 0.2，不乘；睡觉的村民同样
+            peer.push(spawn(104, EntityType.PLAYER), new EntityAttributesPacket(104, scaled),
+                    new EntityMetaDataPacket(104, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SNEAKING))));
+            peer.push(spawn(105, EntityType.PLAYER), new EntityAttributesPacket(105, scaled),
+                    new EntityMetaDataPacket(105, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.DYING))));
+            peer.push(spawn(106, EntityType.VILLAGER), new EntityAttributesPacket(106, scaled),
+                    new EntityMetaDataPacket(106, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SLEEPING))));
+            peer.barrier();
+            assertEquals(new BoundingBox(0.49, 0.98, 0.49), bot.view().entity(100).boundingBox());
+            assertEquals(new BoundingBox(0.9, 1.4, 0.9), bot.view().entity(101).boundingBox());
+            assertEquals(EntityType.SLIME.boundingBox(), bot.view().entity(102).boundingBox());
+            assertEquals(new BoundingBox(0.95, 0.425, 0.95), bot.view().entity(103).boundingBox());
+            assertEquals(new BoundingBox(1.2, 3.0, 1.2), bot.view().entity(104).boundingBox());
+            assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(105).boundingBox());
+            assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(106).boundingBox());
+        });
+    }
+
+    private static SpawnEntityPacket spawn(int id, EntityType type) {
+        return new SpawnEntityPacket(id, UUID.randomUUID(), type, new Pos(2.5, 0, 2.5), 0, 0, Vec.ZERO);
     }
 }

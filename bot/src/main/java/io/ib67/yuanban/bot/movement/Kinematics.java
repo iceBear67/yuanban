@@ -2,6 +2,7 @@ package io.ib67.yuanban.bot.movement;
 
 import io.ib67.yuanban.bot.ChunkNotLoadedException;
 import io.ib67.yuanban.bot.MovementMode;
+import io.ib67.yuanban.bot.player.Interpolation;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.world.ClientWorld;
@@ -67,7 +68,7 @@ public final class Kinematics {
      * @param sprinting 本地的疾跑状态（{@link MovementController} 按原版的条件决定）
      * @param itemInUse 正在使用的物品的 {@code use_effects} 组件；没有在使用物品时为 null
      * @return 模拟结果
-     * @throws ChunkNotLoadedException 本 tick 的移动范围涉及未加载区块，这时不执行模拟
+     * @throws ChunkNotLoadedException 本 tick 的移动范围涉及未加载区块（见 {@link #checkLoaded}），这时不执行模拟，玩家的状态不改变
      */
     public static PhysicsResult step(LocalPlayer player, ClientWorld world, TagTable tags, MoveIntent intent, boolean sprinting,
                                      @Nullable UseEffects itemInUse) {
@@ -75,7 +76,6 @@ public final class Kinematics {
         var yaw = position.yaw();
         var velocity = player.velocity();
         var boundingBox = player.boundingBox();
-        checkLoaded(world, position, velocity, boundingBox.width());
 
         var attributes = player.attributes();
         var abilities = player.abilities();
@@ -88,9 +88,20 @@ public final class Kinematics {
                 velocity = velocity.add(0, vertical * abilities.flyingSpeed() * 3.0F, 0);
             }
         }
-        // 原版 LivingEntity.aiStep：玩家水平速度的平方小于 9.0E-6 时水平速度归零，竖直速度的绝对值小于 0.003 时归零
-        if (player.noJumpDelay() > 0) {
-            player.noJumpDelay(player.noJumpDelay() - 1);
+        // 原版 LivingEntity.aiStep：玩家水平速度的平方小于 9.0E-6 时水平速度归零，竖直速度的绝对值小于 0.003 时归零。
+        // 起跳延迟先记在局部变量中，移动之前确认区块已加载之后才写回：区块未加载时玩家的状态不改变
+        var noJumpDelay = player.noJumpDelay();
+        if (noJumpDelay > 0) {
+            noJumpDelay--;
+        }
+        // 原版 LivingEntity.aiStep：有正在进行的插值时先插值一步（Synchronize Vehicle Position 指向本地玩家），之后从插值的位置移动。
+        // 插值的状态同样在确认区块已加载之后才写回
+        var interpolation = player.interpolation();
+        Interpolation.Step interpolated = null;
+        if (interpolation != null) {
+            interpolated = interpolation.step(position, target -> noCollision(player, world, target, boundingBox));
+            position = interpolated.position();
+            yaw = position.yaw();
         }
         if (velocity.x() * velocity.x() + velocity.z() * velocity.z() < 9.0E-6) {
             velocity = new Vec(0, velocity.y(), 0);
@@ -109,12 +120,12 @@ public final class Kinematics {
         // 原版 LivingEntity.aiStep：按住跳跃、着地并且起跳延迟为 0 时起跳；飞行时不起跳（isAffectedByFluids 为 false）
         var onGround = player.onGround();
         if (intent.jump() && !flying) {
-            if (onGround && player.noJumpDelay() == 0) {
+            if (onGround && noJumpDelay == 0) {
                 velocity = jumpFromGround(player, world, tags, position, velocity, sprinting);
-                player.noJumpDelay(JUMP_DELAY_TICKS);
+                noJumpDelay = JUMP_DELAY_TICKS;
             }
         } else {
-            player.noJumpDelay(0);
+            noJumpDelay = 0;
         }
 
         // 原版 travelInAir：着地时的摩擦按移动之前脚下的方块读取
@@ -127,6 +138,11 @@ public final class Kinematics {
         var airDragModifier = (float) attributes.value(Attribute.AIR_DRAG_MODIFIER);
         var friction = blockFriction * modifiedFriction(AIR_DRAG, airDragModifier);
         var hasPhysics = player.gameMode() != GameMode.SPECTATOR;
+        checkLoaded(world, position, velocity, boundingBox);
+        player.noJumpDelay(noJumpDelay);
+        if (interpolated != null) {
+            player.interpolation(interpolated.next());
+        }
         // PhysicsUtils 只做移动、碰撞与水平阻力：水平阻力直接给出原版的值（着地标记传 false，它不再按移动之后的位置读取方块摩擦），
         // 不施加重力（重力 0、竖直阻力 1），所以返回的竖直速度就是碰撞之后的竖直速度
         var result = PhysicsUtils.simulateMovement(position, velocity, boundingBox, world.border().toWorldBorder(), world,
@@ -156,6 +172,48 @@ public final class Kinematics {
         player.velocity(new Vec(collided.x() * speedFactor, newY, collided.z() * speedFactor));
         player.previousResult(result);
         return result;
+    }
+
+    /**
+     * 骑乘时的插值：原版乘客的 tick（{@code rideTick} 调用 {@code tick}）中 {@code LivingEntity.aiStep} 照常插值一步，
+     * 位置随后被座位覆盖，朝向保留。没有正在进行的插值时什么都不做
+     */
+    static void interpolate(LocalPlayer player, ClientWorld world) {
+        var interpolation = player.interpolation();
+        if (interpolation == null) {
+            return;
+        }
+        var box = player.boundingBox();
+        var step = interpolation.step(player.position(), target -> noCollision(player, world, target, box));
+        player.position(step.position());
+        player.interpolation(step.next());
+    }
+
+    /**
+     * 原版 {@code InterpolationHandler.interpolate} 中的 {@code level.noCollision}：玩家的包围盒放在 position 时不与方块碰撞
+     * （未加载的区块中没有方块），也不伸进世界边框；与实体的碰撞本库不覆盖（9.5）
+     */
+    private static boolean noCollision(LocalPlayer player, ClientWorld world, Point position, BoundingBox box) {
+        if (world.collidesWithBlocks(position, box)) {
+            return false;
+        }
+        var current = player.position();
+        return !world.border().collides(current.x(), current.z(), position.x() + box.minX(), position.z() + box.minZ(),
+                position.x() + box.maxX(), position.z() + box.maxZ());
+    }
+
+    /**
+     * 原版 {@code Entity.setOnGround}：设置着地标记，并在当前位置按 {@code checkSupportingBlock} 查找支撑方块
+     * （没有本 tick 的移动：找不到、并且上一次不是「着地但没有支撑方块」时保留原来的支撑方块）
+     */
+    public static void setOnGround(LocalPlayer player, ClientWorld world, boolean onGround) {
+        player.movementFlags(onGround, player.horizontalCollision(), player.minorHorizontalCollision());
+        if (!onGround) {
+            player.supportingBlock(null, false);
+            return;
+        }
+        var found = findSupport(world, player.position(), player.boundingBox(), 0, 0);
+        player.supportingBlock(found != null || player.onGroundNoBlocks() ? found : player.supportingBlock(), found == null);
     }
 
     /**
@@ -287,7 +345,8 @@ public final class Kinematics {
     }
 
     /**
-     * 原版 {@code CollisionGetter.findSupportingBlock}：距离相同时取方块坐标较大的一个（先比较 y，再比较 z，最后比较 x）
+     * 原版 {@code CollisionGetter.findSupportingBlock}：距离相同时取方块坐标较大的一个（先比较 y，再比较 z，最后比较 x）。
+     * 与原版 {@code BlockCollisions} 相同，检查范围向四周多一格（碰撞形状可以超出所在的格子），未加载的区块中没有方块
      */
     private static @Nullable Point findSupport(ClientWorld world, Pos position, BoundingBox box, double offsetX, double offsetZ) {
         var area = new BoundingBox(box.width(), SUPPORT_DEPTH, box.depth());
@@ -303,6 +362,9 @@ public final class Kinematics {
         for (int y = minY; y <= maxY; y++) {
             for (int z = minZ; z <= maxZ; z++) {
                 for (int x = minX; x <= maxX; x++) {
+                    if (!world.chunkLoaded(x >> 4, z >> 4)) {
+                        continue;
+                    }
                     var shape = world.getBlock(x, y, z, Block.Getter.Condition.TYPE).collisionShape();
                     if (!shape.intersectBox(areaPosition.sub(x, y, z), area)) {
                         continue;
@@ -338,13 +400,18 @@ public final class Kinematics {
         return world.getBlock(position.blockX(), position.blockY(), position.blockZ(), Block.Getter.Condition.TYPE);
     }
 
-    private static void checkLoaded(ClientWorld world, Pos position, Vec velocity, double width) {
-        // 包围盒按速度扩展，再加上一格读取脚下方块与加速度的余量
-        var margin = width / 2 + 1;
-        var minX = position.x() - margin + Math.min(0, velocity.x());
-        var maxX = position.x() + margin + Math.max(0, velocity.x());
-        var minZ = position.z() - margin + Math.min(0, velocity.z());
-        var maxZ = position.z() + margin + Math.max(0, velocity.z());
+    /**
+     * 移动与碰撞读取的方块所在的区块都已加载：包围盒的水平范围按本 tick 加速之后的速度扩展（{@code PhysicsUtils} 只读取这个范围中的方块，
+     * 移动之后读取的脚下方块与方块速度系数也在其中）
+     *
+     * @param velocity 本 tick 交给 {@code PhysicsUtils} 的速度
+     * @throws ChunkNotLoadedException 范围涉及未加载的区块
+     */
+    private static void checkLoaded(ClientWorld world, Pos position, Vec velocity, BoundingBox box) {
+        var minX = position.x() + box.minX() + Math.min(0, velocity.x());
+        var maxX = position.x() + box.maxX() + Math.max(0, velocity.x());
+        var minZ = position.z() + box.minZ() + Math.min(0, velocity.z());
+        var maxZ = position.z() + box.maxZ() + Math.max(0, velocity.z());
         for (int chunkX = CoordConversion.globalToChunk(minX); chunkX <= CoordConversion.globalToChunk(maxX); chunkX++) {
             for (int chunkZ = CoordConversion.globalToChunk(minZ); chunkZ <= CoordConversion.globalToChunk(maxZ); chunkZ++) {
                 if (!world.chunkLoaded(chunkX, chunkZ)) {

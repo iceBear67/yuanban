@@ -63,7 +63,7 @@ dependencies {
 
 **3. 根目录 `README.md` 与 `MINESTOM-BUG-REPORT.md`**
 
-本库需要绕过 Minestom 的以下限制：6.2 的注册表构建（M8）、4.2 中 TCP 区块数据的方块实体（M10）与 TCP 的分帧和长度上限（M11）、9.6 中骑乘位置使用的实体尺寸与挂点（M12）、15 中测试构造档案时的类初始化循环（M13）、6.1 中物品原型绑定到 JVM 中第一个构造的原版注册表（M17）、7.7 中聊天数据包随数据包给出的聊天类型定义（M18）、4.3 中服务端发送 Known Packs 请求与记录等待回应的先后（M19）、4.4 中生物群系直接调色板的位数（M20）。按这两个文件的约定，在 README 的 *Minestom workarounds* 表格与 `MINESTOM-BUG-REPORT.md` 中各追加对应的条目，后者的标题加上 bot。
+本库需要绕过 Minestom 的以下限制：6.2 的注册表构建（M8）、4.2 中 TCP 区块数据的方块实体（M10）与 TCP 的分帧和长度上限（M11）、7.4 的实体包围盒与 9.6 中骑乘位置使用的实体尺寸与挂点（M12）、15 中测试构造档案时的类初始化循环（M13）、6.1 中物品原型绑定到 JVM 中第一个构造的原版注册表（M17）、7.7 中聊天数据包随数据包给出的聊天类型定义（M18）、4.3 中服务端发送 Known Packs 请求与记录等待回应的先后（M19）、4.4 中生物群系直接调色板的位数（M20）。按这两个文件的约定，在 README 的 *Minestom workarounds* 表格与 `MINESTOM-BUG-REPORT.md` 中各追加对应的条目，后者的标题加上 bot。
 
 **4. `bot/README.md`**
 
@@ -130,8 +130,8 @@ io.ib67.yuanban.bot
 ├── registry/    ClientRegistries、ClientRegistriesBuilder、VanillaReference、TagTable
 ├── world/       ClientWorld、ChunkColumn、SectionRef、SharedSection、WorldSnapshot、
 │                BlockEntityStore、WorldClocks、TickState、WorldBorderState、Weather
-├── entity/      EntityStore、ClientEntity
-├── player/      LocalPlayer、AttributeMap、EffectMap、Abilities、PlayerLoadTracker
+├── entity/      EntityStore、ClientEntity、EntityDimensions
+├── player/      LocalPlayer、AttributeMap、EffectMap、Abilities、PlayerLoadTracker、Interpolation
 ├── movement/    MovementController、MovementAction 及 MoveToAction、MoveForwardAction、JumpToAction、
 │                RotateAction、MoveIntent、Rotation、Kinematics、PathPlanner、PathFollower、
 │                RotationArbiter、MovementSender、SineTable、RidingSeat、VehicleControl
@@ -565,12 +565,13 @@ BotState（调度线程独占）
 
 **每 tick 的实体步骤**（原版 `ClientLevel.tickEntities`，10 的第 4 步）：所在区块已加载、没有乘坐其它实体的实体执行一步，世界冻结并且不在步进中时（原版 `TickRateManager.runsNormally` 为 false）玩家以外、没有玩家乘客（直接或间接，包括本地玩家）的实体除外；乘客在它的载具之后执行，玩家以外的乘客所在的区块也要已加载。本库只模拟这一步中马类的人立动画：元数据中的人立标记（0x20）为真时进度向 1 靠近（`standAnim + ((1 − standAnim) × 0.4 + 0.05)`，不超过 1），否则向 0 回落（`standAnim + ((0.8 × standAnim³ − standAnim) × 0.6 − 0.05)`，不低于 0），以 float 计算。本地玩家不在实体模型中，由移动步骤执行。
 
-各数据包按 wiki 的定义处理（目标为本地玩家实体编号的移动包被忽略，原版客户端行为；速度、元数据、属性、效果写入 `LocalPlayer`）：
+各数据包按 wiki 的定义处理（目标为本地玩家实体编号时，Synchronize Vehicle Position 按下面 `EntityTeleportPacket` 一条中本地玩家的情况处理，其余移动包被忽略，原版客户端行为；速度、元数据、属性、效果写入 `LocalPlayer`）：
 
 - `EntityPositionPacket`、`EntityPositionAndRotationPacket`：位移为 `delta / 4096`。
 - `EntityRotationPacket`、`EntityHeadLookPacket`。
-- `EntityPositionSyncPacket`（wiki 中的 Teleport Entity）：绝对位置、速度、朝向、是否着地。
+- `EntityPositionSyncPacket`（wiki 中的 Teleport Entity）：绝对位置、朝向、是否着地；不使用数据包中的速度，实体的速度不变（原版 `handleEntityPositionSync`）。本地玩家控制的实体（原版 `isLocalInstanceAuthoritative`，控制条件见 9.6）不改变：原版只更新它之后的相对移动所用的基准位置，本库不记录这个基准位置。
 - `EntityTeleportPacket`（wiki 中的 Synchronize Vehicle Position）：位置、朝向与速度按 5.2 中 Synchronize Player Position 的计算得出（原版 `handleTeleportEntity` 与 `handleMovePlayer` 都使用 `PositionMoveRotation.calculateAbsolute`）：按 Teleport Flags 处理相对字段，俯仰角限制到 [-90, 90]，带 ROTATE_DELTA 时旋转当前速度。
+  - 编号是本地玩家自己的（原版本地玩家也在世界的实体中，由 `handleTeleportEntity` 照常处理）：按上面的计算得出新的位置、朝向与速度，速度立即设置。本地玩家所在区块已加载（原版 `isTickingEntity`）或者 X、Y、Z 中有相对字段，并且新位置与当前位置的距离不超过 64 时，位置与朝向在之后的移动计算中插值（原版 `moveOrInterpolateTo`，见 9.1 第 2 步）：正在进行的插值目标相同时继续，否则从当前的位置与朝向开始新的 3 步插值（原版 `InterpolationHandler.interpolateTo`）。其余情况立即设置位置与朝向，正在进行的插值不结束（与原版相同）。然后设置着地标记（原版 `setOnGround`）：顶住墙壁标记不变；着地时按 9.1 第 8 步在当前位置查找支撑方块，这里没有可以退回的位移，找不到并且上一次不是「着地但没有支撑方块」时保留原来的支撑方块；不着地时清除支撑方块。不发送任何数据包。与服务端的其它传送相同，之前 `rotate`、`lookAt` 的朝向不再生效（8.3），清空上一次模拟结果并触发 `moveTo` 重新寻路（8.4、9.2）；立即设置时产生 `PlayerTeleported`，插值时不产生，之后移动计算中的位置变化照常产生 `PlayerMoved`。
 - `EntityVelocityPacket`、`EntityMetaDataPacket`、`EntityEquipmentPacket`、`EntityAttributesPacket`、`EntityEffectPacket`、`RemoveEntityEffectPacket`、`SetPassengersPacket`、`AttachEntityPacket`、`DestroyEntitiesPacket`。
 - `SetPassengersPacket`（原版客户端行为，`handleSetEntityPassengersPacket`）：载具不在模型中时整个数据包被忽略。否则载具现有的乘客全部停止乘坐，然后列出的乘客按顺序乘坐它（原版 `Entity.startRiding`，强制乘坐）：
   - 模型中没有的编号被跳过；已经乘坐这个载具的不重复加入；载具为标记或不祥之物生成器（`couldAcceptPassenger` 为 false）时不乘坐；
@@ -579,10 +580,21 @@ BotState（调度线程独占）
   - 实体乘坐自己时，原版之后的乘坐计算会无限循环，本库让 bot 因异常结束；
   - 本地玩家在列出的乘客中时，清除记下的被移除载具编号；新登上船或竹筏时（之前没有直接或间接乘坐它），偏航角设为船的偏航角。这两项与乘坐是否成功无关。
 - `DestroyEntitiesPacket` 移除实体时（原版 `Entity.setRemoved`）：被移除的实体离开它乘坐的载具（从载具的乘客列表中去掉），它的乘客（包括本地玩家）停止乘坐。所以模型中的乘坐关系只指向存在的实体。
+- `SpawnEntityPacket` 的编号已有实体时（原版 `handleAddEntity` 调用的 `ClientLevel.addEntity` 先移除同一编号的实体）：先按上一条移除旧实体（乘坐关系同样解除，产生旧实体的 `EntityRemoved`），再加入新的实体（产生 `EntitySpawned`）。这种移除不记下本地玩家乘坐过的载具编号：下一条只适用于 Remove Entities。
 - 被移除的实体是本地玩家直接或间接乘坐的实体时，记下它的编号（原版 `handleRemoveEntities` 中的 `removedPlayerVehicleId`）。之后模型中没有这个编号的实体时，对它的 `EntityTeleportPacket`（Synchronize Vehicle Position）应用到本地玩家：按 5.2 中 Synchronize Player Position 的计算设置位置、朝向与速度，然后发送当前位置与朝向的 Set Player Position and Rotation（on ground 与 pushing against wall 为 false），不发送 Confirm Teleportation（原版 `handleTeleportEntity`）；与服务端传送相同，产生 `PlayerTeleported`，不计入移动包的上一次发送记录，清空上一次模拟结果并触发 `moveTo` 重新寻路（8.4、9.2）。记下的编号在这个编号的实体重新生成（Spawn Entity）、本地玩家登上任何载具、离开世界（5.1）时清除。
 - `CollectItemPacket`、`EntityStatusPacket`、`DamageEventPacket`、`HitAnimationPacket` 不改变实体状态，只产生观察记录（见 11.2）。
 
-实体位置保存服务端最后给出的值，不插值。包围盒为 `EntityType` 的宽高乘以 `minecraft:scale` 属性，玩家的潜行、游泳、睡眠高度为原版客户端常量。
+模型中实体（`ClientEntity`）的位置保存服务端最后给出的值，不插值；本地玩家的插值见上面的 `EntityTeleportPacket` 一条。
+
+**包围盒**（`EntityDimensions`，原版 `Entity.getDimensions`、`LivingEntity.getDimensions` 与各实体类的 `getDefaultDimensions`），`lookAt(int entityId)`、`attack`、`interact` 按它计算瞄准点：
+
+- 活体以外的实体：`EntityType` 的宽高。
+- 活体（原版 `LivingEntity`，按 Minestom 的 `EntityType.shouldSendAttributes` 判断：原版只有活体有属性）：睡觉的姿势为固定尺寸 0.2 × 0.2；其余为默认尺寸乘以 `minecraft:scale` 属性，默认尺寸为固定尺寸（原版 `EntityDimensions.fixed`）时不乘。
+- 默认尺寸：玩家与人体模型（原版 `Avatar.POSES`）潜行时 0.6 × 1.5，游泳、滑翔、激流冲刺时 0.6 × 0.6，死亡时为固定尺寸 0.2 × 0.2，其余姿势 0.6 × 1.8；其余实体幼年时取原版各实体类的幼年尺寸（`BABY_DIMENSIONS`，例如僵尸一类与村民 0.49 × 0.98、马为成年尺寸乘 0.7、骆驼坐下时 0.95 × 0.425；没有单独定义的乘 0.5），否则取 `EntityType` 的宽高。
+- 幼年按原版各实体类的 `isBaby` 判断：`AgeableMob` 读取它的幼年标记，其中史莱姆、岩浆怪、鹦鹉、僵尸鹦鹉螺、青蛙、骆驼尸壳不会是幼年（`canBeABaby` 为 false），史莱姆一类（`AbstractCubeMob`）的尺寸与年龄无关；僵尸一类、猪灵、僵尸疣猪兽读取各自的幼年标记；盔甲架为小型盔甲架。
+- 不覆盖其它随状态变化的尺寸：史莱姆一类与幻翼的大小、河豚的膨胀、鲑鱼的大小、成年骆驼坐下、山羊跳跃、北极熊站立、嗅探兽与监守者挖掘、潜影贝、盔甲架的标记、交互实体，以及末影龙、快乐恶魂、潜影贝对 scale 属性的限制（原版 `sanitizeScale`），这些情况取上面的尺寸。
+
+Minestom 的实体类型数据只有成年实体默认姿态的尺寸（M12，见 9.6），幼年与玩家各姿势的尺寸是本库内置的原版 26.2 取值。
 
 #### 7.5 本地玩家
 
@@ -740,7 +752,7 @@ public final class ActionCancelledException extends RuntimeException {
 
 1. 正在运行、需要对准目标的手部动作（挖掘、放置、对方块使用物品、攻击、交互）：看向目标。
 2. 正在运行的 `moveTo`、`moveForward`、`jumpTo`：看向移动方向。
-3. 最近一次 `rotate` 或 `lookAt` 设置的朝向，持续到下一个 `moveTo`、`moveForward`、`jumpTo` 开始，或者服务端设置玩家的朝向（不骑乘时的 Synchronize Player Position、Player Rotation、应用到本地玩家的 Synchronize Vehicle Position）。原版 `handleMovePlayer`、`handleRotatePlayer` 设置的朝向一直保持，所以服务端设置朝向之后，之前 `rotate`、`lookAt` 的朝向不再生效。
+3. 最近一次 `rotate` 或 `lookAt` 设置的朝向，持续到下一个 `moveTo`、`moveForward`、`jumpTo` 开始，或者服务端设置玩家的朝向（不骑乘时的 Synchronize Player Position、Player Rotation、应用到本地玩家的 Synchronize Vehicle Position：编号是被移除的载具的，或者是本地玩家自己的，见 7.4；后者插值时朝向在之后的移动计算中逐步改变）。原版 `handleMovePlayer`、`handleRotatePlayer` 设置的朝向一直保持，所以服务端设置朝向之后，之前 `rotate`、`lookAt` 的朝向不再生效。
 4. 保持上一 tick 的朝向（包括服务端设置的朝向）。
 
 移动方向与朝向互相独立：移动由期望方向向量直接计算（见 9.1），不需要先转身。
@@ -757,7 +769,7 @@ public final class ActionCancelledException extends RuntimeException {
 2. **路径判断**：`PPath.getState()` 只在包内可见，外部无法调用，路径按节点列表判断：
    - **REPATH 节点**：已搜索的节点数达到 `maxDistance × 10` 而开放列表不为空时，`PathGenerator.computePath` 在最近节点之后接一个坐标为 (0, 0, 0)、类型为 `REPATH` 的节点，并且只在它位于第一个时把路径判为无效（`PPath.getCurrentType` 只看下标 0）。所以先去掉第一个 `REPATH` 节点及其之后的节点（目标靠近原点时，Minestom 还会在它之后接上目标节点），剩下的路径一定是不完整的；
    - 列表为空：动作被取消，取消原因为找不到路径；
-   - 去掉过 `REPATH` 节点，或者最后一个节点与目标的水平距离大于 `closeDistance`：只走到最近点（与 Minestom 的 BEST_EFFORT 相同），走完后动作被取消，取消原因为找不到路径；
+   - 去掉过 `REPATH` 节点，或者最后一个节点没有到达目标（第 5 步的到达条件，高度取这个节点的站立高度，见第 3 步）：只走到最近点（与 Minestom 的 BEST_EFFORT 相同），走完后动作被取消，取消原因为找不到路径；
    - 其余情况为完整路径（最后一个节点为目标本身）。
 3. **跟随**（`PathFollower`，每 tick）：
    - **节点的高度**：`GroundNodeGenerator` 的节点高度是整数。它从上往下找到包围盒下方第一层有 `solid()` 方块的格子，节点高度为这一层加一（`gravitySnap`），与方块碰撞箱的实际高度无关：半砖上的节点比半砖顶面高 0.5，楼梯上的节点高度为楼梯所在层加一（下层台阶比它低 0.5），栅栏上的节点比栅栏顶面低 0.5。路径的终点（目标）同样经过 `gravitySnap`。所以跟随时为每个节点计算**站立高度**：在节点的水平位置上，让玩家的包围盒从节点高度加一格处向下移动两格（Minestom 的 `CollisionUtils.handlePhysics`，使用这次寻路的世界快照与玩家包围盒），停下的高度；节点所在层的地毯、雪层等不算 `solid()` 但有碰撞箱的方块也计算在内。到达与起跳都按站立高度判断。
@@ -773,7 +785,7 @@ public final class ActionCancelledException extends RuntimeException {
    - 服务端传送了玩家。
 
    寻路期间（从开始寻路到取回结果的那个 tick）发生的情况同样处理：寻路使用开始时的世界快照与玩家位置，所以这期间的传送让这次的结果作废，取回之后不使用它，直接重新寻路；这期间被改变的方块先记下来，取回结果之后其中有方块在路径上时重新寻路。
-5. **执行完毕**：水平距离进入 `closeDistance`，并且玩家着地。
+5. **执行完毕**：玩家着地，与目标的水平距离进入 `closeDistance`，并且脚部与目标的站立高度相差小于 1（与到达 `WALK` 节点的高度条件相同）。目标的站立高度与路径终点的计算相同：按 Minestom `PathGenerator.generate` 的方式，用 `GroundNodeGenerator.gravitySnap`（最多下落 100 格）把目标的高度换成整数的节点高度，找不到时保持原来的高度，再按第 3 步计算站立高度；每次寻路时用这次的世界快照重新计算。所以站在半砖上时脚部高度 0.5 与目标的站立高度相同，目标在正上方或者正下方的另一层时不算到达。
 
 **`moveForward(double blocks, MoveOptions)`**：
 
@@ -791,7 +803,7 @@ public final class ActionCancelledException extends RuntimeException {
 
 - 在移动队列中轮到它的那个 tick 设置朝向：
   - `rotate` 直接使用给出的偏航角与俯仰角，单位为度，取值含义见 wiki Set Player Rotation。俯仰角不在 [-90, 90] 之内（包括 NaN）时在提交请求时抛出 `IllegalArgumentException`。
-  - `lookAt` 由玩家眼睛位置指向目标计算朝向，公式见 wiki Set Player Rotation。`lookAt(int entityId)` 的目标取该实体包围盒中心；实体不在模型中时动作被取消，取消原因为实体不存在。
+  - `lookAt` 由玩家眼睛位置指向目标计算朝向，公式见 wiki Set Player Rotation。`lookAt(int entityId)` 的目标取该实体包围盒（7.4）的中心；实体不在模型中时动作被取消，取消原因为实体不存在。
   - 朝向只在这个 tick 计算一次，之后玩家或目标实体移动时不再更新。
 - 设置朝向的 tick 结束时执行完毕。没有手部动作占用朝向时（8.3），新朝向由这个 tick 的移动包发出（9.3）。
 - 设置的朝向保持到下一个 `moveTo`、`moveForward`、`jumpTo` 开始，或者服务端设置玩家的朝向（8.3）。
@@ -809,7 +821,7 @@ public final class ActionCancelledException extends RuntimeException {
 - **挖掘延迟**：原版 `MultiPlayerGameMode` 的 `destroyDelay`，跨动作保存。挖掘完成或者瞬间破坏时设为 5，只在「继续」步骤中减少；Login (play) 时归零（新建游戏模式控制器），Respawn 时不变。开始新的挖掘不需要等待，延迟只推迟进度的累加。
 - **开始（第 1 tick）**：
   - 目标方块已经是空气时不发送数据包，直接执行完毕；
-  - 旁观模式不发送任何数据包，直接执行完毕（原版 `startAttack` 在旁观模式下不挖掘、不挥手）；
+  - 旁观模式不挖掘、不挥手，只发送不带实体编号的 Spectator Action，数据包写出即执行完毕（原版 `startAttack` 在旁观模式下点击的不是实体时调用 `MultiPlayerGameMode.spectatorNoAction`）；
   - 主手物品带 `piercing_weapon` 组件（穿刺武器）时不挖掘：发送 Player Action「Stab」（位置 0, 0, 0，面 -Y，序号 0）与 Swing Arm，数据包写出即执行完毕（原版 `startAttack` 在判断目标之前调用 `MultiPlayerGameMode.piercingAttack`）；
   - 冒险模式不能破坏目标（原版 `Player.blockActionRestricted`：不能建造，并且主手为空或者主手物品的 `can_break` 不匹配目标方块）、目标在世界边框之外时，不发送「Started digging」，只发送 Swing Arm，再执行一次「继续」中的挖掘延迟步骤（延迟大于 0 时减一并发送 Swing Arm），然后执行完毕；
   - 能力中有瞬间建造时（原版判断的是能力，与游戏模式无关）发送「Started digging」（带序号）与 Swing Arm，挖掘延迟设为 5，收到确认即执行完毕，不发送「Finished digging」（wiki Player Action）；
@@ -819,6 +831,7 @@ public final class ActionCancelledException extends RuntimeException {
   - 主手拿着穿刺武器时什么都不做，不累加、不挥手（原版 `continueAttack` 不调用 `continueDestroyBlock`）；
   - 目标方块变成空气时不再发送数据包，直接执行完毕；
   - 挖掘延迟大于 0 时减一并发送 Swing Arm，不累加进度；
+  - 能力中有瞬间建造并且目标在世界边框之内时（例如挖掘中收到 Player Abilities 或者游戏模式改成创造模式），走原版 `continueDestroyBlock` 中创造模式的分支：不累加进度，也不看主手物品是否改变，挖掘延迟设为 5，发送带新序号的「Started digging」与 Swing Arm，收到确认即执行完毕；
   - 主手物品与开始挖掘时的物品不同（物品种类或组件不同，原版 `sameDestroyTarget` 用 `ItemStack.isSameItemSameComponents` 比较；例如中途 `selectHotbar`）时，这个 tick 不累加进度，重新开始挖掘（原版 `continueDestroyBlock` 改为调用 `startDestroyBlock`）：
     - 冒险模式不能破坏目标、目标在世界边框之外时什么都不发送，不挥手，下一 tick 再次尝试；
     - 否则先发送「Cancelled digging」（该位置，当前的面，序号 0），再发送带新序号的「Started digging」；本 tick 的进度已经达到 1 时发送 Swing Arm，收到这个序号的确认即执行完毕；否则进度归零，记下现在的主手物品，发送 Swing Arm；
@@ -841,7 +854,8 @@ public final class ActionCancelledException extends RuntimeException {
 - **`placeBlock(Point against, BlockFace face, PlayerHand hand)`**：等同于 `useItemOn`，光标取该面的中心。
 - **`useItemOn(Point pos, BlockFace face, PlayerHand hand, Point cursor)`**：
   - 先看向光标位置（见上）；
-  - 发送 Use Item On（带序号；Inside block 按眼睛是否在方块碰撞箱内计算；World Border Hit 为 false，wiki Use Item On）；
+  - 目标方块在世界边框之外时不发送任何数据包（也不挥手），直接执行完毕（原版 `MultiPlayerGameMode.useItemOn` 返回 FAIL）；
+  - 发送 Use Item On（带序号；World Border Hit 为 false，wiki Use Item On）。Inside block 按原版准星选取方块时的 `VoxelShape.clip` 计算：射线从眼睛出发，沿当前朝向的视线（原版 `Entity.calculateViewVector`），长度为 `block_interaction_range` 与 `entity_interaction_range` 属性中较大的一个（原版 `LocalPlayer.pick`），射线上前进全长千分之一的点在目标方块的轮廓形状之内时为 true。wiki 写的是眼睛在方块的碰撞箱内，原版选取方块使用轮廓形状（`ClipContext.Block.OUTLINE`），本库按原版；
   - 然后发送 Swing Arm（本库不预测交互结果，所以总是发送）；
   - 收到确认即执行完毕。
 - **`useItem(PlayerHand hand[, int holdTicks])`**：
@@ -849,7 +863,7 @@ public final class ActionCancelledException extends RuntimeException {
   - 未指定 `holdTicks` 时，收到确认即执行完毕；
   - 指定 `holdTicks` 时，收到确认后再保持使用状态 `holdTicks` 个 tick，然后发送 Player Action「Shoot arrow / finish eating」，数据包写出即执行完毕。吃完、拉满弓这类结果由用户通过 observer 判断。
   - **正在使用物品**：指定了 `holdTicks` 时，从发送 Use Item 到发送「Shoot arrow / finish eating」（包括被取消时的清理）之间，本地玩家正在使用发送 Use Item 时这只手上的物品：移动按 9.1 减速，不开始疾跑（8.7）。原版只对能够使用的物品（食物、弓等）进入使用状态，本库不预测物品能否使用。
-- **`attack(int entityId)`**：先看向目标实体包围盒中心（见上），发送 Attack 与 Swing Arm，数据包写出即执行完毕。
+- **`attack(int entityId)`**：先看向目标实体包围盒中心（见上），发送 Attack 与 Swing Arm，数据包写出即执行完毕。发送时为旁观模式的，不攻击、不挥手，只发送带这个实体编号的 Spectator Action（原版 `startAttack` 在旁观模式下点击实体时调用 `MultiPlayerGameMode.spectate`）。
 - **`interact(int entityId, PlayerHand hand)`**：
   - 先看向目标（见上）；
   - 发送 Interact：目标偏移取包围盒中心（相对实体位置为 `(0, 高度 / 2, 0)`）；Sneak Key Pressed 取当前移动动作是否为 `SNEAK`；
@@ -900,7 +914,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 `Kinematics` 按原版 `LocalPlayer.aiStep`、`LivingEntity.aiStep`、`Player.travel` 与 `LivingEntity.travelInAir` 的顺序计算一个 tick（原版客户端行为），其中的移动与碰撞交给 Minestom 公开的 `PhysicsUtils.simulateMovement(position, velocity, boundingBox, worldBorder, world, aerodynamics, noGravity, hasPhysics, onGround, flying, previousResult)`：
 
 1. **飞行时的竖直输入**：正在飞行时，跳跃键（本 tick 的期望起跳）使竖直速度加 `3 × 飞行速度`，潜行键（`MovementMode.SNEAK`）使它减同样的值。
-2. **速度归零**：水平速度的平方小于 9.0E-6 时水平速度归零；竖直速度的绝对值小于 0.003 时归零。
+2. **插值与速度归零**：有正在进行的插值时（`Interpolation`，由指向本地玩家自己的 Synchronize Vehicle Position 开始，7.4），先插值一步（原版 `LivingEntity.aiStep` 中的 `InterpolationHandler.interpolate`）：从开始插值或者上一步插值之后本地的位移加到目标位置上，加上之后玩家的包围盒不与方块的碰撞箱相交（`ClientWorld.collidesWithBlocks`，与 7.5 中 `resetPos` 的检查相同，未加载区块中没有方块）、也不与世界边框碰撞（`WorldBorderState.collides`，原版 `noBorderCollision`）时才加（原版 `level.noCollision`；与实体的碰撞不覆盖，9.5），同一期间本地的转向加到目标朝向上；然后位置与俯仰角向目标前进剩余步数分之一，偏航角沿较近的方向前进（原版 `Mth.rotLerp`），朝向按原版 `Entity.setRot` 对 360 取余，俯仰角限制到 [-90, 90]。一次插值共 3 步（原版 `DEFAULT_INTERPOLATION_STEPS`），之后的计算从插值得到的位置与朝向开始。然后水平速度的平方小于 9.0E-6 时水平速度归零；竖直速度的绝对值小于 0.003 时归零。
 3. **输入**：期望方向向量乘以 0.98；正在使用物品时再乘以物品 `use_effects` 组件的速度系数（没有这个组件时为 0.2，原版 `modifyInput`；正在使用物品的定义见 8.5 的 `useItem`）；蹲下（潜行并且不在飞行，原版 `crouching`）时再乘以 `minecraft:sneaking_speed` 属性。
 4. **起跳**（原版 `jumpFromGround`）：期望起跳、着地、不在飞行，并且起跳延迟为 0 时起跳，之后 10 tick 内持续期望起跳也不再起跳（原版 `noJumpDelay`，不期望起跳的 tick 归零）。起跳力为 `(float) jump_strength 属性 × 起跳系数 + 0.1 × 跳跃提升等级`，以 float 计算；起跳力不大于 1.0E-5 时不起跳，否则竖直速度取起跳力与当前竖直速度中较大的一个；疾跑时再沿朝向增加 0.2 的水平速度（正弦与余弦取自 `SineTable`）。起跳系数为脚部所在方块的 `jumpFactor()`，它为 1 时取脚下方块的。
 5. **水平加速**：着地时先读出脚下方块的摩擦 `f = clamp(1 − (1 − friction()) × friction_modifier 属性, 0, 1)`（移动之前读取），不着地时 `f = 1`。加速度为输入乘以：着地时 `movement_speed 属性`（`f` 大于 0.6 时再乘以 `0.21600002 / f³`）；空中飞行时为能力中的飞行速度，疾跑时乘以 2；空中不飞行时为 0.02，疾跑时为 0.026（原版 `getFrictionInfluencedSpeed`、`Player.getFlyingSpeed`）。
@@ -932,12 +946,13 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 
 本库按期望方向向量直接施加加速度，任何方向的速度都等于向前行走的速度，wiki 中的斜向行走数值（4.405 m/s）不适用。
 
-**区块未加载**：本 tick 的移动范围涉及未加载区块时不执行模拟，执行中的移动动作被取消，取消原因为区块未加载。移动范围为玩家包围盒的水平范围按本 tick 的速度扩展，再向四周各加一格（读取脚下方块与加速度的余量）。
+**区块未加载**：本 tick 的移动范围涉及未加载区块时不执行模拟（玩家的任何状态都不改变，包括起跳延迟与插值的进度：它们在确认区块已加载之后才写回），执行中的移动动作被取消，取消原因为区块未加载。移动范围为玩家包围盒（第 2 步插值之后的位置）的水平范围按第 6 步交给 `PhysicsUtils` 的速度（加速与起跳之后）扩展：`PhysicsUtils` 只读取这个范围中的方块，移动之前读取的脚下方块（玩家所在的列或者支撑方块所在的列）与移动之后读取的脚下方块、方块速度系数也都在其中。第 8 步查找支撑方块时按原版 `BlockCollisions` 向包围盒四周多检查一格（碰撞形状可以超出所在的格子，例如伸出的活塞头），其中未加载区块的格子按原版没有方块，不读取。
 
 #### 9.2 服务端施加的位置与速度
 
 - **Synchronize Player Position**：按 5.2 处理。传送的两个应答由协议状态机直接发出，不计入 9.3 的上一次发送记录（原版 `handleMovePlayer` 直接发送的 PosRot 不更新 `xLast`、`yRotLast`、`lastOnGround`、`positionReminder` 等字段），着地与顶住墙壁标记也不变；下一次移动包照常与上一次发送记录比较。
 - **应用到本地玩家的 Synchronize Vehicle Position**（本地玩家乘坐过的实体被移除之后，7.4）：与 Synchronize Player Position 相同地计算与处理，只发送 Set Player Position and Rotation。
+- **指向本地玩家自己的 Synchronize Vehicle Position**（7.4）：速度立即设置；位置与朝向在之后的移动计算中插值（9.1 第 2 步），不插值的情况下立即设置；然后设置着地标记。不发送任何数据包，9.3 的上一次发送记录不变，新的位置与朝向由之后的移动包按 9.3 照常发出。
 - **自己实体编号的 Set Entity Velocity**：替换当前速度。
 - **Player Info Update 把自己改成旁观模式**：玩家列表中自己原来的游戏模式与新的不同、并且新的是旁观模式时，竖直速度清零（原版 `applyPlayerInfoUpdate` 调用 `LocalPlayer.onGameModeChanged`）。原来的游戏模式取更新之前的条目；同一数据包中刚刚由 ADD_PLAYER 加入的条目按原版 `PlayerInfo` 的初始值生存模式计算。Login (play)、Respawn、Game Event 3 改变游戏模式时不清零（原版只在这里调用 `onGameModeChanged`）。
 - **Explosion 中的玩家击退**：加到当前速度上。
@@ -964,7 +979,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 
 **暂停期间停止**（只涉及速度与位置的计算）：
 
-- 9.1 的整个计算都不执行，重力也不生效，位置保持不变；
+- 9.1 的整个计算都不执行（包括第 2 步的插值，指向本地玩家自己的 Synchronize Vehicle Position 开始的插值等到恢复之后才进行），重力也不生效，位置保持不变；
 - 移动队列中的 `moveTo`、`moveForward`、`jumpTo` 不推进，「连续若干 tick 没有进展」的计数也暂停。它们的期望移动方向与 `MovementMode` 保持暂停开始时的值，排在它们后面的动作随之等待。
 - 暂停期间在移动队列中轮到的 `moveTo`、`moveForward`、`jumpTo` 不开始：不寻路，不接管朝向，也不清除 `rotate`、`lookAt` 设置的朝向（8.3）；它留在队首，恢复之后才开始，排在它后面的动作（包括 `rotate`、`lookAt`）随之等待。
 
@@ -1009,8 +1024,8 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 1. 移动队列照常推进，`RotationArbiter` 照常决定朝向（8.3）。
 2. **疾跑**：只有载具可以疾跑（`canSprint()`，载具中只有骆驼）并且由本地玩家控制时才保持或开始疾跑，否则本地停止疾跑（移除疾跑修饰符）。
 3. Player Input 照常在变化时发送（8.7）。
-4. 不执行 `Kinematics`：原版 `rideTick` 在每次乘客 tick 开始时把速度清零，位置随后被 `positionRider` 覆盖。本库把速度设为零，着地与顶住墙壁设为 false（没有移动输入时原版的两个标记也都为 false；有移动输入时本库同样取 false），位置设为座位位置（见下文）。movement suspension 期间位置与速度不变。位置变化时产生 `PlayerMoved`，移动动作照常按位移判断是否被阻挡。
-5. 发送 Set Player Rotation（偏航角、俯仰角、着地、顶住墙壁）；不发送移动包，9.3 的上一次发送记录与 `positionReminder` 不变。
+4. 9.1 的计算只执行其中的插值：原版 `rideTick` 在每次乘客 tick 开始时把速度清零，乘客的 tick 中 `LivingEntity.aiStep` 照常插值一步（9.1 第 2 步），位置随后被 `positionRider` 覆盖。本库把速度设为零，着地与顶住墙壁设为 false（没有移动输入时原版的两个标记也都为 false；有移动输入时本库同样取 false），有正在进行的插值时插值一步（位置随后被座位覆盖，插值得到的朝向保留），位置设为座位位置（见下文）。movement suspension 期间位置与速度不变，也不插值。位置变化时产生 `PlayerMoved`，移动动作照常按位移判断是否被阻挡。
+5. 发送 Set Player Rotation（偏航角、俯仰角，插值时为插值之后的朝向；着地、顶住墙壁）；不发送移动包，9.3 的上一次发送记录与 `positionReminder` 不变。
 6. 本地玩家控制最下层的载具时（原版 `getRootVehicle().isLocalInstanceAuthoritative()`），再发送 Move Vehicle（载具在模型中的位置、偏航角、俯仰角、着地），然后在疾跑状态改变时发送 Player Command。不控制时不发送疾跑的 Player Command，下马之后的第一次移动包之前再发送（8.7）。
 
 **控制载具**（原版各实体的 `getControllingPassenger`）：前提都是本地玩家为载具的第一个乘客。
@@ -1036,7 +1051,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 - 玩家的载具挂点为 (0, 0.6, 0) 乘以玩家的 scale 属性。
 - 载具位置取模型中服务端最后给出的值，不插值（7.4）。
 
-**Minestom 的限制（M12）**：Minestom 的实体类型数据只有成年实体默认姿态的尺寸与挂点，没有幼年与坐下姿态的尺寸和挂点。本库内置原版 26.2 各实体类的取值，代码标注 `FIXME(Minestom M12)`。
+**Minestom 的限制（M12）**：Minestom 的实体类型数据只有成年实体默认姿态的尺寸与挂点，没有幼年与坐下姿态的尺寸和挂点。本库内置原版 26.2 各实体类的取值（这里的座位位置，以及 7.4 的实体包围盒），代码标注 `FIXME(Minestom M12)`。
 
 **不覆盖**：炽足兽行走时乘客的上下起伏。原版按炽足兽每 tick 的位移计算行走动画（`walkAnimation`），这个位移来自客户端对服务端位置的插值，由本地玩家控制时来自客户端对载具的移动模拟；本库不插值实体位置（7.4），也不模拟载具的移动（9.5），没有这个位移。
 
@@ -1060,7 +1075,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
    - 加载之前（原版 `LocalPlayer.tick` 在 `hasClientLoaded` 为 false 时不执行，加载画面也让 `handleKeybinds` 不执行）第 3、5 步不执行。
 3. 手部交互队列推进一步（原版 `handleKeybinds`，在本地玩家的 tick 之前）。这一步发出的数据包排在第 5 步的移动包之前，服务端处理它们时使用的是之前的 tick 发出的朝向，所以需要对准目标的 `useItemOn`、`placeBlock`、`attack`、`interact` 在开始的 tick 只确定朝向，由第 5 步发出，之后的 tick 才在这一步发送数据包（8.5）。动作结束时产生 `ActionCompleted`。
 4. 其它实体执行每 tick 的实体步骤（7.4，原版 `ClientLevel.tickEntities`），与加载状态无关。原版的载具在它的乘客之前执行，所以本地玩家乘坐的载具在第 5 步之前更新。
-5. 移动队列推进一步（暂停时 `moveTo`、`moveForward`、`jumpTo` 不推进，见 9.4）。不骑乘时依次：`RotationArbiter` 确定朝向；决定本地的疾跑状态（8.7）；确定 Player Input 的按键；`Kinematics` 模拟（暂停时跳过）并在着地时停止飞行（9.1，发送 Player Abilities）；发送 Player Input；疾跑状态改变时发送 Player Command；`MovementSender` 发送移动包。骑乘时按 9.6：最下层的载具或者中间的载具所在区块未加载时这一步什么都不做，否则确定朝向、派生 Player Input、设置座位位置、发送 Set Player Rotation，控制载具时再发送 Move Vehicle 与疾跑的 Player Command。位置变化时产生 `PlayerMoved`，动作结束时产生 `ActionCompleted`。
+5. 移动队列推进一步（暂停时 `moveTo`、`moveForward`、`jumpTo` 不推进，见 9.4）。不骑乘时依次：`RotationArbiter` 确定朝向；决定本地的疾跑状态（8.7）；确定 Player Input 的按键；`Kinematics` 模拟（暂停时跳过）并在着地时停止飞行（9.1，发送 Player Abilities）；发送 Player Input；疾跑状态改变时发送 Player Command；`MovementSender` 发送移动包。骑乘时按 9.6：最下层的载具或者中间的载具所在区块未加载时这一步什么都不做，否则确定朝向、派生 Player Input、有正在进行的插值时插值一步、设置座位位置、发送 Set Player Rotation，控制载具时再发送 Move Vehicle 与疾跑的 Player Command。位置变化时产生 `PlayerMoved`，动作结束时产生 `ActionCompleted`。
 6. 这个 tick 正常运行时依次推进 `WorldBorderState`、World Age 加一、`WorldClocks` 按新的 World Age 推进（7.8；原版 `Minecraft.tick` 在 `level.tickEntities` 之后调用 `ClientLevel.tick`）。
 7. 发送 Client Tick End（每个 tick 一次）。
 8. 产生 `BotTicked`。
@@ -1095,7 +1110,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 | | `ChunkLoaded(int x, int z)`、`ChunkUnloaded(int x, int z)` | |
 | | `BlockChanged(Point pos, Block old, Block now)` | Block Update、Update Section Blocks；区块加载与卸载不产生 |
 | | `BlockEntityChanged(Point pos, CompoundBinaryTag nbt)` | 被应用的 Block Entity Data（7.1） |
-| 实体 | `EntitySpawned(EntitySnapshot entity)`、`EntityRemoved(EntitySnapshot last)` | |
+| 实体 | `EntitySpawned(EntitySnapshot entity)`、`EntityRemoved(EntitySnapshot last)` | Spawn Entity 的编号已有实体时，先产生旧实体的 `EntityRemoved`（7.4） |
 | | `EntityMoved(int entityId, Point from, Point to, boolean onGround)` | 每个改变实体位置的数据包；坐标为模型算出的绝对位置 |
 | | `EntityMetadataChanged(int entityId, Map<Integer, Metadata.Entry<?>> changed)` | |
 | | `EntityEquipmentChanged(int entityId, EquipmentSlot slot, ItemStack old, ItemStack now)` | Set Equipment；Set Player Inventory Slot 改变本地玩家的身体护甲与鞍时（7.6），实体编号为本地玩家的 |
@@ -1104,7 +1119,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 | | `ItemPickedUp(int collectedId, int collectorId, int count)` | Pickup Item |
 | 本地玩家 | `PlayerLoaded` | 见 10 |
 | | `PlayerMoved(Pos from, Pos to, boolean onGround)` | 自身模拟或者骑乘的座位（9.6）使位置变化的 tick |
-| | `PlayerTeleported(Pos from, Pos to)` | Synchronize Player Position；应用到本地玩家的 Synchronize Vehicle Position（7.4） |
+| | `PlayerTeleported(Pos from, Pos to)` | Synchronize Player Position；应用到本地玩家的 Synchronize Vehicle Position（7.4：编号是被移除的载具的；或者是本地玩家自己的并且立即设置位置，插值时不产生） |
 | | `HealthChanged(float oldHealth, float health, int food, float saturation)` | Set Health |
 | | `PlayerDied(Component message)` | Combat Death |
 | | `GameModeChanged(GameMode old, GameMode now)` | |
@@ -1557,11 +1572,11 @@ README 规定本库只编写单元测试，不编写端到端测试。对象级�
 |---|---|
 | `decode` | 帧读取：同一次读取中 Set Compression 之后紧跟压缩数据包；超过 Minestom 服务端上限的登录阶段数据包与解压后超过 2097151 字节的数据包照常读出，长度 VarInt 超过 3 个字节、长度为 0、解压出的数据少于声明长度、读完之后有剩余字节时出错，解压出的数据比声明更长时只取声明长度的部分（4.2）；区块数据的方块实体取区段中的方块，名称与方块不同的类型（告示牌）不丢失，类型不一致时忽略；对象级区块只保留发给客户端的 NBT；区段解码与 `SectionPool` 共享；区段字节与解码结果一致；64 个生物群系时按原版的 6 位读出直接调色板，Minestom 写出的 7 位直接调色板让解码出错 |
 | `transport` | TCP 写线程的阶段跟踪、压缩阈值与注册表（带附魔的物品）；`close()` 之前交出的批次照常写出；对端不读取、发送缓冲区已满时 `close()` 丢弃没有交给套接字的数据，连接随即关闭；连接重置时正在写出的批次以异常结束；登录阶段的读取超时 |
-| `protocol` | 登录与配置的发送顺序与内容（握手、Login Start、brand、Client Information、Known Packs 子集）；Set Passengers 拒绝形成循环的乘坐、实体乘坐自己时 bot 结束、跳过未知的乘客、乘客离开原来的载具；5.2 的应答（Ping、Cookie、资源包两种方式、区块批次确认、传送的两个应答）；Bundle 的整批交出与 4096 上限；区块批次确认的数值；cookie 的 5 KiB 上限；Transfer 重新登录并保留 cookie、取消移动队列；Transfer 时 Outbox 中的数据包交给旧连接、不发送清理数据包、新连接上的第一个数据包是 Handshake、同一个 bundle 中之后的数据包被忽略、旧连接写出失败的动作以 `BotDisconnectedException` 结束；重新配置的完整流程（离开世界、取消挖掘不发送清理数据包、配置阶段与 Login (play) 之前不 tick、期间提交的请求在下一个世界执行、`RECONFIGURATION`、新的本地玩家与方块交互序号）；Respawn（同一维度保留世界与方块交互序号、换维度重新创建并且序号从 1 开始、Close Container、Data kept 两个掩码、没有 0x02 时上次发送的 Player Input 与疾跑状态重新开始、Set Held Item(0)）；重复的 Login (play)；传送速度的 ROTATE_DELTA 旋转与 DELTA 标志、应答不计入上一次发送记录；Synchronize Vehicle Position 对实体的速度同样按 ROTATE_DELTA 旋转，俯仰角限制到 [-90, 90]；载具被移除与 Login (play) 时清除乘坐状态；Update Section Blocks 的负数区段坐标；Chunk Biomes；区块方块实体的 NBT；Block Entity Data 只应用到同一类型的方块实体（类型不同、方块没有方块实体、区块没有加载、超出维度高度时忽略）；更新不存在的 Boss Bar 与引用不存在的签名编号时 bot 结束，Login (play) 之后签名缓存重新开始；新玩家的属性基础值；Game Event 3 按游戏模式设置能力（包括可以建造）；未知玩家的 Player Info Update 被忽略；断开之后的动作与查询；Respawn（包括同一维度）之后的第一次 tick 在一个间隔之后；Start Configuration 先发送 Acknowledge Message；Player Chat Message 的全局编号不连续时 bot 结束；Delete Message 去掉还没有告知服务端的已读条目；部分过滤的玩家聊天记录过滤之后的消息正文，完全过滤的不记录、只计入未确认的消息数；发送者不在玩家列表中的玩家聊天记录 `chat.validation_error`、只计入未确认的消息数；`ChatLine` 的聊天类型、发送者名称与目标名称，聊天类型编号为 0 或者不在注册表中时 bot 结束；移除实体时乘客停止乘坐、离开自己的载具，之后对被移除的载具的 Synchronize Vehicle Position 应用到本地玩家，同一编号的实体重新生成之后不再应用；ADD_PLAYER 保留已有条目；移除不存在的 Boss Bar 不产生观察记录；世界冻结时时间与世界边框只在 Step Tick 给出的 tick 推进；世界边框、World Age 与时钟在移动步骤之后推进；时钟属于连接（换维度的 Respawn 之后保留，重新配置之后重新开始），Update Time 按 World Age 的差值与速率推进没有列出的时钟；Player Info Update 改成旁观模式时竖直速度清零；队伍成员互斥与重复创建队伍，移除不在队伍中的成员时 bot 结束；玩家列表新条目的游戏模式为生存模式；重复创建目标时 bot 结束，删除目标时清空指向它的显示位置，Display Objective 指向不存在的目标时清空这个位置；离开世界之后 `joined()`、`loaded()` 等待下一个世界，Respawn 之后 `loaded()` 等待重新加载 |
+| `protocol` | 登录与配置的发送顺序与内容（握手、Login Start、brand、Client Information、Known Packs 子集）；Set Passengers 拒绝形成循环的乘坐、实体乘坐自己时 bot 结束、跳过未知的乘客、乘客离开原来的载具；5.2 的应答（Ping、Cookie、资源包两种方式、区块批次确认、传送的两个应答）；Bundle 的整批交出与 4096 上限；区块批次确认的数值；cookie 的 5 KiB 上限；Transfer 重新登录并保留 cookie、取消移动队列；Transfer 时 Outbox 中的数据包交给旧连接、不发送清理数据包、新连接上的第一个数据包是 Handshake、同一个 bundle 中之后的数据包被忽略、旧连接写出失败的动作以 `BotDisconnectedException` 结束；重新配置的完整流程（离开世界、取消挖掘不发送清理数据包、配置阶段与 Login (play) 之前不 tick、期间提交的请求在下一个世界执行、`RECONFIGURATION`、新的本地玩家与方块交互序号）；Respawn（同一维度保留世界与方块交互序号、换维度重新创建并且序号从 1 开始、Close Container、Data kept 两个掩码、没有 0x02 时上次发送的 Player Input 与疾跑状态重新开始、Set Held Item(0)）；重复的 Login (play)；传送速度的 ROTATE_DELTA 旋转与 DELTA 标志、应答不计入上一次发送记录；Synchronize Vehicle Position 对实体的速度同样按 ROTATE_DELTA 旋转，俯仰角限制到 [-90, 90]；Teleport Entity 不改变实体的速度，本地玩家控制的船不被它移动，下船之后照常应用；实体包围盒的幼年尺寸（僵尸、乘以 scale 的牛、坐下的骆驼，史莱姆的幼年标记被忽略）与玩家、村民的姿势尺寸（潜行乘以 scale，死亡与睡觉为固定尺寸）；载具被移除与 Login (play) 时清除乘坐状态；Update Section Blocks 的负数区段坐标；Chunk Biomes；区块方块实体的 NBT；Block Entity Data 只应用到同一类型的方块实体（类型不同、方块没有方块实体、区块没有加载、超出维度高度时忽略）；更新不存在的 Boss Bar 与引用不存在的签名编号时 bot 结束，Login (play) 之后签名缓存重新开始；新玩家的属性基础值；Game Event 3 按游戏模式设置能力（包括可以建造）；未知玩家的 Player Info Update 被忽略；断开之后的动作与查询；Respawn（包括同一维度）之后的第一次 tick 在一个间隔之后；Start Configuration 先发送 Acknowledge Message；Player Chat Message 的全局编号不连续时 bot 结束；Delete Message 去掉还没有告知服务端的已读条目；部分过滤的玩家聊天记录过滤之后的消息正文，完全过滤的不记录、只计入未确认的消息数；发送者不在玩家列表中的玩家聊天记录 `chat.validation_error`、只计入未确认的消息数；`ChatLine` 的聊天类型、发送者名称与目标名称，聊天类型编号为 0 或者不在注册表中时 bot 结束；移除实体时乘客停止乘坐、离开自己的载具，之后对被移除的载具的 Synchronize Vehicle Position 应用到本地玩家，同一编号的实体重新生成之后不再应用；Spawn Entity 的编号已有实体时先移除旧实体（乘坐关系解除，先产生旧实体的 `EntityRemoved`，不记下本地玩家乘坐过的载具）；ADD_PLAYER 保留已有条目；移除不存在的 Boss Bar 不产生观察记录；世界冻结时时间与世界边框只在 Step Tick 给出的 tick 推进；世界边框、World Age 与时钟在移动步骤之后推进；时钟属于连接（换维度的 Respawn 之后保留，重新配置之后重新开始），Update Time 按 World Age 的差值与速率推进没有列出的时钟；Player Info Update 改成旁观模式时竖直速度清零；队伍成员互斥与重复创建队伍，移除不在队伍中的成员时 bot 结束；玩家列表新条目的游戏模式为生存模式；重复创建目标时 bot 结束，删除目标时清空指向它的显示位置，Display Objective 指向不存在的目标时清空这个位置；离开世界之后 `joined()`、`loaded()` 等待下一个世界，Respawn 之后 `loaded()` 等待重新加载 |
 | `registry` | 用 `Registries.registryDataPackets(VanillaReference.get(), false)` 的输出，以及去掉其中全部 NBT 的输出（与 `excludeVanilla = true` 的内容相同；那里返回的 `CachedPacket` 需要服务端进程才能取出数据包）构建 `ClientRegistries`，编号与原注册表一致；重新配置时清空；同步注册表的标签已创建；条目引用同一注册表中排在后面的条目 |
 | `world` | 写入时复制；快照不受之后写入的影响；加载区域移动后的卸载，加载区域的半径（视距小于 2 时按 2 计算）；高度范围之外与未加载区块；方块实体数据；Chunk Biomes 按原版的位数读出直接调色板；世界边框插值期间范围与碰撞使用上一 tick 的大小，插值结束时静止在目标大小，插值时间小于 0 时第一次推进之后为目标大小 |
-| `movement` | 9.1 的 wiki 数值（包括飞行与疾跑飞行）；使用物品时的减速；缓降、飘浮与 NoGravity；`air_drag_modifier`、`movement_efficiency` 属性；起跳时竖直速度取较大的一个；开始时的速度归零；站在方块边缘时按支撑方块确定脚下方块；着地时停止飞行并发送 Player Abilities；疾跑的开始与停止条件（饥饿值、失明、撞墙）与 Player Input 的疾跑键；`jumpTo` 起跳没有离开地面时执行完毕；寻路跟随（在构造的世界上走完 `WALK`、`JUMP`、`FALL` 节点；按站立高度走上半砖与楼梯，在半砖上行走不起跳，再走下半砖）；找不到路径时停在最近点并以 `NO_PATH` 取消（远离原点、寻路结果末尾带 `REPATH` 节点）；走进未加载区块时以 `CHUNK_NOT_LOADED` 取消；重新寻路三次之后以 `BLOCKED` 取消；寻路期间的传送让结果作废，寻路期间被改变的路径方块在取回结果之后触发重新寻路；`moveForward` 连续被阻挡时取消；`rotate`、`lookAt` 的朝向计算、发送，俯仰角超出 [-90, 90] 或为 NaN 时提交时抛出异常，以及与手部动作朝向的优先级（8.3），服务端用传送或 Player Rotation 设置的朝向不被 `rotate` 留下的朝向改回；movement suspension 的停止与照常项（暂停期间 `rotate` 照常执行，每 20 tick 的位置照常发送；暂停期间轮到的 `moveTo` 不开始，不清除 `rotate` 设置的朝向，排在后面的动作随之等待，恢复之后照常执行）；`jumpTo`（按水平距离选择行走或疾跑，指定移动方式时不按距离选择，起跳后再次着地即执行完毕，与目标顶面中心的水平距离小于 0.1 时原地起跳）；骑乘（座位位置、新登上船时的偏航角、每 tick 的 Set Player Rotation 与 Move Vehicle、不控制矿车、载具或者它下面的载具所在区块未加载时只发送 Client Tick End、下马之后恢复移动包、载具未知的 Set Passengers 被忽略、马在被乘坐之前的人立动画、世界冻结时没有玩家乘客的马不更新人立动画） |
-| `interaction` | `DigSpeed` 与 wiki Breaking 页的公式与示例一致（急迫 II、效率 V 钻石镐瞬间破坏石头）；序号确认；挖掘每个 tick 的 Swing Arm 次数与先后（第 1 tick 两次，Finished digging 与它所在 tick 的 Swing Arm 的先后）；挖掘延迟 5 推迟下一次挖掘的进度；`breakBlock`：确认之前收到 Block Update 时 `broken()` 为 true，只收到确认时为 false，Block Update 只改变方块状态时为 false；`placeBlock` 的字段；`placeBlock` 与 `attack` 的数据包在之前的 tick 已经发出目标朝向之后才发送；`useItem` 的保持与结束；`attack` 的目标不存在时取消；挖掘中更换手持物品时中止并以新的序号重新开始，重新开始的 tick 不累加；主手拿着穿刺武器时发送 Stab，挖掘中换成穿刺武器时不累加、不挥手 |
+| `movement` | 9.1 的 wiki 数值（包括飞行与疾跑飞行）；使用物品时的减速；缓降、飘浮与 NoGravity；`air_drag_modifier`、`movement_efficiency` 属性；起跳时竖直速度取较大的一个；开始时的速度归零；站在方块边缘时按支撑方块确定脚下方块；着地时停止飞行并发送 Player Abilities；疾跑的开始与停止条件（饥饿值、失明、撞墙）与 Player Input 的疾跑键；`jumpTo` 起跳没有离开地面时执行完毕；寻路跟随（在构造的世界上走完 `WALK`、`JUMP`、`FALL` 节点；按站立高度走上半砖与楼梯，在半砖上行走不起跳，再走下半砖）；找不到路径时停在最近点并以 `NO_PATH` 取消（远离原点、寻路结果末尾带 `REPATH` 节点）；目标在正上方或者正下方另一层、没有路径时不算到达，以 `NO_PATH` 取消；走进未加载区块时以 `CHUNK_NOT_LOADED` 取消，包围盒离未加载区块不到一格时背离它的移动照常执行；重新寻路三次之后以 `BLOCKED` 取消；寻路期间的传送让结果作废，寻路期间被改变的路径方块在取回结果之后触发重新寻路；`moveForward` 连续被阻挡时取消；`rotate`、`lookAt` 的朝向计算、发送，俯仰角超出 [-90, 90] 或为 NaN 时提交时抛出异常，以及与手部动作朝向的优先级（8.3），服务端用传送或 Player Rotation 设置的朝向不被 `rotate` 留下的朝向改回；指向本地玩家自己的 Synchronize Vehicle Position 在距离不超过 64 时由之后 3 次移动计算插值到目标的位置与朝向（每一步前进剩余的三分之一、二分之一、全部），不发送 Confirm Teleportation，距离超过 64 时立即设置并产生 `PlayerTeleported`；movement suspension 的停止与照常项（暂停期间 `rotate` 照常执行，每 20 tick 的位置照常发送；暂停期间轮到的 `moveTo` 不开始，不清除 `rotate` 设置的朝向，排在后面的动作随之等待，恢复之后照常执行）；`jumpTo`（按水平距离选择行走或疾跑，指定移动方式时不按距离选择，起跳后再次着地即执行完毕，与目标顶面中心的水平距离小于 0.1 时原地起跳）；骑乘（座位位置、新登上船时的偏航角、每 tick 的 Set Player Rotation 与 Move Vehicle、不控制矿车、载具或者它下面的载具所在区块未加载时只发送 Client Tick End、下马之后恢复移动包、载具未知的 Set Passengers 被忽略、马在被乘坐之前的人立动画、世界冻结时没有玩家乘客的马不更新人立动画） |
+| `interaction` | `DigSpeed` 与 wiki Breaking 页的公式与示例一致（急迫 II、效率 V 钻石镐瞬间破坏石头）；序号确认；挖掘每个 tick 的 Swing Arm 次数与先后（第 1 tick 两次，Finished digging 与它所在 tick 的 Swing Arm 的先后）；挖掘延迟 5 推迟下一次挖掘的进度；`breakBlock`：确认之前收到 Block Update 时 `broken()` 为 true，只收到确认时为 false，Block Update 只改变方块状态时为 false；`placeBlock` 的字段；`placeBlock` 与 `attack` 的数据包在之前的 tick 已经发出目标朝向之后才发送；Inside block 按方块的轮廓形状计算（眼睛在蜘蛛网中时为 true），目标在世界边框之外的 `placeBlock` 什么都不发送；`useItem` 的保持与结束；`attack` 的目标不存在时取消，攻击幼年僵尸时看向它的幼年包围盒的中心；挖掘中更换手持物品时中止并以新的序号重新开始，重新开始的 tick 不累加；主手拿着穿刺武器时发送 Stab，挖掘中换成穿刺武器时不累加、不挥手；旁观模式的挖掘与攻击只发送 Spectator Action（挖掘不带实体编号，攻击带目标实体编号）；挖掘中能力变成瞬间建造时以新的序号发送 Started digging，不再累加 |
 | `inventory` | `InventoryType.getSize()` 与 wiki Inventory 页的第一个主物品栏槽位逐项一致，合成器与讲台的布局；窗口槽位与窗口 0 的同步；点击包字段；每个窗口各自的状态编号与光标；关闭窗口，Close Container 不看窗口编号；Open Horse Screen 只为模型中的马类与鹦鹉螺打开窗口，鹦鹉螺的窗口不看列数；Set Container Slot 与 Set Container Content 的槽位越界时 bot 结束，窗口编号不符时忽略；Set Player Inventory Slot 的下标 41、42 为身体护甲与鞍（`equipment` 与 `EntityEquipmentChanged`），大于 42 的下标被忽略，负数时 bot 结束；选择快捷栏 |
 | `chat` | Checksum 与 wiki 描述的计算方法一致；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending` 只去掉还没有告知服务端的条目；没有显示的消息只计入新增消息数，不计入已读 |
 | `player` | `PlayerLoadTracker`：收到 Game Event 13 之前不发送 Player Loaded，也不超时；之后条件满足，或者自开始等待起超过 30 秒时发送；Respawn 重新开始计时；开始等待之前的 Game Event 13 被忽略 |

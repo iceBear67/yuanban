@@ -13,6 +13,7 @@ import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observer;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.PlayerMoved;
+import io.ib67.yuanban.bot.observe.PlayerTeleported;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.builtin.Observers;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
@@ -37,6 +38,7 @@ import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerPositionPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
+import net.minestom.server.network.packet.client.play.ClientTeleportConfirmPacket;
 import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
 import net.minestom.server.network.packet.client.play.ClientVehicleMovePacket;
 import net.minestom.server.network.packet.server.ServerPacket;
@@ -45,6 +47,7 @@ import net.minestom.server.network.packet.server.play.BlockChangePacket;
 import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
 import net.minestom.server.network.packet.server.play.EntityEffectPacket;
 import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
+import net.minestom.server.network.packet.server.play.EntityTeleportPacket;
 import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
 import net.minestom.server.network.packet.server.play.PlayerPositionAndLookPacket;
 import net.minestom.server.network.packet.server.play.PlayerRotationPacket;
@@ -168,6 +171,38 @@ class MovementBotTest {
     }
 
     @Test
+    void synchronizeVehiclePositionOfThePlayerInterpolates() {
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            bot.await(state -> state.player().onGround(), TIMEOUT);
+            // 指向本地玩家自己的 Synchronize Vehicle Position（原版 handleTeleportEntity）：所在区块已加载、距离不超过 64，
+            // 之后 3 次移动计算插值到目标的位置与朝向（原版 InterpolationHandler），不发送 Confirm Teleportation
+            var moves = bot.observe(Observers.observations(PlayerMoved.class));
+            var teleports = bot.observe(Observers.observations(PlayerTeleported.class));
+            var mark = peer.mark();
+            peer.push(new EntityTeleportPacket(TestServer.ENTITY_ID, new Pos(3.5, 0, 0.5, 90, 0), Vec.ZERO, 0, true));
+            peer.barrier();
+            waitTicks(peer, 4);
+            moves.close();
+            var steps = moves.observer().observations().stream().map(PlayerMoved::to).toList();
+            assertEquals(3, steps.size(), steps::toString);
+            // 每一步前进剩余距离的「剩余步数分之一」：x 为 1.5、2.5、3.5，偏航角为 30、60、90
+            for (int i = 0; i < 3; i++) {
+                assertEquals(1.5 + i, steps.get(i).x(), 1e-6, steps::toString);
+                assertEquals(30 * (i + 1), steps.get(i).yaw(), 1e-4, steps::toString);
+            }
+            assertTrue(peer.sentSince(mark, ClientTeleportConfirmPacket.class).isEmpty());
+
+            // 距离超过 64：立即设置位置，产生 PlayerTeleported
+            peer.push(new EntityTeleportPacket(TestServer.ENTITY_ID, new Pos(100.5, 0, 0.5, 0, 0), Vec.ZERO, 0, true));
+            peer.barrier();
+            assertEquals(100.5, bot.view().player().position().x(), 1e-9);
+            teleports.close();
+            assertEquals(1, teleports.observer().observations().size());
+        });
+    }
+
+    @Test
     void moveToOnFlatGround() {
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (_, bot) -> {
@@ -242,6 +277,38 @@ class MovementBotTest {
     }
 
     @Test
+    void moveToComparesTheHeightWithTheTarget() {
+        // 目标在正上方的方块顶上，没有路径可以上去：水平距离为 0 也没有到达，以 NO_PATH 取消
+        withBot(new Pos(0.5, 0, 0.5), (x, z, chunk) -> {
+            if (x == 0 && z == 0) {
+                chunk.set(0, 3, 0, Block.STONE);
+            }
+        }, (_, bot) -> {
+            bot.await(state -> state.player().onGround(), TIMEOUT);
+            var up = bot.moveTo(new Vec(0.5, 4, 0.5));
+            assertFalse(up.await(TIMEOUT));
+            assertEquals(ActionCancelledException.NO_PATH,
+                    assertThrows(CompletionException.class, () -> up.future().join()).getCause().getMessage());
+            assertEquals(0, bot.view().player().position().y(), 1e-6);
+        });
+        // 目标在正下方另一层（y = 2 的石头地板下面）
+        withBot(new Pos(0.5, 3, 0.5), (_, _, chunk) -> {
+            for (int bx = 0; bx < 16; bx++) {
+                for (int bz = 0; bz < 16; bz++) {
+                    chunk.set(bx, 2, bz, Block.STONE);
+                }
+            }
+        }, (_, bot) -> {
+            bot.await(state -> state.player().onGround(), TIMEOUT);
+            var down = bot.moveTo(new Vec(0.5, 0, 0.5));
+            assertFalse(down.await(TIMEOUT));
+            assertEquals(ActionCancelledException.NO_PATH,
+                    assertThrows(CompletionException.class, () -> down.future().join()).getCause().getMessage());
+            assertEquals(3, bot.view().player().position().y(), 1e-6);
+        });
+    }
+
+    @Test
     void moveToFallsFromALedge() {
         withBot(new Pos(0.5, 2, 0.5), (x, z, chunk) -> {
             if (x == 0) {
@@ -305,6 +372,20 @@ class MovementBotTest {
             assertEquals(ActionCancelledException.CHUNK_NOT_LOADED,
                     assertThrows(CompletionException.class, () -> forward.future().join()).getCause().getMessage());
             assertTrue(bot.view().player().position().x() < 64);
+        });
+    }
+
+    @Test
+    void movingNextToAnUnloadedChunkIsNotCancelled() {
+        // 已加载的区块为 x 方向的 -1 到 1（方块 -16 到 31）；包围盒离未加载的区块只有 0.2 格。
+        // 移动范围是包围盒按本 tick 的速度扩展，背离未加载区块的移动照常执行；查找支撑方块时未加载区块中的格子没有方块
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            peer.push(new PlayerPositionAndLookPacket(2, new Pos(-15.5, 0, 0.5), Vec.ZERO, 0, 0, 0));
+            peer.barrier();
+            var forward = bot.moveForward(2, MoveOptions.builder().direction(new Vec(1, 0, 0)).build());
+            assertTrue(forward.await(TIMEOUT), () -> forward.future().toString());
+            assertTrue(bot.view().player().position().x() >= -13.5 - 1e-6, () -> bot.view().player().position().toString());
         });
     }
 
@@ -638,13 +719,16 @@ class MovementBotTest {
             assertEquals(0.5625 / 3 - 0.6, player.position().y(), 1e-9);
             assertEquals(0.5, player.position().z(), 1e-9);
             assertEquals(90, player.position().yaw());
-            // 每 tick 发送 Set Player Rotation（两个标记为 false）与 Move Vehicle，不发送移动包
+            // 每 tick 发送 Set Player Rotation（两个标记为 false）与 Move Vehicle，不发送移动包。
+            // bot 仍在运行：各种数据包的数量从同一次读取的列表中统计，一个 tick 的数据包总是一起交给连接
             var sent = peer.sentSince(mark);
             assertTrue(sent.stream().noneMatch(packet -> packet instanceof ClientPlayerPositionPacket
                     || packet instanceof ClientPlayerPositionAndRotationPacket), sent::toString);
-            var rotations = peer.sentSince(mark, ClientPlayerRotationPacket.class);
-            var vehicleMoves = peer.sentSince(mark, ClientVehicleMovePacket.class);
-            var ticks = peer.sentSince(mark, ClientTickEndPacket.class).size();
+            var rotations = sent.stream().filter(ClientPlayerRotationPacket.class::isInstance)
+                    .map(ClientPlayerRotationPacket.class::cast).toList();
+            var vehicleMoves = sent.stream().filter(ClientVehicleMovePacket.class::isInstance)
+                    .map(ClientVehicleMovePacket.class::cast).toList();
+            var ticks = sent.stream().filter(ClientTickEndPacket.class::isInstance).count();
             assertEquals(ticks, rotations.size());
             assertEquals(ticks, vehicleMoves.size());
             assertFalse(rotations.getFirst().onGround());

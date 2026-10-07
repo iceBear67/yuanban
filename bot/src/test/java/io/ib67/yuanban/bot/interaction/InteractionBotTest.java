@@ -11,6 +11,8 @@ import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.EntityType;
 import net.minestom.server.entity.GameMode;
+import net.minestom.server.entity.Metadata;
+import net.minestom.server.entity.MetadataDef;
 import net.minestom.server.entity.PlayerHand;
 import net.minestom.server.instance.block.Block;
 import net.minestom.server.instance.block.BlockFace;
@@ -24,16 +26,21 @@ import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerBlockPlacementPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
+import net.minestom.server.network.packet.client.play.ClientSpectatorActionPacket;
 import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
 import net.minestom.server.network.packet.client.play.ClientUseItemPacket;
 import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
 import net.minestom.server.network.packet.server.play.BlockChangePacket;
+import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
+import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
 import net.minestom.server.network.packet.server.play.SetSlotPacket;
 import net.minestom.server.network.packet.server.play.SpawnEntityPacket;
+import net.minestom.server.network.packet.server.play.WorldBorderSizePacket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 
@@ -210,13 +217,47 @@ class InteractionBotTest {
             assertTrue(peer.sentSince(mark, ClientPlayerActionPacket.class).isEmpty());
             assertEquals(1, peer.sentSince(mark, ClientAnimationPacket.class).size());
         });
-        // 旁观模式什么都不发送
+    }
+
+    @Test
+    void spectatorsSendSpectatorActionInsteadOfDiggingOrAttacking() {
+        // 原版 startAttack：旁观模式不挖掘、不攻击、不挥手，点击方块时发送不带实体编号的 Spectator Action，点击实体时带它的编号
         withBot(GameMode.SPECTATOR, (peer, bot) -> {
             var mark = peer.mark();
             assertTrue(bot.attemptBreakBlock(new Vec(1, -1, 0)).await(TIMEOUT));
             peer.barrier();
+            assertEquals(List.of(new ClientSpectatorActionPacket(null)), peer.sentSince(mark, ClientSpectatorActionPacket.class));
             assertTrue(peer.sentSince(mark, ClientPlayerActionPacket.class).isEmpty());
             assertTrue(peer.sentSince(mark, ClientAnimationPacket.class).isEmpty());
+
+            peer.push(new SpawnEntityPacket(100, UUID.randomUUID(), EntityType.ZOMBIE, new Pos(3, 0, 0.5), 0, 0, Vec.ZERO));
+            mark = peer.mark();
+            assertTrue(bot.attack(100).await(TIMEOUT));
+            peer.barrier();
+            assertEquals(List.of(new ClientSpectatorActionPacket(100)), peer.sentSince(mark, ClientSpectatorActionPacket.class));
+            assertTrue(peer.sentSince(mark, ClientAttackPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ClientAnimationPacket.class).isEmpty());
+        });
+    }
+
+    @Test
+    void instantBreakWhileDiggingTakesTheCreativeBranch() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            bot.await(state -> state.player().onGround(), TIMEOUT);
+            var mark = peer.mark();
+            var dig = bot.attemptBreakBlock(new Vec(1, -1, 0));
+            assertEquals(1, awaitDigging(peer, mark, ClientPlayerActionPacket.Status.STARTED_DIGGING).sequence());
+            // 挖掘中能力变成瞬间建造：原版 continueDestroyBlock 走创造模式的分支，不再累加进度，
+            // 以新的序号发送 Started digging 与 Swing Arm，收到确认即执行完毕
+            peer.push(new PlayerAbilitiesPacket((byte) 0x08, 0.05f, 0.1f));
+            var restarted = peer.awaitSent(mark, ClientPlayerActionPacket.class,
+                    packet -> packet.status() == ClientPlayerActionPacket.Status.STARTED_DIGGING && packet.sequence() == 2, TIMEOUT);
+            peer.push(new AcknowledgeBlockChangePacket(2));
+            assertTrue(dig.await(TIMEOUT));
+            peer.barrier();
+            var sent = peer.sentSince(mark);
+            assertEquals(new ClientAnimationPacket(PlayerHand.MAIN), sent.get(sent.indexOf(restarted) + 1));
+            assertEquals(2, peer.sentSince(mark, ClientPlayerActionPacket.class).size(), sent::toString);
         });
     }
 
@@ -277,6 +318,28 @@ class InteractionBotTest {
         });
     }
 
+    @Test
+    void useItemOnUsesTheOutlineForInsideBlockAndChecksTheBorder() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            // 眼睛 (0.5, 1.62, 0.5) 在蜘蛛网中：蜘蛛网没有碰撞箱，轮廓形状为整格。原版选取方块使用轮廓形状，Inside block 为 true
+            peer.push(new BlockChangePacket(new Vec(0, 1, 0), Block.COBWEB));
+            var mark = peer.mark();
+            var use = bot.useItemOn(new Vec(0, 1, 0), BlockFace.TOP, PlayerHand.MAIN, new Vec(0.5, 0.5, 0.5));
+            var placement = peer.awaitSent(mark, ClientPlayerBlockPlacementPacket.class, TIMEOUT);
+            assertTrue(placement.insideBlock());
+            peer.push(new AcknowledgeBlockChangePacket(placement.sequence()));
+            assertTrue(use.await(TIMEOUT));
+
+            // 目标方块在世界边框之外（直径 2，范围 [-1, 1)）：原版 useItemOn 返回 FAIL，什么都不发送
+            peer.push(new WorldBorderSizePacket(2));
+            mark = peer.mark();
+            assertTrue(bot.placeBlock(new Vec(1, -1, 0), BlockFace.TOP, PlayerHand.MAIN).await(TIMEOUT));
+            peer.barrier();
+            assertTrue(peer.sentSince(mark, ClientPlayerBlockPlacementPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ClientAnimationPacket.class).isEmpty());
+        });
+    }
+
     /**
      * packet 之前最后一个带朝向的移动包的朝向为 rotation，并且两者之间至少隔着一个 Client Tick End
      */
@@ -333,6 +396,15 @@ class InteractionBotTest {
             assertEquals(new ClientAnimationPacket(PlayerHand.MAIN), sent.get(sent.indexOf(attack) + 1));
             // 僵尸包围盒中心为 (3, 0.975, 0.5)：先看向它，服务端收到朝向之后再攻击（击退方向取攻击者的朝向）
             assertAimedBefore(sent, attack, Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(3, 0.975, 0.5)));
+
+            // 幼年僵尸的包围盒为原版 Zombie.BABY_DIMENSIONS（0.49 × 0.98），中心为 (3, 0.49, 0.5)
+            peer.push(new SpawnEntityPacket(101, UUID.randomUUID(), EntityType.ZOMBIE, new Pos(3, 0, 0.5), 0, 0, Vec.ZERO),
+                    new EntityMetaDataPacket(101, Map.of(MetadataDef.Zombie.IS_BABY.index(), Metadata.Boolean(true))));
+            mark = peer.mark();
+            assertTrue(bot.attack(101).await(TIMEOUT));
+            sent = peer.sentSince(mark);
+            var babyAttack = sent.stream().filter(ClientAttackPacket.class::isInstance).findFirst().orElseThrow();
+            assertAimedBefore(sent, babyAttack, Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(3, 0.49, 0.5)));
         });
     }
 }

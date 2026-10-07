@@ -14,6 +14,7 @@ import net.minestom.server.instance.block.BlockFace;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.network.packet.client.play.ClientAnimationPacket;
 import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
+import net.minestom.server.network.packet.client.play.ClientSpectatorActionPacket;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -21,7 +22,8 @@ import org.jetbrains.annotations.Nullable;
  * {@code MultiPlayerGameMode} 的挖掘逻辑执行。第 1 tick 为开始的 tick：
  * <ul>
  *     <li>目标为空气时直接执行完毕，不发送数据包；</li>
- *     <li>旁观模式不发送任何数据包；主手拿着穿刺武器时不挖掘，发送 Stab 与 Swing Arm，数据包写出即执行完毕；</li>
+ *     <li>旁观模式不挖掘，只发送不带实体编号的 Spectator Action；主手拿着穿刺武器时不挖掘，发送 Stab 与 Swing Arm；
+ *     这两种情况数据包写出即执行完毕；</li>
  *     <li>冒险模式不能破坏目标、目标在世界边框之外时不发送 Started digging，只发送 Swing Arm，
  *     再执行一次「继续」中的挖掘延迟步骤；这几种情况随即执行完毕；</li>
  *     <li>能力中有瞬间破坏时发送 Started digging（带序号）与 Swing Arm，挖掘延迟设为 5；
@@ -29,7 +31,8 @@ import org.jetbrains.annotations.Nullable;
  *     <li>其余情况发送 Started digging 与 Swing Arm，然后在同一 tick 执行一次「继续」。</li>
  * </ul>
  * 「继续」在之后的每个 tick 执行：主手拿着穿刺武器时什么都不做；目标变成空气时直接执行完毕，不发送数据包；
- * 挖掘延迟大于 0 时减一并发送 Swing Arm，不累加进度；主手物品与开始挖掘时不同时重新开始挖掘（{@link #restart}）；
+ * 挖掘延迟大于 0 时减一并发送 Swing Arm，不累加进度；能力中有瞬间破坏并且目标在世界边框之内时，挖掘延迟设为 5，
+ * 以新的序号发送 Started digging 与 Swing Arm，收到确认即执行完毕；主手物品与开始挖掘时不同时重新开始挖掘（{@link #restart}）；
  * 否则累加进度，达到 1 时先发送 Finished digging（带序号），挖掘延迟设为 5，再发送 Swing Arm，收到确认即执行完毕；未达到时只发送 Swing Arm。
  */
 public final class DigTask extends HandAction {
@@ -59,8 +62,14 @@ public final class DigTask extends HandAction {
         var player = state.player();
         var world = state.world();
         var block = world.getBlock(position, Block.Getter.Condition.NONE);
-        if (block.air() || player.gameMode() == GameMode.SPECTATOR) {
+        if (block.air()) {
             handle.succeed();
+            return;
+        }
+        // 原版 startAttack：旁观模式不挖掘、不挥手，目标不是实体时发送不带实体编号的 Spectator Action（spectatorNoAction）
+        if (player.gameMode() == GameMode.SPECTATOR) {
+            state.outbox().send(new ClientSpectatorActionPacket(null));
+            state.outbox().completeWhenWritten(handle);
             return;
         }
         // 原版 startAttack：主手拿着穿刺武器时不挖掘，调用 MultiPlayerGameMode.piercingAttack 发送 Stab，然后挥手
@@ -122,6 +131,16 @@ public final class DigTask extends HandAction {
         if (controller.destroyDelay() > 0) {
             controller.destroyDelay(controller.destroyDelay() - 1);
             swing(state);
+            return;
+        }
+        // 原版 continueDestroyBlock：能力中有瞬间建造并且目标在世界边框之内时走创造模式的分支，不累加进度，也不看主手物品是否改变：
+        // 挖掘延迟设为 5，以新的序号发送 Started digging，调用方随后挥手；收到确认即执行完毕
+        if (state.player().abilities().instantBreak() && state.world().border().withinBounds(position.blockX(), position.blockZ())) {
+            controller.destroyDelay(HandController.DESTROY_DELAY_TICKS);
+            var sequence = controller.sequence().next();
+            state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.STARTED_DIGGING, position, face, sequence));
+            swing(state);
+            awaitAcknowledgement(controller, sequence);
             return;
         }
         // 原版 sameDestroyTarget：主手物品（物品与组件）与开始挖掘时不同就不是同一个挖掘目标

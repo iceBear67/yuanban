@@ -57,8 +57,22 @@ public final class PathFollower {
      * 节点所在层还可以有地毯、雪等不算 {@code solid()} 但有碰撞箱的方块，所以从加一格处开始；开始时已经与包围盒相交的碰撞箱被忽略
      */
     static double standingHeight(PNode node, Block.Getter blocks, BoundingBox boundingBox) {
-        return CollisionUtils.handlePhysics(blocks, boundingBox, new Pos(node.x(), node.y() + 1, node.z()), new Vec(0, -2, 0),
+        return standingHeight(node.x(), node.y(), node.z(), blocks, boundingBox);
+    }
+
+    /**
+     * 节点坐标为 (x, y, z) 时的站立高度，见 {@link #standingHeight(PNode, Block.Getter, BoundingBox)}
+     */
+    static double standingHeight(double x, double y, double z, Block.Getter blocks, BoundingBox boundingBox) {
+        return CollisionUtils.handlePhysics(blocks, boundingBox, new Pos(x, y + 1, z), new Vec(0, -2, 0),
                 null, false).newPosition().y();
+    }
+
+    /**
+     * 第 index 个节点的站立高度
+     */
+    double standingHeight(int index) {
+        return standingHeights[index];
     }
 
     public boolean finished() {

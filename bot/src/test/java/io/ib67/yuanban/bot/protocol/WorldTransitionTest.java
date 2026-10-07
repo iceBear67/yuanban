@@ -12,6 +12,8 @@ import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.observe.BotTicked;
+import io.ib67.yuanban.bot.observe.EntityRemoved;
+import io.ib67.yuanban.bot.observe.EntitySpawned;
 import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observer;
 import io.ib67.yuanban.bot.observe.ObserverContext;
@@ -84,6 +86,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -92,6 +95,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -636,6 +640,48 @@ class WorldTransitionTest {
             peer.barrier();
             assertEquals(8.5, bot.view().entity(411).position().x(), 1e-9);
             assertEquals(6.5, bot.view().player().position().x(), 1e-9);
+        });
+    }
+
+    @Test
+    void spawningAnExistingIdRemovesTheOldEntityFirst() throws Exception {
+        withBot(_ -> {
+        }, (peer, bot) -> {
+            var instance = (BotInstance) bot;
+            // 本地玩家乘坐船 420，船乘坐矿车 421
+            peer.push(new SpawnEntityPacket(421, UUID.randomUUID(), EntityType.MINECART, new Pos(2.5, 0, 0.5), 0, 0, Vec.ZERO),
+                    new SpawnEntityPacket(420, UUID.randomUUID(), EntityType.OAK_BOAT, new Pos(2.5, 0, 0.5), 0, 0, Vec.ZERO),
+                    new SetPassengersPacket(421, List.of(420)),
+                    new SetPassengersPacket(420, List.of(TestServer.ENTITY_ID)));
+            peer.barrier();
+            var changes = new CopyOnWriteArrayList<Observation>();
+            var handle = bot.observe(new Observer() {
+                @Override
+                public Subscription subscription() {
+                    return Subscription.of(EntityRemoved.class, EntitySpawned.class);
+                }
+
+                @Override
+                public void onObservation(Observation observation, ObserverContext context) {
+                    changes.add(observation);
+                }
+            });
+            // 同一编号再次生成（原版 ClientLevel.addEntity）：先移除旧的船，它离开矿车，本地玩家停止乘坐
+            peer.push(new SpawnEntityPacket(420, UUID.randomUUID(), EntityType.PIG, new Pos(4.5, 0, 0.5), 0, 0, Vec.ZERO));
+            peer.barrier();
+            handle.close();
+            assertEquals(2, changes.size(), changes::toString);
+            assertEquals(EntityType.OAK_BOAT, assertInstanceOf(EntityRemoved.class, changes.get(0)).last().type());
+            assertEquals(EntityType.PIG, assertInstanceOf(EntitySpawned.class, changes.get(1)).entity().type());
+            assertNull(bot.inspect(_ -> instance.state().player().vehicle()));
+            assertTrue(bot.view().entity(421).passengers().isEmpty());
+            assertNull(bot.view().entity(420).vehicle());
+
+            // 只有 Remove Entities 记下本地玩家乘坐过的载具：移除新的实体之后，这个编号的 Synchronize Vehicle Position
+            // 不应用到本地玩家
+            peer.push(new DestroyEntitiesPacket(List.of(420)), new EntityTeleportPacket(420, new Pos(9.5, 0, 0.5), Vec.ZERO, 0, false));
+            peer.barrier();
+            assertNotEquals(9.5, bot.view().player().position().x(), 1e-9);
         });
     }
 }

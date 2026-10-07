@@ -9,6 +9,7 @@ import io.ib67.yuanban.bot.decode.DecodedChunk;
 import io.ib67.yuanban.bot.decode.SectionDecoder;
 import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.inventory.InventoryModel;
+import io.ib67.yuanban.bot.movement.Kinematics;
 import io.ib67.yuanban.bot.movement.RidingSeat;
 import io.ib67.yuanban.bot.movement.SineTable;
 import io.ib67.yuanban.bot.observe.ActionBarShown;
@@ -43,6 +44,7 @@ import io.ib67.yuanban.bot.observe.WorldEntered;
 import io.ib67.yuanban.bot.observe.WorldEntryCause;
 import io.ib67.yuanban.bot.observe.WorldInfo;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationDispatcher;
+import io.ib67.yuanban.bot.player.Interpolation;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
@@ -61,7 +63,6 @@ import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.minestom.server.MinecraftServer;
-import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
@@ -394,14 +395,7 @@ public final class ProtocolMachine {
                     entity.headYaw(headLook.yaw());
                 }
             }
-            case EntityPositionSyncPacket sync -> {
-                var entity = otherEntity(sync.entityId());
-                if (entity != null) {
-                    entity.velocity(sync.delta().asVec());
-                    var position = sync.position();
-                    entityMoved(entity, new Pos(position.x(), position.y(), position.z(), sync.yaw(), sync.pitch()), sync.onGround());
-                }
-            }
+            case EntityPositionSyncPacket sync -> positionSync(sync);
             case EntityTeleportPacket teleport -> teleportEntity(teleport);
             case EntityVelocityPacket velocity -> {
                 if (velocity.entityId() == state.player().entityId()) {
@@ -804,37 +798,13 @@ public final class ProtocolMachine {
         var maxY = world.minY() + world.height() - 1;
         for (double y = position.y(); y > world.minY() && y <= maxY; y++) {
             position = position.withY(y);
-            if (!collidesWithBlocks(world, position, player.boundingBox())) {
+            if (!world.collidesWithBlocks(position, player.boundingBox())) {
                 break;
             }
         }
         player.position(position.withPitch(0));
         player.velocity(Vec.ZERO);
         player.health((float) player.attributes().value(Attribute.MAX_HEALTH), player.food(), player.saturation());
-    }
-
-    private static boolean collidesWithBlocks(ClientWorld world, Pos position, BoundingBox box) {
-        // 碰撞箱可以超出所在的格子（例如栅栏），所以向四周多检查一格
-        var minX = (int) Math.floor(position.x() + box.minX()) - 1;
-        var minY = (int) Math.floor(position.y() + box.minY()) - 1;
-        var minZ = (int) Math.floor(position.z() + box.minZ()) - 1;
-        var maxX = (int) Math.floor(position.x() + box.maxX()) + 1;
-        var maxY = (int) Math.floor(position.y() + box.maxY()) + 1;
-        var maxZ = (int) Math.floor(position.z() + box.maxZ()) + 1;
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                if (!world.chunkLoaded(x >> 4, z >> 4)) {
-                    continue;
-                }
-                for (int y = minY; y <= maxY; y++) {
-                    var block = world.getBlock(x, y, z, Block.Getter.Condition.TYPE);
-                    if (block.collisionShape().intersectBox(position.sub(x, y, z), box)) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     private void installChunk(DecodedChunk chunk) {
@@ -938,10 +908,22 @@ public final class ProtocolMachine {
 
     // 实体
 
+    /**
+     * Spawn Entity（原版 {@code handleAddEntity}）：这个编号已有实体时，先按 {@code ClientLevel.addEntity} 移除它
+     * （{@code setRemoved}，乘坐关系的处理与 Remove Entities 相同，产生 {@code EntityRemoved}），但不记下被移除的载具编号
+     * （只有 {@code handleRemoveEntities} 记下），然后加入新的实体
+     */
     private void spawnEntity(SpawnEntityPacket spawn) {
         // 原版 handleAddEntity：这个编号的实体重新出现，之后的数据包不再应用到本地玩家
         if (Objects.equals(removedPlayerVehicle, spawn.entityId())) {
             removedPlayerVehicle = null;
+        }
+        var old = world().entities().remove(spawn.entityId());
+        if (old != null) {
+            stopRiding(old);
+            if (observations.wants(EntityRemoved.class)) {
+                observations.emit(new EntityRemoved(old.snapshot()));
+            }
         }
         var entity = new ClientEntity(spawn.entityId(), spawn.uuid(), spawn.type(), spawn.data(), spawn.position(),
                 spawn.headRot(), spawn.velocity());
@@ -983,11 +965,28 @@ public final class ProtocolMachine {
     }
 
     /**
+     * Teleport Entity（原版 {@code handleEntityPositionSync}）：设置绝对位置、朝向与是否着地，不使用数据包中的速度。
+     * 由本地玩家控制的实体（原版 {@code isLocalInstanceAuthoritative}）不改变：原版只更新相对移动的基准位置，本库不记录它
+     */
+    private void positionSync(EntityPositionSyncPacket sync) {
+        var entity = otherEntity(sync.entityId());
+        if (entity == null || bot.movement().controlledLocally(entity)) {
+            return;
+        }
+        var position = sync.position();
+        entityMoved(entity, new Pos(position.x(), position.y(), position.z(), sync.yaw(), sync.pitch()), sync.onGround());
+    }
+
+    /**
      * Synchronize Vehicle Position（原版 {@code handleTeleportEntity}）：位置、朝向与速度按 Synchronize Player Position 的计算得出
      * （{@link #calculateAbsolute}：相对字段、俯仰角限制到 [-90, 90]、带 ROTATE_DELTA 时旋转当前速度）。
-     * 实体不在模型中、并且是被移除的本地玩家乘坐过的实体时，应用到本地玩家
+     * 实体不在模型中、并且是被移除的本地玩家乘坐过的实体时，应用到本地玩家；编号是本地玩家自己的时见 {@link #teleportLocalPlayer}
      */
     private void teleportEntity(EntityTeleportPacket teleport) {
+        if (teleport.entityId() == state.player().entityId()) {
+            teleportLocalPlayer(teleport);
+            return;
+        }
         var entity = otherEntity(teleport.entityId());
         if (entity == null) {
             if (Objects.equals(removedPlayerVehicle, teleport.entityId())) {
@@ -1000,6 +999,35 @@ public final class ProtocolMachine {
                 target.yaw(), target.pitch(), teleport.flags());
         entity.velocity(absolute.velocity());
         entityMoved(entity, absolute.position(), teleport.onGround());
+    }
+
+    /**
+     * 原版 {@code handleTeleportEntity} 中实体是本地玩家的情况（原版本地玩家在世界的实体中）：按 {@link #calculateAbsolute} 得出
+     * 新的位置、朝向与速度，速度立即设置。本地玩家所在区块已加载（原版 {@code isTickingEntity}）或者 X、Y、Z 中有相对字段，
+     * 并且新位置与当前位置的距离不超过 64 时，位置与朝向在之后的移动计算中插值（{@link Interpolation}，原版 {@code moveOrInterpolateTo}）；
+     * 否则立即设置位置与朝向，产生 {@code PlayerTeleported}。然后设置着地标记（原版 {@code setOnGround}）。不发送任何数据包。
+     * 与服务端的其它传送相同，之前 rotate、lookAt 设置的朝向不再生效，清空上一次的模拟结果并触发 moveTo 重新寻路
+     */
+    private void teleportLocalPlayer(EntityTeleportPacket teleport) {
+        var player = state.player();
+        var old = player.position();
+        var target = teleport.position();
+        var absolute = calculateAbsolute(old, player.velocity(), target, teleport.delta(), target.yaw(), target.pitch(), teleport.flags());
+        var relative = (teleport.flags() & (RelativeFlags.X | RelativeFlags.Y | RelativeFlags.Z)) != 0;
+        var ticking = world().chunkLoaded(old.chunkX(), old.chunkZ());
+        var interpolate = (ticking || relative) && old.distanceSquared(absolute.position()) <= 4096.0;
+        player.velocity(absolute.velocity());
+        if (interpolate) {
+            player.interpolation(Interpolation.start(player.interpolation(), old, absolute.position()));
+        } else {
+            player.position(absolute.position());
+        }
+        Kinematics.setOnGround(player, world(), teleport.onGround());
+        bot.movement().onServerRotation();
+        bot.movement().onTeleport();
+        if (!interpolate && observations.wants(PlayerTeleported.class)) {
+            observations.emit(new PlayerTeleported(old, absolute.position()));
+        }
     }
 
     private void entityMoved(ClientEntity entity, Pos to, boolean onGround) {

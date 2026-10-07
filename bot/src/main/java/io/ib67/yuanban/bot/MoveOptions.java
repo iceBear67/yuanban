@@ -21,7 +21,7 @@ public final class MoveOptions {
      */
     private final @Nullable MovementMode mode;
     /**
-     * {@code moveTo} 判断到达的水平距离
+     * {@code moveTo} 判断到达的水平距离；高度另外要求脚部与目标的站立高度相差小于 1
      */
     @Builder.Default
     private final double closeDistance = 0.5;

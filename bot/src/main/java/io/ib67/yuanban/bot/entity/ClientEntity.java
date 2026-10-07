@@ -8,7 +8,6 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityPose;
 import net.minestom.server.entity.EntityType;
 import net.minestom.server.entity.EquipmentSlot;
 import net.minestom.server.entity.Metadata;
@@ -170,35 +169,14 @@ public final class ClientEntity {
     }
 
     /**
-     * 包围盒：{@link EntityType} 的宽高乘以 {@code minecraft:scale} 属性；玩家按姿势使用原版客户端的尺寸
+     * 包围盒：按原版的姿势、幼年与固定尺寸计算，活体的非固定尺寸乘以 {@code minecraft:scale} 属性，见 {@link EntityDimensions}
      */
     public BoundingBox boundingBox() {
-        double width = type.width();
-        double height = type.height();
-        if (type == EntityType.PLAYER) {
-            var pose = snapshotMeta(MetadataDef.POSE);
-            switch (pose) {
-                case SNEAKING -> height = 1.5;
-                case SWIMMING, FALL_FLYING, SPIN_ATTACK -> height = 0.6;
-                case SLEEPING, DYING -> {
-                    width = 0.2;
-                    height = 0.2;
-                }
-                default -> {
-                }
-            }
-        }
-        var scale = attributes.value(Attribute.SCALE);
-        return new BoundingBox(width * scale, height * scale, width * scale);
+        return EntityDimensions.boundingBox(type, metadata, attributes.value(Attribute.SCALE));
     }
 
     public EntitySnapshot snapshot() {
         return new EntitySnapshot(id, uuid, type, data, position, headYaw, velocity, onGround,
                 metadata, equipment, attributes.values(), effects, vehicle, passengers, leashHolder, boundingBox());
-    }
-
-    private EntityPose snapshotMeta(MetadataDef.Entry<EntityPose> entry) {
-        var value = metadata.get(entry.index());
-        return value == null ? entry.defaultValue() : (EntityPose) value.value();
     }
 }

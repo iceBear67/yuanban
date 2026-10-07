@@ -125,6 +125,27 @@ public final class WorldBorderState {
     }
 
     /**
+     * 原版 {@code CollisionGetter.noBorderCollision} 的反面：位于 (x, z) 的实体在边框之内并且靠近边框（{@code isInsideCloseToBorder}：
+     * 到最近一边的距离小于包围盒宽度的 2 倍，范围放宽包围盒宽度，宽度至少为 1），并且包围盒伸进边框的碰撞形状
+     * （范围向外取整之后的外侧，{@code getCollisionShape}）时为 true
+     *
+     * @param minX 包围盒的最小 x，其余参数同理
+     */
+    public boolean collides(double x, double z, double minX, double minZ, double maxX, double maxZ) {
+        var half = boundsSize / 2;
+        var borderMinX = limit(centerX - half);
+        var borderMaxX = limit(centerX + half);
+        var borderMinZ = limit(centerZ - half);
+        var borderMaxZ = limit(centerZ + half);
+        var size = Math.max(Math.max(Math.abs(maxX - minX), Math.abs(maxZ - minZ)), 1.0);
+        var distance = Math.min(Math.min(x - borderMinX, borderMaxX - x), Math.min(z - borderMinZ, borderMaxZ - z));
+        var close = distance < size * 2.0 && x >= borderMinX - size && x < borderMaxX + size
+                && z >= borderMinZ - size && z < borderMaxZ + size;
+        return close && (minX < Math.floor(borderMinX) || maxX > Math.ceil(borderMaxX)
+                || minZ < Math.floor(borderMinZ) || maxZ > Math.ceil(borderMaxZ));
+    }
+
+    /**
      * 交给 {@code PhysicsUtils} 计算碰撞的边框：直径为范围判断使用的大小（插值期间为上一 tick 的大小，原版的碰撞形状同样由它得出）
      */
     public WorldBorder toWorldBorder() {

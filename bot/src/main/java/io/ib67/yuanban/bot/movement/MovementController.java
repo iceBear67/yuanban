@@ -140,6 +140,13 @@ public final class MovementController {
     }
 
     /**
+     * 本地玩家是否控制这个实体（原版 {@code isLocalInstanceAuthoritative}，条件见 {@link VehicleControl}）
+     */
+    public boolean controlledLocally(ClientEntity entity) {
+        return VehicleControl.controlledBy(entity, state);
+    }
+
+    /**
      * 新的本地玩家（Login (play)、Respawn）：移动包的上一次发送记录重新开始。
      * keepInput 为 false 时上一次发送的 Player Input 为空、疾跑状态为 false（Respawn 带 Data kept 0x02 时保留）
      */
@@ -291,7 +298,8 @@ public final class MovementController {
      *     <li>Player Input 照常在变化时发送；不执行移动模拟，速度清零（原版 {@code rideTick}），着地与顶住墙壁为 false；</li>
      *     <li>每 tick 发送 Set Player Rotation；本地玩家控制最下层的载具时，再发送载具在模型中的位置、朝向与着地（Move Vehicle），
      *     然后在疾跑状态改变时发送 Player Command；不控制时不发送疾跑的 Player Command，下马之后的第一次移动包之前再发送；</li>
-     *     <li>位置设为座位位置（{@link RidingSeat}），不发送移动包，移动包的上一次发送记录不变；
+     *     <li>位置设为座位位置（{@link RidingSeat}），不发送移动包，移动包的上一次发送记录不变；有正在进行的插值时先插值一步
+     *     （{@link Kinematics#interpolate}，位置随后被座位覆盖，朝向保留，Set Player Rotation 发送插值之后的朝向）；
      *     movement suspension 期间位置与速度不变。</li>
      * </ul>
      */
@@ -304,6 +312,7 @@ public final class MovementController {
             var from = player.position();
             player.velocity(Vec.ZERO);
             player.previousResult(null);
+            Kinematics.interpolate(player, state.world());
             var to = RidingSeat.seat(vehicle, player, state.world().worldAge());
             player.position(to);
             if (!from.samePoint(to) && state.observations().wants(PlayerMoved.class)) {
@@ -313,7 +322,8 @@ public final class MovementController {
                 moving.afterMove(this, from, to, player.onGround());
             }
         }
-        state.outbox().send(new ClientPlayerRotationPacket(rotation.yaw(), rotation.pitch(), false, false));
+        var look = player.position();
+        state.outbox().send(new ClientPlayerRotationPacket(look.yaw(), look.pitch(), false, false));
         var root = vehicle;
         while (root.vehicle() != null) {
             var below = (int) root.vehicle();

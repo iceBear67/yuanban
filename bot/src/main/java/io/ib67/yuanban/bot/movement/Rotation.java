@@ -1,6 +1,7 @@
 package io.ib67.yuanban.bot.movement;
 
 import net.minestom.server.coordinate.Point;
+import net.minestom.server.coordinate.Vec;
 
 /**
  * 朝向，单位为度，取值含义见 wiki Set Player Rotation。
@@ -24,5 +25,18 @@ public record Rotation(float yaw, float pitch) {
      */
     public static Rotation horizontal(double x, double z) {
         return new Rotation((float) -Math.toDegrees(Math.atan2(x, z)), 0);
+    }
+
+    /**
+     * 视线方向的单位向量（原版 {@code Entity.calculateViewVector}：以 float 计算，正弦与余弦取自 {@link SineTable}）
+     */
+    public Vec viewVector() {
+        var pitchRadians = pitch * (float) (Math.PI / 180.0);
+        var yawRadians = -yaw * (float) (Math.PI / 180.0);
+        var yawCos = SineTable.cos(yawRadians);
+        var yawSin = SineTable.sin(yawRadians);
+        var pitchCos = SineTable.cos(pitchRadians);
+        var pitchSin = SineTable.sin(pitchRadians);
+        return new Vec(yawSin * pitchCos, -pitchSin, yawCos * pitchCos);
     }
 }

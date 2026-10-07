@@ -22,12 +22,13 @@ import java.util.UUID;
  *
  * @param data        Spawn Entity 的附加数据
  * @param position    位置与朝向（身体）
- * @param velocity    服务端最后给出的速度
+ * @param velocity    Spawn Entity、Set Entity Velocity、Synchronize Vehicle Position 最后给出的速度（原版不使用 Teleport Entity 中的速度）
  * @param metadata    元数据，按索引；通过 {@link #meta(MetadataDef.Entry)} 读取命名条目
  * @param effects     药水效果，{@link Potion#duration()} 为收到时的持续时间
  * @param vehicle     乘坐的实体；没有乘坐时为 null
  * @param leashHolder 拴住它的实体（Link Entities）；没有时为 null
- * @param boundingBox 包围盒，宽高为 {@link EntityType} 的宽高乘以 {@code minecraft:scale} 属性
+ * @param boundingBox 包围盒：活体按原版的姿势、幼年与固定尺寸计算，非固定尺寸乘以 {@code minecraft:scale} 属性；
+ *                    其余实体为 {@link EntityType} 的宽高
  */
 public record EntitySnapshot(int entityId, UUID uuid, EntityType type, int data,
                              Pos position, float headYaw, Vec velocity, boolean onGround,

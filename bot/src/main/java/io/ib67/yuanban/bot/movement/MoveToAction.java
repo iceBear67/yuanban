@@ -8,7 +8,6 @@ import io.ib67.yuanban.bot.world.WorldSnapshot;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
-import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.pathfinding.PNode;
 import org.jetbrains.annotations.Nullable;
 
@@ -18,7 +17,8 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * {@code moveTo}：在寻路线程上寻路，然后沿路径移动。水平距离进入 closeDistance 并且玩家着地时执行完毕。
+ * {@code moveTo}：在寻路线程上寻路，然后沿路径移动。玩家着地，与目标的水平距离进入 closeDistance，并且脚部与目标的站立高度
+ * （{@link PathPlanner#targetHeight}）相差小于 1 时执行完毕。
  * 连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路，最多 3 次。
  */
 public final class MoveToAction extends MovementAction {
@@ -35,6 +35,10 @@ public final class MoveToAction extends MovementAction {
      */
     private @Nullable WorldSnapshot planningSnapshot;
     private @Nullable BoundingBox planningBox;
+    /**
+     * 目标的站立高度（{@link PathPlanner#targetHeight}），每次寻路时用这次的世界快照重新计算
+     */
+    private double targetHeight;
     /**
      * 寻路期间被 Block Update 改变的方块
      */
@@ -65,7 +69,8 @@ public final class MoveToAction extends MovementAction {
     @Override
     MoveIntent tick(MovementController controller) {
         var player = controller.player();
-        if (player.onGround() && horizontalDistance(player.position(), target) <= options.closeDistance()) {
+        var position = player.position();
+        if (player.onGround() && nearTarget(position.x(), position.y(), position.z())) {
             handle.succeed();
             return MoveIntent.NONE;
         }
@@ -97,10 +102,20 @@ public final class MoveToAction extends MovementAction {
                 handle.cancelled(ActionCancelledException.NO_PATH);
                 return MoveIntent.NONE;
             }
-            var position = player.position();
             return new MoveIntent(MoveIntent.horizontalDirection(position.x(), position.z(), target.x(), target.z()), mode, false);
         }
         return intent;
+    }
+
+    /**
+     * 是否已经到达目标：与目标的水平距离不大于 closeDistance，并且高度与目标的站立高度相差小于 1（与到达 WALK 节点的高度条件相同）
+     *
+     * @param y 玩家脚部的高度，或者节点的站立高度
+     */
+    private boolean nearTarget(double x, double y, double z) {
+        var dx = x - target.x();
+        var dz = z - target.z();
+        return Math.sqrt(dx * dx + dz * dz) <= options.closeDistance() && Math.abs(y - targetHeight) < 1.0;
     }
 
     /**
@@ -119,10 +134,11 @@ public final class MoveToAction extends MovementAction {
             handle.cancelled(ActionCancelledException.NO_PATH);
             return false;
         }
-        // 搜索没有完成，或者最后一个节点与目标的距离大于 closeDistance：只走到最近点（与 Minestom 的 BEST_EFFORT 相同）
-        var last = nodes.getLast();
-        bestEffort = repath >= 0 || horizontalDistance(new Vec(last.x(), last.y(), last.z()), target) > options.closeDistance();
         var path = new PathFollower(nodes, Objects.requireNonNull(planningSnapshot), Objects.requireNonNull(planningBox));
+        // 搜索没有完成，或者最后一个节点没有到达目标（水平距离大于 closeDistance，或者站立高度与目标的相差 1 以上）：
+        // 只走到最近点（与 Minestom 的 BEST_EFFORT 相同）
+        var last = nodes.getLast();
+        bestEffort = repath >= 0 || !nearTarget(last.x(), path.standingHeight(nodes.size() - 1), last.z());
         follower = path;
         stuckTicks = 0;
         // 世界快照在开始寻路时取得，之后改变的方块没有反映在路径中
@@ -187,6 +203,7 @@ public final class MoveToAction extends MovementAction {
         follower = null;
         planningSnapshot = snapshot;
         planningBox = boundingBox;
+        targetHeight = PathPlanner.targetHeight(snapshot, target, boundingBox);
         changedWhilePlanning.clear();
         planning = PathPlanner.plan(snapshot, player.position(), target, options.closeDistance(), options.maxDistance(),
                 boundingBox, player.onGround());

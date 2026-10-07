@@ -66,6 +66,10 @@ public final class LocalPlayer {
      * 原版 {@code LivingEntity.noJumpDelay}：起跳之后 10 tick 内按住跳跃也不再起跳
      */
     private int noJumpDelay;
+    /**
+     * 正在进行的位置与朝向的插值（Synchronize Vehicle Position 指向本地玩家时开始）；没有时为 null
+     */
+    private @Nullable Interpolation interpolation;
     private boolean sneaking;
     private @Nullable PhysicsResult previousResult;
     private @Nullable Integer vehicle;
@@ -220,6 +224,14 @@ public final class LocalPlayer {
 
     public void noJumpDelay(int noJumpDelay) {
         this.noJumpDelay = noJumpDelay;
+    }
+
+    public @Nullable Interpolation interpolation() {
+        return interpolation;
+    }
+
+    public void interpolation(@Nullable Interpolation interpolation) {
+        this.interpolation = interpolation;
     }
 
     public boolean sneaking() {
