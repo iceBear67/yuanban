@@ -8,6 +8,7 @@ import io.ib67.yuanban.bot.MoveOptions;
 import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
+import io.ib67.yuanban.bot.data.EntityTypeData;
 import io.ib67.yuanban.bot.observe.BotTicked;
 import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observer;
@@ -16,55 +17,65 @@ import io.ib67.yuanban.bot.observe.PlayerMoved;
 import io.ib67.yuanban.bot.observe.PlayerTeleported;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.builtin.Observers;
+import io.ib67.yuanban.bot.protocol.Vectors;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityPose;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.entity.pathfinding.PNode;
 import net.minestom.server.entity.pathfinding.PathGenerator;
 import net.minestom.server.entity.pathfinding.generators.GroundNodeGenerator;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.network.packet.client.ClientPacket;
-import net.minestom.server.network.packet.client.play.ClientEntityActionPacket;
-import net.minestom.server.network.packet.client.play.ClientInputPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerAbilitiesPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientTeleportConfirmPacket;
-import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
-import net.minestom.server.network.packet.client.play.ClientVehicleMovePacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
-import net.minestom.server.network.packet.server.play.BlockChangePacket;
-import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
-import net.minestom.server.network.packet.server.play.EntityEffectPacket;
-import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
-import net.minestom.server.network.packet.server.play.EntityTeleportPacket;
-import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
-import net.minestom.server.network.packet.server.play.PlayerPositionAndLookPacket;
-import net.minestom.server.network.packet.server.play.PlayerRotationPacket;
-import net.minestom.server.network.packet.server.play.RemoveEntityEffectPacket;
-import net.minestom.server.network.packet.server.play.SetPassengersPacket;
-import net.minestom.server.network.packet.server.play.SetTickStatePacket;
-import net.minestom.server.network.packet.server.play.SetTimePacket;
-import net.minestom.server.network.packet.server.play.SpawnEntityPacket;
-import net.minestom.server.network.packet.server.play.UpdateHealthPacket;
-import net.minestom.server.potion.Potion;
-import net.minestom.server.potion.PotionEffect;
+import org.cloudburstmc.math.vector.Vector3d;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.Pose;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.LongEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ObjectEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerState;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockChangeEntry;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTickingStatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRemoveMobEffectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetPassengersPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTeleportEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateMobEffectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerRotationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundMoveVehiclePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerCommandPacket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
@@ -96,7 +107,7 @@ class MovementBotTest {
     private static void waitTicks(TestPeer peer, int ticks) {
         var mark = peer.mark();
         var deadline = System.nanoTime() + TIMEOUT.toNanos();
-        while (peer.sentSince(mark, ClientTickEndPacket.class).size() < ticks) {
+        while (peer.sentSince(mark, ServerboundClientTickEndPacket.class).size() < ticks) {
             if (System.nanoTime() > deadline) {
                 throw new AssertionError("timed out waiting for " + ticks + " ticks");
             }
@@ -105,22 +116,37 @@ class MovementBotTest {
     }
 
     /**
+     * Synchronize Player Position：绝对位置与朝向，速度为 0，没有相对字段
+     */
+    private static ClientboundPlayerPositionPacket teleport(int id, double x, double y, double z, float yaw, float pitch) {
+        return new ClientboundPlayerPositionPacket(id, x, y, z, 0, 0, 0, yaw, pitch);
+    }
+
+    /**
+     * 指向本地玩家自己的 Synchronize Vehicle Position：绝对位置与朝向，速度为 0，没有相对字段，着地
+     */
+    private static ClientboundTeleportEntityPacket teleportSelf(Pos position) {
+        return new ClientboundTeleportEntityPacket(TestServer.ENTITY_ID, Vectors.vector(position), Vector3d.ZERO,
+                position.yaw(), position.pitch(), List.of(), true);
+    }
+
+    /**
      * 移动包发出的朝向：朝向改变的 tick 同时到了每 20 tick 发送一次位置的时候，由 Set Player Position and Rotation 发出
      */
-    private static Rotation sentRotation(ClientPacket packet) {
+    private static Rotation sentRotation(MinecraftPacket packet) {
         return switch (packet) {
-            case ClientPlayerRotationPacket rotation -> new Rotation(rotation.yaw(), rotation.pitch());
-            case ClientPlayerPositionAndRotationPacket both -> new Rotation(both.position().yaw(), both.position().pitch());
+            case ServerboundMovePlayerRotPacket rotation -> new Rotation(rotation.getYaw(), rotation.getPitch());
+            case ServerboundMovePlayerPosRotPacket both -> new Rotation(both.getYaw(), both.getPitch());
             default -> throw new AssertionError("not a rotation: " + packet);
         };
     }
 
-    private static boolean sendsRotation(ClientPacket packet) {
-        return packet instanceof ClientPlayerRotationPacket || packet instanceof ClientPlayerPositionAndRotationPacket;
+    private static boolean sendsRotation(MinecraftPacket packet) {
+        return packet instanceof ServerboundMovePlayerRotPacket || packet instanceof ServerboundMovePlayerPosRotPacket;
     }
 
     private static Rotation awaitRotation(TestPeer peer, int mark) {
-        return sentRotation(peer.awaitSent(mark, ClientPacket.class, MovementBotTest::sendsRotation, TIMEOUT));
+        return sentRotation(peer.awaitSent(mark, MinecraftPacket.class, MovementBotTest::sendsRotation, TIMEOUT));
     }
 
     @Test
@@ -152,7 +178,7 @@ class MovementBotTest {
         }, (peer, bot) -> {
             assertTrue(bot.rotate(90, 10).await(TIMEOUT));
             // 原版 handleMovePlayer 设置的朝向一直保持，rotate 留下的朝向不再生效
-            peer.push(new PlayerPositionAndLookPacket(2, new Pos(0.5, 0, 0.5), Vec.ZERO, 30, 5, 0));
+            peer.push(teleport(2, 0.5, 0, 0.5, 30, 5));
             peer.barrier();
             waitTicks(peer, 3);
             var position = bot.view().player().position();
@@ -161,7 +187,7 @@ class MovementBotTest {
 
             // handleRotatePlayer 同样如此
             assertTrue(bot.rotate(90, 10).await(TIMEOUT));
-            peer.push(new PlayerRotationPacket(-45, false, 20, false));
+            peer.push(new ClientboundPlayerRotationPacket(-45, false, 20, false));
             peer.barrier();
             waitTicks(peer, 3);
             position = bot.view().player().position();
@@ -180,7 +206,7 @@ class MovementBotTest {
             var moves = bot.observe(Observers.observations(PlayerMoved.class));
             var teleports = bot.observe(Observers.observations(PlayerTeleported.class));
             var mark = peer.mark();
-            peer.push(new EntityTeleportPacket(TestServer.ENTITY_ID, new Pos(3.5, 0, 0.5, 90, 0), Vec.ZERO, 0, true));
+            peer.push(teleportSelf(new Pos(3.5, 0, 0.5, 90, 0)));
             peer.barrier();
             waitTicks(peer, 4);
             moves.close();
@@ -191,10 +217,10 @@ class MovementBotTest {
                 assertEquals(1.5 + i, steps.get(i).x(), 1e-6, steps::toString);
                 assertEquals(30 * (i + 1), steps.get(i).yaw(), 1e-4, steps::toString);
             }
-            assertTrue(peer.sentSince(mark, ClientTeleportConfirmPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundAcceptTeleportationPacket.class).isEmpty());
 
             // 距离超过 64：立即设置位置，产生 PlayerTeleported
-            peer.push(new EntityTeleportPacket(TestServer.ENTITY_ID, new Pos(100.5, 0, 0.5, 0, 0), Vec.ZERO, 0, true));
+            peer.push(teleportSelf(new Pos(100.5, 0, 0.5, 0, 0)));
             peer.barrier();
             assertEquals(100.5, bot.view().player().position().x(), 1e-9);
             teleports.close();
@@ -229,7 +255,7 @@ class MovementBotTest {
             assertTrue(bot.moveTo(new Vec(5.5, 1, 0.5)).await(TIMEOUT));
             var position = bot.view().player().position();
             assertEquals(1, position.y(), 1e-6);
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().anyMatch(ClientInputPacket::jump));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().anyMatch(ServerboundPlayerInputPacket::isJump));
         });
     }
 
@@ -381,7 +407,7 @@ class MovementBotTest {
         // 移动范围是包围盒按本 tick 的速度扩展，背离未加载区块的移动照常执行；查找支撑方块时未加载区块中的格子没有方块
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
-            peer.push(new PlayerPositionAndLookPacket(2, new Pos(-15.5, 0, 0.5), Vec.ZERO, 0, 0, 0));
+            peer.push(teleport(2, -15.5, 0, 0.5, 0, 0));
             peer.barrier();
             var forward = bot.moveForward(2, MoveOptions.builder().direction(new Vec(1, 0, 0)).build());
             assertTrue(forward.await(TIMEOUT), () -> forward.future().toString());
@@ -398,7 +424,7 @@ class MovementBotTest {
             for (int teleport = 1; teleport <= MoveToAction.MAX_REPATHS + 1; teleport++) {
                 bot.await(state -> state.player().position().x() > 2, TIMEOUT);
                 assertFalse(action.future().isDone());
-                peer.push(new PlayerPositionAndLookPacket(teleport, new Pos(0.5, 0, 0.5), Vec.ZERO, 0, 0, 0));
+                peer.push(teleport(teleport, 0.5, 0, 0.5, 0, 0));
                 peer.barrier();
             }
             assertFalse(action.await(TIMEOUT));
@@ -411,7 +437,7 @@ class MovementBotTest {
      * 用 observeDuring 提交 moveTo，在它开始寻路的那个 tick 结束时停住调度线程，等测试线程把 packets 交给 bot 之后再继续：
      * 这些数据包在下一个 tick 之前应用，那时寻路的结果还没有被取回。返回之后每个 tick 结束时玩家的位置，在动作结束之后读取
      */
-    private static List<Pos> moveToWithPacketsWhilePlanning(TestPeer peer, Bot bot, Vec target, ServerPacket... packets)
+    private static List<Pos> moveToWithPacketsWhilePlanning(TestPeer peer, Bot bot, Vec target, MinecraftPacket... packets)
             throws InterruptedException {
         var positions = new ArrayList<Pos>();
         var planning = new CountDownLatch(1);
@@ -454,7 +480,7 @@ class MovementBotTest {
             try {
                 // 寻路从 (0.5, 0, 0.5) 出发；寻路期间被传送到 (6.5, 0, 10.5)，旧路径的第一个节点在 x = 1.5 附近
                 var positions = moveToWithPacketsWhilePlanning(peer, bot, new Vec(6.5, 0, 0.5),
-                        new PlayerPositionAndLookPacket(2, new Pos(6.5, 0, 10.5), Vec.ZERO, 0, 0, 0));
+                        teleport(2, 6.5, 0, 10.5, 0, 0));
                 assertTrue(positions.stream().allMatch(position -> position.x() > 5), positions::toString);
             } catch (InterruptedException e) {
                 throw new AssertionError(e);
@@ -467,14 +493,14 @@ class MovementBotTest {
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
             // 寻路期间在 x = 3 立起一堵两格高、z 从 -3 到 3 的墙，挡住寻路快照中的直线路径
-            var wall = new ArrayList<ServerPacket>();
+            var wall = new ArrayList<MinecraftPacket>();
             for (int z = -3; z <= 3; z++) {
                 for (int y = 0; y <= 1; y++) {
-                    wall.add(new BlockChangePacket(new Vec(3, y, z), Block.STONE));
+                    wall.add(new ClientboundBlockUpdatePacket(new BlockChangeEntry(Vector3i.from(3, y, z), Block.STONE.stateId())));
                 }
             }
             try {
-                var positions = moveToWithPacketsWhilePlanning(peer, bot, new Vec(6.5, 0, 0.5), wall.toArray(ServerPacket[]::new));
+                var positions = moveToWithPacketsWhilePlanning(peer, bot, new Vec(6.5, 0, 0.5), wall.toArray(MinecraftPacket[]::new));
                 // 寻路完成时发现路径上的方块被改变，立即重新寻路绕过墙：从来没有连续 20 tick 被挡住（那样才会因为被阻挡而重新寻路）
                 var stuck = 0;
                 var longest = 0;
@@ -529,8 +555,9 @@ class MovementBotTest {
             var landed = bot.view().player().position();
             assertTrue(Math.hypot(landed.x() - 2.5, landed.z() - 0.5) < 2, landed.toString());
             peer.barrier();
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().anyMatch(input -> input.jump() && !input.sprint()));
-            assertTrue(peer.sentSince(mark, ClientEntityActionPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream()
+                    .anyMatch(input -> input.isJump() && !input.isSprint()));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerCommandPacket.class).isEmpty());
 
             // 超过 2 格时疾跑起跳
             mark = peer.mark();
@@ -539,16 +566,17 @@ class MovementBotTest {
             var sprinted = bot.view().player().position();
             assertTrue(Math.hypot(sprinted.x() - 6.5, sprinted.z() - 0.5) < Math.hypot(start.x() - 6.5, start.z() - 0.5), sprinted.toString());
             peer.barrier();
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().anyMatch(input -> input.jump() && input.sprint()));
-            assertTrue(peer.sentSince(mark, ClientEntityActionPacket.class).stream()
-                    .anyMatch(action -> action.action() == ClientEntityActionPacket.Action.START_SPRINTING));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream()
+                    .anyMatch(input -> input.isJump() && input.isSprint()));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerCommandPacket.class).stream()
+                    .anyMatch(command -> command.getState() == PlayerState.START_SPRINTING));
 
             // 指定了移动方式时不按距离选择
             mark = peer.mark();
             assertTrue(bot.jumpTo(new Vec(12, -1, 0), MoveOptions.builder().mode(MovementMode.WALK).build()).await(TIMEOUT));
             peer.barrier();
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().anyMatch(ClientInputPacket::jump));
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().noneMatch(ClientInputPacket::sprint));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().anyMatch(ServerboundPlayerInputPacket::isJump));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().noneMatch(ServerboundPlayerInputPacket::isSprint));
         });
     }
 
@@ -558,8 +586,8 @@ class MovementBotTest {
         }, (peer, bot) -> {
             bot.await(state -> state.player().onGround(), TIMEOUT);
             // 跳跃力为 0：原版 jumpFromGround 不起跳，玩家一直着地
-            peer.push(new EntityAttributesPacket(TestServer.ENTITY_ID,
-                    List.of(new EntityAttributesPacket.Property(Attribute.JUMP_STRENGTH, 0, List.of()))));
+            peer.push(new ClientboundUpdateAttributesPacket(TestServer.ENTITY_ID,
+                    List.of(new Attribute(AttributeType.Builtin.JUMP_STRENGTH, 0))));
             peer.barrier();
             assertTrue(bot.jumpTo(new Vec(2, -1, 0)).await(TIMEOUT));
             assertEquals(0, bot.view().player().position().y(), 1e-4);
@@ -573,9 +601,9 @@ class MovementBotTest {
             bot.await(state -> state.player().onGround(), TIMEOUT);
             var mark = peer.mark();
             // 允许飞行并且正在飞行，但站在地上：原版 LocalPlayer.aiStep 在着地时停止飞行并发送 Player Abilities
-            peer.push(new PlayerAbilitiesPacket((byte) 0x06, 0.05f, 0.1f));
-            var abilities = peer.awaitSent(mark, ClientPlayerAbilitiesPacket.class, TIMEOUT);
-            assertEquals(0, abilities.flags());
+            peer.push(new ClientboundPlayerAbilitiesPacket(false, true, true, false, 0.05f, 0.1f));
+            var abilities = peer.awaitSent(mark, ServerboundPlayerAbilitiesPacket.class, TIMEOUT);
+            assertFalse(abilities.isFlying());
             peer.barrier();
             assertFalse(bot.view().player().abilities().flying());
             assertTrue(bot.view().player().abilities().allowFlying());
@@ -595,31 +623,32 @@ class MovementBotTest {
         }, (peer, bot) -> {
             var east = MoveOptions.builder().direction(new Vec(1, 0, 0)).mode(MovementMode.SPRINT).build();
             // 饥饿值不大于 6：不开始疾跑；Player Input 的疾跑键照常按下
-            peer.push(new UpdateHealthPacket(20, 6, 0));
+            peer.push(new ClientboundSetHealthPacket(20, 6, 0));
             peer.barrier();
             var mark = peer.mark();
             assertTrue(bot.moveForward(2, east).await(TIMEOUT));
             peer.barrier();
-            assertTrue(peer.sentSince(mark, ClientEntityActionPacket.class).isEmpty());
-            assertTrue(peer.sentSince(mark, ClientInputPacket.class).stream().anyMatch(ClientInputPacket::sprint));
+            assertTrue(peer.sentSince(mark, ServerboundPlayerCommandPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().anyMatch(ServerboundPlayerInputPacket::isSprint));
 
             // 失明：不开始疾跑
-            peer.push(new UpdateHealthPacket(20, 20, 5),
-                    new EntityEffectPacket(TestServer.ENTITY_ID, new Potion(PotionEffect.BLINDNESS, 0, 100)));
+            peer.push(new ClientboundSetHealthPacket(20, 20, 5),
+                    new ClientboundUpdateMobEffectPacket(TestServer.ENTITY_ID, Effect.BLINDNESS, 0, 100, false, false, false, false));
             peer.barrier();
             mark = peer.mark();
             assertTrue(bot.moveForward(2, east).await(TIMEOUT));
             peer.barrier();
-            assertTrue(peer.sentSince(mark, ClientEntityActionPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundPlayerCommandPacket.class).isEmpty());
 
             // 开始疾跑，撞上 x = 12 的墙时停止疾跑（迎面的碰撞）
-            peer.push(new RemoveEntityEffectPacket(TestServer.ENTITY_ID, PotionEffect.BLINDNESS));
+            peer.push(new ClientboundRemoveMobEffectPacket(TestServer.ENTITY_ID, Effect.BLINDNESS));
             peer.barrier();
             mark = peer.mark();
             assertFalse(bot.moveForward(20, east).await(TIMEOUT));
             peer.barrier();
-            var commands = peer.sentSince(mark, ClientEntityActionPacket.class).stream().map(ClientEntityActionPacket::action).toList();
-            assertEquals(List.of(ClientEntityActionPacket.Action.START_SPRINTING, ClientEntityActionPacket.Action.STOP_SPRINTING), commands);
+            var commands = peer.sentSince(mark, ServerboundPlayerCommandPacket.class).stream()
+                    .map(ServerboundPlayerCommandPacket::getState).toList();
+            assertEquals(List.of(PlayerState.START_SPRINTING, PlayerState.STOP_SPRINTING), commands);
         });
     }
 
@@ -636,9 +665,9 @@ class MovementBotTest {
             assertEquals(0.5, position.z(), 1e-9);
             assertTrue(bot.view().player().onGround());
             peer.barrier();
-            var inputs = peer.sentSince(mark, ClientInputPacket.class);
-            assertTrue(inputs.stream().anyMatch(ClientInputPacket::jump));
-            assertTrue(inputs.stream().noneMatch(input -> input.forward() || input.backward() || input.left() || input.right()));
+            var inputs = peer.sentSince(mark, ServerboundPlayerInputPacket.class);
+            assertTrue(inputs.stream().anyMatch(ServerboundPlayerInputPacket::isJump));
+            assertTrue(inputs.stream().noneMatch(input -> input.isForward() || input.isBackward() || input.isLeft() || input.isRight()));
         });
     }
 
@@ -658,8 +687,8 @@ class MovementBotTest {
             assertEquals(start.x(), during.x(), 1e-9);
             assertEquals(start.z(), during.z(), 1e-9);
             // 每 20 tick 至少发送一次位置；Player Input 按暂停开始时的期望方向照常发送
-            assertFalse(peer.sentSince(mark, ClientPlayerPositionPacket.class).isEmpty()
-                    && peer.sentSince(mark, ClientPlayerPositionAndRotationPacket.class).isEmpty());
+            assertFalse(peer.sentSince(mark, ServerboundMovePlayerPosPacket.class).isEmpty()
+                    && peer.sentSince(mark, ServerboundMovePlayerPosRotPacket.class).isEmpty());
             bot.resumeMovement();
             assertTrue(forward.await(TIMEOUT));
             assertFalse(bot.view().movementSuspended());
@@ -682,9 +711,9 @@ class MovementBotTest {
             // 手部动作结束之后朝向回到 rotate 设置的朝向：暂停期间轮到的 moveTo 没有开始，没有清除它
             var mark = peer.mark();
             var dig = bot.attemptBreakBlock(new Vec(2, -1, 0));
-            var finished = peer.awaitSent(mark, ClientPlayerActionPacket.class,
-                    packet -> packet.status() == ClientPlayerActionPacket.Status.FINISHED_DIGGING, TIMEOUT);
-            peer.push(new AcknowledgeBlockChangePacket(finished.sequence()));
+            var finished = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
+                    packet -> packet.getAction() == PlayerAction.FINISH_DIGGING, TIMEOUT);
+            peer.push(new ClientboundBlockChangedAckPacket(finished.getSequence()));
             assertTrue(dig.await(TIMEOUT));
             bot.await(state -> state.player().position().yaw() == 30 && state.player().position().pitch() == 10, TIMEOUT);
             assertFalse(move.future().isDone());
@@ -697,8 +726,20 @@ class MovementBotTest {
         });
     }
 
-    private static SpawnEntityPacket vehicle(int id, EntityType type, Pos position) {
-        return new SpawnEntityPacket(id, UUID.randomUUID(), type, position, position.yaw(), 0, Vec.ZERO);
+    private static ClientboundAddEntityPacket vehicle(int id, EntityType type, Pos position) {
+        return new ClientboundAddEntityPacket(id, UUID.randomUUID(), type, position.x(), position.y(), position.z(),
+                position.yaw(), position.pitch(), position.yaw());
+    }
+
+    private static ClientboundSetPassengersPacket passengers(int vehicle, int... passengers) {
+        return new ClientboundSetPassengersPacket(vehicle, passengers);
+    }
+
+    /**
+     * Minestom 数据（{@code entity_type.json}）中这种实体的第一个 PASSENGER 挂点
+     */
+    private static Vec passengerAttachment(EntityType type) {
+        return Objects.requireNonNull(EntityTypeData.passengerAttachments(type)).getFirst();
     }
 
     @Test
@@ -707,8 +748,8 @@ class MovementBotTest {
         }, (peer, bot) -> {
             var boat = new Pos(2.5, 0, 0.5, 90, 0);
             // 载具不在模型中：整个 Set Passengers 被忽略
-            peer.push(new SetPassengersPacket(300, List.of(TestServer.ENTITY_ID)));
-            peer.push(vehicle(300, EntityType.OAK_BOAT, boat), new SetPassengersPacket(300, List.of(TestServer.ENTITY_ID)));
+            peer.push(passengers(300, TestServer.ENTITY_ID));
+            peer.push(vehicle(300, EntityType.OAK_BOAT, boat), passengers(300, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 2);
             var mark = peer.mark();
@@ -722,26 +763,27 @@ class MovementBotTest {
             // 每 tick 发送 Set Player Rotation（两个标记为 false）与 Move Vehicle，不发送移动包。
             // bot 仍在运行：各种数据包的数量从同一次读取的列表中统计，一个 tick 的数据包总是一起交给连接
             var sent = peer.sentSince(mark);
-            assertTrue(sent.stream().noneMatch(packet -> packet instanceof ClientPlayerPositionPacket
-                    || packet instanceof ClientPlayerPositionAndRotationPacket), sent::toString);
-            var rotations = sent.stream().filter(ClientPlayerRotationPacket.class::isInstance)
-                    .map(ClientPlayerRotationPacket.class::cast).toList();
-            var vehicleMoves = sent.stream().filter(ClientVehicleMovePacket.class::isInstance)
-                    .map(ClientVehicleMovePacket.class::cast).toList();
-            var ticks = sent.stream().filter(ClientTickEndPacket.class::isInstance).count();
+            assertTrue(sent.stream().noneMatch(packet -> packet instanceof ServerboundMovePlayerPosPacket
+                    || packet instanceof ServerboundMovePlayerPosRotPacket), sent::toString);
+            var rotations = sent.stream().filter(ServerboundMovePlayerRotPacket.class::isInstance)
+                    .map(ServerboundMovePlayerRotPacket.class::cast).toList();
+            var vehicleMoves = sent.stream().filter(ServerboundMoveVehiclePacket.class::isInstance)
+                    .map(ServerboundMoveVehiclePacket.class::cast).toList();
+            var ticks = sent.stream().filter(ServerboundClientTickEndPacket.class::isInstance).count();
             assertEquals(ticks, rotations.size());
             assertEquals(ticks, vehicleMoves.size());
-            assertFalse(rotations.getFirst().onGround());
-            assertEquals(boat, vehicleMoves.getFirst().position());
+            assertFalse(rotations.getFirst().isOnGround());
+            var vehicleMove = vehicleMoves.getFirst();
+            assertEquals(boat, new Pos(Vectors.vec(vehicleMove.getPosition()), vehicleMove.getYRot(), vehicleMove.getXRot()));
 
             // 下船之后恢复移动模拟与移动包
-            peer.push(new SetPassengersPacket(300, List.of()));
+            peer.push(passengers(300));
             peer.barrier();
             mark = peer.mark();
             waitTicks(peer, 25);
-            assertTrue(peer.sentSince(mark, ClientVehicleMovePacket.class).isEmpty());
-            assertFalse(peer.sentSince(mark, ClientPlayerPositionPacket.class).isEmpty()
-                    && peer.sentSince(mark, ClientPlayerPositionAndRotationPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundMoveVehiclePacket.class).isEmpty());
+            assertFalse(peer.sentSince(mark, ServerboundMovePlayerPosPacket.class).isEmpty()
+                    && peer.sentSince(mark, ServerboundMovePlayerPosRotPacket.class).isEmpty());
         });
     }
 
@@ -749,35 +791,35 @@ class MovementBotTest {
     void ridingAMinecartDoesNotControlItAndAnUnloadedVehicleSkipsThePlayerTick() {
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
-            peer.push(vehicle(301, EntityType.MINECART, new Pos(1.5, 0, 0.5)), new SetPassengersPacket(301, List.of(TestServer.ENTITY_ID)));
+            peer.push(vehicle(301, EntityType.MINECART, new Pos(1.5, 0, 0.5)), passengers(301, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 1);
             var mark = peer.mark();
             waitTicks(peer, 3);
-            assertTrue(peer.sentSince(mark, ClientVehicleMovePacket.class).isEmpty());
-            assertFalse(peer.sentSince(mark, ClientPlayerRotationPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundMoveVehiclePacket.class).isEmpty());
+            assertFalse(peer.sentSince(mark, ServerboundMovePlayerRotPacket.class).isEmpty());
             // 矿车的乘客挂点取 Minestom 数据中的 PASSENGER
-            var attachment = EntityType.MINECART.entityAttachments("PASSENGER").getFirst();
+            var attachment = passengerAttachment(EntityType.MINECART);
             assertEquals(attachment.y() - 0.6, bot.view().player().position().y(), 1e-9);
 
             // 矿车自己乘坐的船所在区块未加载：原版从最下层的载具开始执行乘客，本地玩家整个 tick 不执行，只发送 Client Tick End
-            peer.push(vehicle(303, EntityType.OAK_BOAT, new Pos(100.5, 0, 0.5)), new SetPassengersPacket(303, List.of(301)));
+            peer.push(vehicle(303, EntityType.OAK_BOAT, new Pos(100.5, 0, 0.5)), passengers(303, 301));
             peer.barrier();
             waitTicks(peer, 1);
             mark = peer.mark();
             waitTicks(peer, 3);
-            for (ClientPacket packet : peer.sentSince(mark)) {
-                assertInstanceOf(ClientTickEndPacket.class, packet);
+            for (MinecraftPacket packet : peer.sentSince(mark)) {
+                assertInstanceOf(ServerboundClientTickEndPacket.class, packet);
             }
 
             // 载具所在区块未加载：同样只发送 Client Tick End
-            peer.push(vehicle(302, EntityType.OAK_BOAT, new Pos(100.5, 0, 0.5)), new SetPassengersPacket(302, List.of(TestServer.ENTITY_ID)));
+            peer.push(vehicle(302, EntityType.OAK_BOAT, new Pos(100.5, 0, 0.5)), passengers(302, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 1);
             mark = peer.mark();
             waitTicks(peer, 3);
-            for (ClientPacket packet : peer.sentSince(mark)) {
-                assertInstanceOf(ClientTickEndPacket.class, packet);
+            for (MinecraftPacket packet : peer.sentSince(mark)) {
+                assertInstanceOf(ServerboundClientTickEndPacket.class, packet);
             }
         });
     }
@@ -787,42 +829,49 @@ class MovementBotTest {
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
             // 马：Minestom 数据中的 PASSENGER 挂点，没有人立时不加偏移
-            peer.push(vehicle(310, EntityType.HORSE, new Pos(2.5, 0, 0.5)), new SetPassengersPacket(310, List.of(TestServer.ENTITY_ID)));
+            peer.push(vehicle(310, EntityType.HORSE, new Pos(2.5, 0, 0.5)), passengers(310, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 2);
-            var horse = EntityType.HORSE.entityAttachments("PASSENGER").getFirst();
+            var horse = passengerAttachment(EntityType.HORSE);
             assertEquals(horse.y() - 0.6, bot.view().player().position().y(), 1e-9);
 
             // 骆驼：站立时座位高度为 2.375 − 0.375，第一个乘客向前 0.5；坐下（上次姿态改变的 tick 为负数）时为
             // 坐下尺寸的高度 0.945 − 0.375 再加 0.2
-            peer.push(new SetTimePacket(1000, Map.of()));
-            peer.push(vehicle(311, EntityType.CAMEL, new Pos(5.5, 0, 0.5)), new SetPassengersPacket(311, List.of(TestServer.ENTITY_ID)));
+            peer.push(new ClientboundSetTimePacket(1000, Map.of()));
+            peer.push(vehicle(311, EntityType.CAMEL, new Pos(5.5, 0, 0.5)), passengers(311, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 2);
             var standing = bot.view().player().position();
             assertEquals(2.0 - 0.6, standing.y(), 1e-6);
             assertEquals(1.0, standing.z(), 1e-6);
-            peer.push(new EntityMetaDataPacket(311, Map.of(
-                    MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SITTING),
-                    MetadataDef.Camel.LAST_POSE_CHANGE_TICK.index(), Metadata.VarLong(-500))));
+            peer.push(new ClientboundSetEntityDataPacket(311, new EntityMetadata<?, ?>[]{
+                    new ObjectEntityMetadata<>(EntityMetaIndex.POSE.index(), MetadataTypes.POSE, Pose.SITTING),
+                    new LongEntityMetadata(EntityMetaIndex.CAMEL_LAST_POSE_CHANGE_TICK.index(), MetadataTypes.LONG, -500)}));
             peer.barrier();
             waitTicks(peer, 2);
             assertEquals(0.77 - 0.6, bot.view().player().position().y(), 1e-6);
         });
     }
 
+    /**
+     * 马的标记字节为正在人立（0x20）
+     */
+    private static ClientboundSetEntityDataPacket rearing(int entityId) {
+        return new ClientboundSetEntityDataPacket(entityId, new EntityMetadata<?, ?>[]{
+                new ByteEntityMetadata(EntityMetaIndex.HORSE_FLAGS.index(), MetadataTypes.BYTE, (byte) 0x20)});
+    }
+
     @Test
     void horsesAnimateRearingEveryTickUnlessFrozenWithoutPlayerPassengers() {
         withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
-            var attachment = EntityType.HORSE.entityAttachments("PASSENGER").getFirst();
-            Map<Integer, Metadata.Entry<?>> rearing = Map.of(MetadataDef.AbstractHorse.ABSTRACT_HORSE_FLAGS.index(), Metadata.Byte((byte) 0x20));
+            var attachment = passengerAttachment(EntityType.HORSE);
             // 原版对每匹马每 tick 更新人立动画，与是否被乘坐无关：人立 6 tick 之后进度为 1，登上它的第一个 tick 乘客就随之后仰
-            peer.push(vehicle(320, EntityType.HORSE, new Pos(2.5, 0, 0.5)), new EntityMetaDataPacket(320, rearing));
+            peer.push(vehicle(320, EntityType.HORSE, new Pos(2.5, 0, 0.5)), rearing(320));
             peer.barrier();
             waitTicks(peer, 7);
             var seats = bot.observe(Observers.observations(PlayerMoved.class, moved -> Math.abs(moved.to().x() - 2.5) < 1e-9));
-            peer.push(new SetPassengersPacket(320, List.of(TestServer.ENTITY_ID)));
+            peer.push(passengers(320, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 2);
             seats.close();
@@ -831,12 +880,12 @@ class MovementBotTest {
             assertEquals(0.5 + attachment.z() - 0.7, seat.z(), 1e-6);
 
             // 冻结并且不在步进中时，没有玩家乘客的马不 tick：进度保持 0；登上之后它有了玩家乘客，从 0 开始更新
-            peer.push(new SetPassengersPacket(320, List.of()), new SetTickStatePacket(20, true));
-            peer.push(vehicle(321, EntityType.HORSE, new Pos(5.5, 0, 0.5)), new EntityMetaDataPacket(321, rearing));
+            peer.push(passengers(320), new ClientboundTickingStatePacket(20, true));
+            peer.push(vehicle(321, EntityType.HORSE, new Pos(5.5, 0, 0.5)), rearing(321));
             peer.barrier();
             waitTicks(peer, 7);
             var frozenSeats = bot.observe(Observers.observations(PlayerMoved.class, moved -> Math.abs(moved.to().x() - 5.5) < 1e-9));
-            peer.push(new SetPassengersPacket(321, List.of(TestServer.ENTITY_ID)));
+            peer.push(passengers(321, TestServer.ENTITY_ID));
             peer.barrier();
             waitTicks(peer, 3);
             frozenSeats.close();
@@ -856,13 +905,13 @@ class MovementBotTest {
             assertTrue(bot.rotate(0, 0).await(TIMEOUT));
             var mark = peer.mark();
             var dig = bot.attemptBreakBlock(new Vec(2, -1, 0));
-            var finished = peer.awaitSent(mark, ClientPlayerActionPacket.class,
-                    packet -> packet.status() == ClientPlayerActionPacket.Status.FINISHED_DIGGING, TIMEOUT);
+            var finished = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
+                    packet -> packet.getAction() == PlayerAction.FINISH_DIGGING, TIMEOUT);
             var rotation = sentRotation(peer.sentSince(mark).stream().filter(MovementBotTest::sendsRotation).findFirst().orElseThrow());
             var expected = Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(2.5, -0.5, 0.5));
             assertEquals(expected.yaw(), rotation.yaw(), 1e-4);
             assertEquals(expected.pitch(), rotation.pitch(), 1e-4);
-            peer.push(new AcknowledgeBlockChangePacket(finished.sequence()));
+            peer.push(new ClientboundBlockChangedAckPacket(finished.getSequence()));
             assertTrue(dig.await(TIMEOUT));
         });
     }

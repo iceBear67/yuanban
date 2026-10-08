@@ -1,10 +1,11 @@
 package io.ib67.yuanban.bot.inventory;
 
+import io.ib67.yuanban.bot.data.Items;
 import net.kyori.adventure.text.Component;
-import net.minestom.server.entity.EquipmentSlot;
-import net.minestom.server.inventory.InventoryType;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.network.packet.server.play.TradeListPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundMerchantOffersPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.EnumMap;
@@ -14,12 +15,13 @@ import java.util.Objects;
 
 /**
  * 物品栏：窗口 0 与打开的窗口，以及窗口 0 中没有槽位的身体护甲与鞍。物品栏内容只由服务端数据更新；状态编号与光标物品由每个窗口各自记录
- * （原版每个 {@code AbstractContainerMenu} 各有 {@code stateId} 与 {@code carried}），当前的光标为当前窗口的光标。
+ * （原版每个 {@code AbstractContainerMenu} 各有 {@code stateId} 与 {@code carried}），当前的光标为当前窗口的光标。空物品为 null。
  * <p>
  * 打开的窗口中玩家物品栏部分与窗口 0 对应同一份物品（原版客户端的容器共用玩家的 Inventory）：
  * 服务端对其中一边的修改同时写入另一边（wiki Set Container Slot：服务端不会针对窗口 0 重发）。
  * <p>
  * 当前的光标（{@link #cursor()}）改变时通知 {@link CursorSink}，包括打开与关闭窗口使当前窗口改变的情况。
+ * 物品是否改变按 {@link Items#sameStack} 判断。
  */
 public final class InventoryModel {
     private final Window player = Window.player();
@@ -27,8 +29,12 @@ public final class InventoryModel {
     /**
      * 窗口 0 中没有槽位的玩家装备：身体护甲与鞍
      */
-    private final Map<EquipmentSlot, ItemStack> equipment = new EnumMap<>(Map.of(
-            EquipmentSlot.BODY, ItemStack.AIR, EquipmentSlot.SADDLE, ItemStack.AIR));
+    private final Map<EquipmentSlot, @Nullable ItemStack> equipment = new EnumMap<>(EquipmentSlot.class);
+
+    public InventoryModel() {
+        equipment.put(EquipmentSlot.BODY, null);
+        equipment.put(EquipmentSlot.SADDLE, null);
+    }
 
     public Window player() {
         return player;
@@ -47,9 +53,9 @@ public final class InventoryModel {
     }
 
     /**
-     * 当前窗口（打开的窗口，没有打开窗口时为窗口 0）的光标物品
+     * 当前窗口（打开的窗口，没有打开窗口时为窗口 0）的光标物品；为空时为 null
      */
-    public ItemStack cursor() {
+    public @Nullable ItemStack cursor() {
         return current().carried();
     }
 
@@ -67,7 +73,7 @@ public final class InventoryModel {
     /**
      * Open Screen
      */
-    public void open(int windowId, InventoryType type, Component title, CursorSink sink) {
+    public void open(int windowId, ContainerType type, Component title, CursorSink sink) {
         switchTo(Window.container(windowId, type, title), sink);
     }
 
@@ -101,9 +107,9 @@ public final class InventoryModel {
         cursorChanged(old, sink);
     }
 
-    private void cursorChanged(ItemStack old, CursorSink sink) {
+    private void cursorChanged(@Nullable ItemStack old, CursorSink sink) {
         var now = cursor();
-        if (!old.equals(now)) {
+        if (!Items.sameStack(old, now)) {
             sink.cursorChanged(old, now);
         }
     }
@@ -114,7 +120,8 @@ public final class InventoryModel {
      *
      * @throws IndexOutOfBoundsException 物品数多于窗口的槽位数（原版 {@code AbstractContainerMenu.getSlot} 越界抛出异常，客户端断开连接）
      */
-    public void windowItems(int windowId, int stateId, List<ItemStack> items, ItemStack carried, SlotChangeSink sink) {
+    public void windowItems(int windowId, int stateId, List<@Nullable ItemStack> items, @Nullable ItemStack carried,
+                            SlotChangeSink sink) {
         var window = window(windowId);
         if (window == null) {
             return;
@@ -134,7 +141,7 @@ public final class InventoryModel {
      *
      * @throws IndexOutOfBoundsException 槽位不在窗口中（原版 {@code AbstractContainerMenu.getSlot} 越界抛出异常，客户端断开连接）
      */
-    public void setSlot(int windowId, int stateId, int slot, ItemStack item, SlotChangeSink sink) {
+    public void setSlot(int windowId, int stateId, int slot, @Nullable ItemStack item, SlotChangeSink sink) {
         var window = window(windowId);
         if (window == null) {
             return;
@@ -151,7 +158,7 @@ public final class InventoryModel {
      *
      * @throws IndexOutOfBoundsException 下标为负数（原版写入物品列表时越界抛出异常，客户端断开连接）
      */
-    public void setPlayerInventorySlot(int index, ItemStack item, SlotChangeSink sink) {
+    public void setPlayerInventorySlot(int index, @Nullable ItemStack item, SlotChangeSink sink) {
         if (index < 0) {
             throw new IndexOutOfBoundsException("player inventory index " + index + " is negative");
         }
@@ -162,7 +169,7 @@ public final class InventoryModel {
         if (index == 41 || index == 42) {
             var slot = index == 41 ? EquipmentSlot.BODY : EquipmentSlot.SADDLE;
             var old = equipment.put(slot, item);
-            if (!item.equals(old)) {
+            if (!Items.sameStack(old, item)) {
                 sink.equipmentChanged(slot, old, item);
             }
             return;
@@ -181,24 +188,23 @@ public final class InventoryModel {
     }
 
     /**
-     * 窗口 0 中没有槽位的玩家装备：身体护甲与鞍（Set Player Inventory Slot 的下标 41、42，原版 {@code Inventory.EQUIPMENT_SLOT_MAPPING}）；
-     * 没有时为空气
+     * 窗口 0 中没有槽位的玩家装备：身体护甲与鞍（Set Player Inventory Slot 的下标 41、42，原版 {@code Inventory.EQUIPMENT_SLOT_MAPPING}）
      *
      * @param slot {@link EquipmentSlot#BODY} 或 {@link EquipmentSlot#SADDLE}
+     * @return 没有装备时为 null
      * @throws IllegalArgumentException 其它装备槽位：它们在窗口 0 中
      */
-    public ItemStack equipment(EquipmentSlot slot) {
-        var item = equipment.get(slot);
-        if (item == null) {
+    public @Nullable ItemStack equipment(EquipmentSlot slot) {
+        if (!equipment.containsKey(slot)) {
             throw new IllegalArgumentException(slot + " is a slot of window 0");
         }
-        return item;
+        return equipment.get(slot);
     }
 
     /**
      * Set Cursor Item：写入当前窗口的光标（原版 {@code containerMenu.setCarried}）
      */
-    public void cursor(ItemStack item, CursorSink sink) {
+    public void cursor(@Nullable ItemStack item, CursorSink sink) {
         var old = cursor();
         current().carried(item);
         cursorChanged(old, sink);
@@ -214,8 +220,8 @@ public final class InventoryModel {
     /**
      * Merchant Offers：窗口编号与打开的窗口不同时忽略
      */
-    public void trades(TradeListPacket trades) {
-        if (open != null && open.id() == trades.windowId()) {
+    public void trades(ClientboundMerchantOffersPacket trades) {
+        if (open != null && open.id() == trades.getContainerId()) {
             open.trades(trades);
         }
     }
@@ -227,7 +233,7 @@ public final class InventoryModel {
         return open != null && open.id() == windowId ? open : null;
     }
 
-    private void setAndPropagate(Window window, int slot, ItemStack item, SlotChangeSink sink) {
+    private void setAndPropagate(Window window, int slot, @Nullable ItemStack item, SlotChangeSink sink) {
         set(window, slot, item, sink);
         var index = window.toPlayerInventory(slot);
         if (index < 0) {
@@ -240,26 +246,26 @@ public final class InventoryModel {
         }
     }
 
-    private static void set(Window window, int slot, ItemStack item, SlotChangeSink sink) {
+    private static void set(Window window, int slot, @Nullable ItemStack item, SlotChangeSink sink) {
         var old = window.set(slot, item);
-        if (!old.equals(item)) {
+        if (!Items.sameStack(old, item)) {
             sink.slotChanged(window.id(), slot, old, item);
         }
     }
 
     /**
-     * 接收槽位变化
+     * 接收槽位变化；空物品为 null
      */
     public interface SlotChangeSink extends CursorSink {
-        void slotChanged(int windowId, int slot, ItemStack old, ItemStack now);
+        void slotChanged(int windowId, int slot, @Nullable ItemStack old, @Nullable ItemStack now);
 
         /**
          * 窗口 0 中没有槽位的玩家装备（{@link #equipment}）改变
          */
-        void equipmentChanged(EquipmentSlot slot, ItemStack old, ItemStack now);
+        void equipmentChanged(EquipmentSlot slot, @Nullable ItemStack old, @Nullable ItemStack now);
     }
 
     public interface CursorSink {
-        void cursorChanged(ItemStack old, ItemStack now);
+        void cursorChanged(@Nullable ItemStack old, @Nullable ItemStack now);
     }
 }

@@ -1,16 +1,19 @@
 package io.ib67.yuanban.bot.movement;
 
+import io.ib67.yuanban.bot.data.EntityTypeData;
 import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.player.LocalPlayer;
+import io.ib67.yuanban.bot.view.EntityMeta;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityPose;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.Pose;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 
+import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -25,8 +28,8 @@ import java.util.stream.Collectors;
  * </ul>
  * 偏航角的旋转使用 {@link SineTable}。载具位置取模型中服务端最后给出的值，不插值（7.4）。
  */
-// FIXME(Minestom M12): Minestom 的实体类型数据只有成年实体默认姿态的尺寸与挂点，没有幼年与坐下姿态的尺寸和挂点；
-//  这里内置原版 26.2 各实体类的取值，见 MINESTOM-BUG-REPORT.md
+// FIXME(Minestom M12): Minestom 的实体类型数据（net.minestom:data 的 entity_type.json）只有成年实体默认姿态的尺寸与挂点，
+//  没有幼年与坐下姿态的尺寸和挂点；这里内置原版 26.2 各实体类的取值，见 MINESTOM-BUG-REPORT.md
 public final class RidingSeat {
     /**
      * 原版 {@code Player.DEFAULT_VEHICLE_ATTACHMENT}
@@ -46,8 +49,8 @@ public final class RidingSeat {
             EntityType.SKELETON_HORSE, EntityType.ZOMBIE_HORSE, EntityType.LLAMA, EntityType.TRADER_LLAMA,
             EntityType.CAMEL, EntityType.CAMEL_HUSK, EntityType.PIG, EntityType.STRIDER, EntityType.CHICKEN,
             EntityType.HAPPY_GHAST, EntityType.NAUTILUS, EntityType.ZOMBIE_NAUTILUS, EntityType.SLIME, EntityType.MAGMA_CUBE);
-    static final Set<EntityType> BOATS = EntityType.values().stream()
-            .filter(type -> type.key().value().endsWith("_boat") || type.key().value().endsWith("_raft"))
+    static final Set<EntityType> BOATS = Arrays.stream(EntityType.values())
+            .filter(type -> name(type).endsWith("_boat") || name(type).endsWith("_raft"))
             .collect(Collectors.toUnmodifiableSet());
 
     private RidingSeat() {
@@ -81,12 +84,12 @@ public final class RidingSeat {
         if (BOATS.contains(type)) {
             return boatPoint(type, index, passengers.size(), yaw);
         }
-        var scale = (float) vehicle.attributes().value(Attribute.SCALE);
-        var baby = AGEABLE.contains(type) && meta(vehicle, MetadataDef.AgeableMob.IS_BABY);
+        var scale = (float) vehicle.attributes().value(AttributeType.Builtin.SCALE);
+        var baby = AGEABLE.contains(type) && meta(vehicle, EntityMetaIndex.AGEABLE_IS_BABY);
         if (CUBE_MOBS.contains(type)) {
             // 原版 AbstractCubeMob：尺寸按大小缩放，挂点在顶面向下 size / 64 处，不随偏航角旋转
-            int size = meta(vehicle, MetadataDef.AbstractCubeMob.SIZE);
-            var height = (float) type.height() * size * scale;
+            int size = meta(vehicle, EntityMetaIndex.CUBE_SIZE);
+            var height = (float) EntityTypeData.height(type) * size * scale;
             return new Vec(0.0, height - 0.015625 * size * (scale * ageScale(type, baby)), 0.0);
         }
         if (CAMELS.contains(type)) {
@@ -109,9 +112,9 @@ public final class RidingSeat {
      * 只有一个乘客时向前偏移 0（带箱子的为 0.15），多个乘客时第一个为 0.2、其余为 -0.6
      */
     private static Vec boatPoint(EntityType type, int index, int passengerCount, float yaw) {
-        var name = type.key().value();
+        var name = name(type);
         var chest = name.endsWith("_chest_boat") || name.endsWith("_chest_raft");
-        var height = (float) type.height();
+        var height = (float) EntityTypeData.height(type);
         float rideHeight = name.endsWith("_raft") ? height * 0.8888889F : height / 3.0F;
         var offset = chest ? 0.15F : 0.0F;
         if (passengerCount > 1) {
@@ -131,7 +134,7 @@ public final class RidingSeat {
         if (passengerCount > 1 && !driver) {
             offset = -0.7F;
         }
-        var sittingPose = Objects.requireNonNullElse(metaOrNull(vehicle, MetadataDef.POSE), EntityPose.STANDING) == EntityPose.SITTING;
+        var sittingPose = meta(vehicle, EntityMetaIndex.POSE) == Pose.SITTING;
         var dimensionHeight = camelHeight(vehicle.type(), sittingPose, baby) * scale;
         var anchorScale = scale * ageScale(vehicle.type(), baby);
         var height = (float) bodyAnchorOffset(vehicle, driver, dimensionHeight, anchorScale, baby, gameTime);
@@ -140,13 +143,13 @@ public final class RidingSeat {
 
     private static float camelHeight(EntityType type, boolean sitting, boolean baby) {
         if (sitting) {
-            return baby ? 0.425F : (float) type.height() - 1.43F;
+            return baby ? 0.425F : (float) EntityTypeData.height(type) - 1.43F;
         }
-        return baby ? 1.4F : (float) type.height();
+        return baby ? 1.4F : (float) EntityTypeData.height(type);
     }
 
     private static double bodyAnchorOffset(ClientEntity camel, boolean front, float height, float scale, boolean baby, long gameTime) {
-        long lastPoseChange = meta(camel, MetadataDef.Camel.LAST_POSE_CHANGE_TICK);
+        long lastPoseChange = meta(camel, EntityMetaIndex.CAMEL_LAST_POSE_CHANGE_TICK);
         var sitting = lastPoseChange < 0L;
         var poseTime = gameTime - Math.abs(lastPoseChange);
         double ageSitOffset = baby ? 0.09375 : 0.375;
@@ -205,18 +208,18 @@ public final class RidingSeat {
     }
 
     /**
-     * 成年实体的乘客挂点：Minestom 数据中的 PASSENGER，没有时为实体高度处（原版 {@code EntityAttachment.Fallback.AT_HEIGHT}）
+     * 成年实体的乘客挂点：实体类型数据中的 PASSENGER，没有时为实体高度处（原版 {@code EntityAttachment.Fallback.AT_HEIGHT}）
      */
     private static List<Vec> adultPassengerAttachments(EntityType type) {
-        var attachments = type.entityAttachments("PASSENGER");
-        return attachments != null ? attachments : List.of(new Vec(0.0, (float) type.height(), 0.0));
+        var attachments = EntityTypeData.passengerAttachments(type);
+        return attachments != null ? attachments : List.of(new Vec(0.0, (float) EntityTypeData.height(type), 0.0));
     }
 
     /**
      * 幼年实体的乘客挂点（原版各实体类的 BABY_DIMENSIONS），其余幼年实体为成年挂点乘以年龄缩放
      */
     private static List<Vec> babyPassengerAttachments(EntityType type) {
-        var height = (float) type.height();
+        var height = (float) EntityTypeData.height(type);
         if (type == EntityType.HORSE) {
             return List.of(new Vec(0.0, height - 0.125F, 0.0).mul(0.7F));
         }
@@ -227,7 +230,7 @@ public final class RidingSeat {
             return List.of(new Vec(0.0, height + 0.03125F, -0.3125F).mul(0.5F));
         }
         if (type == EntityType.LLAMA || type == EntityType.TRADER_LLAMA) {
-            return List.of(new Vec(0.0, (float) EntityType.LLAMA.height() - 0.25F, -0.3F).mul(0.5F));
+            return List.of(new Vec(0.0, (float) EntityTypeData.height(EntityType.LLAMA) - 0.25F, -0.3F).mul(0.5F));
         }
         if (type == EntityType.PIG) {
             return List.of(new Vec(0.0, 0.5F, 0.0));
@@ -252,13 +255,14 @@ public final class RidingSeat {
         return SineTable.yRot(point, -yaw * (float) (Math.PI / 180.0));
     }
 
-    private static <T> T meta(ClientEntity entity, MetadataDef.Entry<T> entry) {
-        return Objects.requireNonNullElse(metaOrNull(entity, entry), entry.defaultValue());
+    private static <T> T meta(ClientEntity entity, EntityMeta<T> entry) {
+        return EntityMetaIndex.get(entity.metadata(), entry);
     }
 
-    @SuppressWarnings("unchecked")
-    private static <T> T metaOrNull(ClientEntity entity, MetadataDef.Entry<T> entry) {
-        var value = entity.metadata().get(entry.index());
-        return value == null ? null : (T) value.value();
+    /**
+     * 实体类型在注册表中的名称（不带命名空间）：MCProtocolLib 常量名的小写形式
+     */
+    private static String name(EntityType type) {
+        return type.name().toLowerCase(Locale.ROOT);
     }
 }

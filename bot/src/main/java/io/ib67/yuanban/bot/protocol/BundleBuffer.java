@@ -1,6 +1,6 @@
 package io.ib67.yuanban.bot.protocol;
 
-import net.minestom.server.network.packet.server.play.BundlePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDelimiterPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -22,7 +22,7 @@ public final class BundleBuffer {
      * @throws IllegalStateException bundle 超过 {@link #MAX_BUNDLE_SIZE} 个数据包
      */
     public @Nullable List<InboundPacket> accept(InboundPacket packet) {
-        if (packet.packet() instanceof BundlePacket) {
+        if (packet.packet() instanceof ClientboundDelimiterPacket) {
             if (open == null) {
                 open = new ArrayList<>();
                 return null;

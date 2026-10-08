@@ -2,7 +2,7 @@ package io.ib67.yuanban.bot.interaction;
 
 import io.ib67.yuanban.bot.movement.Rotation;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
-import net.minestom.server.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -44,7 +44,14 @@ public abstract class HandAction {
     }
 
     /**
-     * 正在使用的物品；没有在使用物品时为 null
+     * 是否正在使用物品（包括空手使用）
+     */
+    boolean usingItem() {
+        return false;
+    }
+
+    /**
+     * 正在使用的物品；没有在使用物品或者空手使用时为 null
      */
     @Nullable ItemStack itemInUse() {
         return null;

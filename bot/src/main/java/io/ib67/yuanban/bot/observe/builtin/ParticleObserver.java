@@ -8,8 +8,8 @@ import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.WorldBoundObserver;
 import io.ib67.yuanban.bot.observe.WorldInfo;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.network.packet.server.play.ParticlePacket;
-import net.minestom.server.particle.Particle;
+import org.geysermc.mcprotocollib.protocol.data.game.level.particle.Particle;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelParticlesPacket;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -58,7 +58,7 @@ public final class ParticleObserver extends WorldBoundObserver<Records<ParticleR
 
     @Override
     protected Subscription worldSubscription() {
-        return Subscription.NONE.received(ParticlePacket.class);
+        return Subscription.NONE.received(ClientboundLevelParticlesPacket.class);
     }
 
     @Override
@@ -68,13 +68,14 @@ public final class ParticleObserver extends WorldBoundObserver<Records<ParticleR
 
     @Override
     protected void observe(Records<ParticleRecord> world, Observation observation, ObserverContext context) {
-        if (!(observation instanceof PacketReceived(ParticlePacket packet))) {
+        if (!(observation instanceof PacketReceived(ClientboundLevelParticlesPacket packet))) {
             return;
         }
-        var center = new Vec(packet.x(), packet.y(), packet.z());
-        if (region.contains(center) && filter.test(packet.particle())) {
-            world.add(new ParticleRecord(packet.particle(), center, new Vec(packet.offsetX(), packet.offsetY(), packet.offsetZ()),
-                    packet.maxSpeed(), packet.particleCount(), packet.longDistance()));
+        var center = new Vec(packet.getX(), packet.getY(), packet.getZ());
+        if (region.contains(center) && filter.test(packet.getParticle())) {
+            world.add(new ParticleRecord(packet.getParticle(), center,
+                    new Vec(packet.getOffsetX(), packet.getOffsetY(), packet.getOffsetZ()), packet.getVelocityOffset(),
+                    packet.getAmount(), packet.isLongDistance()));
         }
     }
 }

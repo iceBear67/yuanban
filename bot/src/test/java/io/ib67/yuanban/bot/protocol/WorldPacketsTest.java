@@ -7,81 +7,102 @@ import io.ib67.yuanban.bot.ChunkBuilder;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.chat.LastSeenTracker;
+import io.ib67.yuanban.bot.chat.Signature;
+import io.ib67.yuanban.bot.data.EntityTypeData;
 import io.ib67.yuanban.bot.observe.BlockEntityChanged;
 import io.ib67.yuanban.bot.observe.BossBarChanged;
 import io.ib67.yuanban.bot.observe.BotTicked;
+import io.ib67.yuanban.bot.observe.EntityDamaged;
+import io.ib67.yuanban.bot.observe.EntityStatusReceived;
 import io.ib67.yuanban.bot.observe.PlayerMoved;
 import io.ib67.yuanban.bot.observe.builtin.Observers;
+import io.ib67.yuanban.bot.registry.SyncedRegistries;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
 import io.ib67.yuanban.bot.view.AbilitiesSnapshot;
 import io.ib67.yuanban.bot.view.ChatKind;
 import io.ib67.yuanban.bot.view.ChatLine;
+import io.ib67.yuanban.bot.view.EntityMeta;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import io.ib67.yuanban.bot.view.HudSnapshot;
-import net.kyori.adventure.bossbar.BossBar;
+import io.netty.buffer.Unpooled;
 import net.kyori.adventure.key.Key;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.crypto.FilterMask;
-import net.minestom.server.crypto.LastSeenMessages;
-import net.minestom.server.crypto.MessageSignature;
-import net.minestom.server.crypto.SignedMessageBody;
-import net.minestom.server.collision.BoundingBox;
-import net.minestom.server.entity.EntityPose;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.RelativeFlags;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.block.BlockEntityType;
-import net.minestom.server.instance.block.BlockHandler;
-import net.minestom.server.message.ChatType;
-import net.minestom.server.network.packet.client.play.ClientChatAckPacket;
-import net.minestom.server.network.packet.client.play.ClientChatMessagePacket;
-import net.minestom.server.network.packet.client.play.ClientConfigurationAckPacket;
-import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
-import net.minestom.server.network.packet.server.play.BlockEntityDataPacket;
-import net.minestom.server.network.packet.server.play.BossBarPacket;
-import net.minestom.server.network.packet.server.play.ChangeGameStatePacket;
-import net.minestom.server.network.packet.server.play.ChunkBiomesPacket;
-import net.minestom.server.network.packet.server.play.DeleteChatPacket;
-import net.minestom.server.network.packet.server.play.DisguisedChatPacket;
-import net.minestom.server.network.packet.server.play.DisplayScoreboardPacket;
-import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
-import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
-import net.minestom.server.network.packet.server.play.EntityPositionSyncPacket;
-import net.minestom.server.network.packet.server.play.EntityTeleportPacket;
-import net.minestom.server.network.packet.server.play.EntityVelocityPacket;
-import net.minestom.server.network.packet.server.play.MultiBlockChangePacket;
-import net.minestom.server.network.packet.server.play.PlayerChatMessagePacket;
-import net.minestom.server.network.packet.server.play.PlayerInfoUpdatePacket;
-import net.minestom.server.network.packet.server.play.ScoreboardObjectivePacket;
-import net.minestom.server.network.packet.server.play.SetPassengersPacket;
-import net.minestom.server.network.packet.server.play.SetTickStatePacket;
-import net.minestom.server.network.packet.server.play.SetTimePacket;
-import net.minestom.server.network.packet.server.play.SpawnEntityPacket;
-import net.minestom.server.network.packet.server.play.StartConfigurationPacket;
-import net.minestom.server.network.packet.server.play.SystemChatPacket;
-import net.minestom.server.network.packet.server.play.TeamsPacket;
-import net.minestom.server.network.packet.server.play.TickStepPacket;
-import net.minestom.server.network.packet.server.play.WorldBorderLerpSizePacket;
-import net.minestom.server.registry.RegistryKey;
-import net.minestom.server.world.clock.WorldClock;
-import net.minestom.server.tag.Tag;
+import org.cloudburstmc.math.vector.Vector3d;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.auth.GameProfile;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.BossBarColor;
+import org.geysermc.mcprotocollib.protocol.data.game.BossBarDivision;
+import org.geysermc.mcprotocollib.protocol.data.game.Holder;
+import org.geysermc.mcprotocollib.protocol.data.game.PlayerListEntry;
+import org.geysermc.mcprotocollib.protocol.data.game.PlayerListEntryAction;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatFilterType;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatType;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatTypeDecoration;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.MessageSignature;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkBiomeData;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EntityEvent;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.Pose;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ObjectEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PositionElement;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.level.ClockNetworkState;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.GameEvent;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.CollisionRule;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.NameTagVisibility;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ObjectiveAction;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreType;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreboardPosition;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.TeamAction;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundBossEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDeleteChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDisguisedChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerInfoUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTickingStatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTickingStepPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundDamageEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityPositionSyncPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityMotionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetPassengersPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTeleportEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunksBiomesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundGameEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSectionBlocksUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderLerpSizePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetDisplayObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetPlayerTeamPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundConfigurationAcknowledgedPacket;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
 import java.util.Arrays;
-import java.util.BitSet;
-import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -122,10 +143,18 @@ class WorldPacketsTest {
     void updateSectionBlocksDecodesNegativeSectionCoordinates() {
         withBot(new Pos(-8.5, 0, -8.5), (_, _, _) -> {
         }, (peer, bot) -> {
-            // 区段 (-1, -1, -1)：方块 (-16, -16, -1) 到 (-1, -1, -16)；每项为状态编号左移 12 位加上区段内坐标
+            // 区段 (-1, -1, -1)：方块 (-16, -16, -1) 到 (-1, -1, -16)。按协议的格式写出，由 MCProtocolLib 解码：
+            // 区段坐标 x 为高 22 位，z 为中间 22 位，y 为低 20 位；每项为状态编号左移 12 位加上区段内坐标
             var gold = ((long) Block.GOLD_BLOCK.stateId() << 12) | (0 << 8) | (15 << 4) | 0;
             var diamond = ((long) Block.DIAMOND_BLOCK.stateId() << 12) | (15 << 8) | (0 << 4) | 15;
-            peer.push(new MultiBlockChangePacket(-1, -1, -1, new long[]{gold, diamond}));
+            var buffer = Unpooled.buffer();
+            buffer.writeLong(((long) (-1 & 0x3FFFFF) << 42) | ((long) (-1 & 0x3FFFFF) << 20) | (-1 & 0xFFFFF));
+            MinecraftTypes.writeVarInt(buffer, 2);
+            MinecraftTypes.writeVarLong(buffer, gold);
+            MinecraftTypes.writeVarLong(buffer, diamond);
+            var packet = new ClientboundSectionBlocksUpdatePacket(buffer);
+            buffer.release();
+            peer.push(packet);
             peer.barrier();
             assertEquals(Block.GOLD_BLOCK, bot.view().block(-16, -16, -1));
             assertEquals(Block.DIAMOND_BLOCK, bot.view().block(-1, -1, -16));
@@ -137,7 +166,7 @@ class WorldPacketsTest {
         withBot((peer, bot) -> {
             var biomeCount = TestServer.biomeCount();
             var data = ChunkBuilder.overworld().biome(3).biomeData(biomeCount);
-            peer.push(new ChunkBiomesPacket(List.of(new ChunkBiomesPacket.ChunkBiomeData(-1, 0, data))));
+            peer.push(new ClientboundChunksBiomesPacket(List.of(new ChunkBiomeData(-1, 0, data))));
             peer.barrier();
             var instance = (BotInstance) bot;
             assertEquals(3, (int) bot.inspect(_ -> instance.state().world().biome(-5, 70, 3)));
@@ -146,25 +175,17 @@ class WorldPacketsTest {
     }
 
     @Test
-    void chunkBlockEntitiesKeepTheNbtSentToClients() {
-        var handler = new BlockHandler() {
-            @Override
-            public Collection<Tag<?>> getBlockEntityTags() {
-                return List.of(Tag.String("CustomName"));
-            }
-
-            @Override
-            public Key getKey() {
-                return Key.key("test:chest");
-            }
-        };
-        var nbt = CompoundBinaryTag.builder().putString("CustomName", "box").putString("Secret", "server only").build();
+    void chunkBlockEntitiesKeepTheNbtFromThePacket() {
+        var nbt = NbtMap.builder().putString("CustomName", "box").build();
         withBot(new Pos(0.5, 0, 0.5), (x, z, chunk) -> {
             if (x == 0 && z == 0) {
-                chunk.set(2, 0, 2, Block.CHEST).blockEntity(2, 0, 2, Block.CHEST.withHandler(handler).withNbt(nbt));
+                chunk.set(2, 0, 2, Block.CHEST).blockEntity(2, 0, 2, BlockEntityType.CHEST, nbt);
             }
-        }, (_, bot) -> assertEquals(CompoundBinaryTag.builder().putString("CustomName", "box").build(),
-                bot.view().block(2, 0, 2).nbt()));
+        }, (_, bot) -> {
+            // 方块不带 NBT，方块实体的 NBT 单独读取
+            assertNull(bot.view().block(2, 0, 2).nbt());
+            assertEquals(nbt, bot.view().blockEntity(2, 0, 2));
+        });
     }
 
     @Test
@@ -175,35 +196,39 @@ class WorldPacketsTest {
             }
         }, (peer, bot) -> {
             var changes = bot.observe(Observers.observations(BlockEntityChanged.class));
-            var named = CompoundBinaryTag.builder().putString("CustomName", "\"box\"").build();
+            var named = NbtMap.builder().putString("CustomName", "\"box\"").build();
             var chest = new Vec(2, 0, 2);
             // 原版 handleBlockEntityData 只应用到 getBlockEntity(pos, type) 存在的方块实体：
             // 类型不同、方块没有方块实体、区块没有加载、超出维度高度时忽略
-            peer.push(new BlockEntityDataPacket(chest, BlockEntityType.SIGN, named));
-            peer.push(new BlockEntityDataPacket(new Vec(2, -1, 2), BlockEntityType.CHEST, named));
-            peer.push(new BlockEntityDataPacket(new Vec(16 * 4 + 2, 0, 2), BlockEntityType.CHEST, named));
-            peer.push(new BlockEntityDataPacket(new Vec(2, 320, 2), BlockEntityType.CHEST, named));
+            peer.push(new ClientboundBlockEntityDataPacket(Vector3i.from(2, 0, 2), BlockEntityType.SIGN, named));
+            peer.push(new ClientboundBlockEntityDataPacket(Vector3i.from(2, -1, 2), BlockEntityType.CHEST, named));
+            peer.push(new ClientboundBlockEntityDataPacket(Vector3i.from(16 * 4 + 2, 0, 2), BlockEntityType.CHEST, named));
+            peer.push(new ClientboundBlockEntityDataPacket(Vector3i.from(2, 320, 2), BlockEntityType.CHEST, named));
             peer.barrier();
-            assertNull(bot.view().block(chest).nbt());
-            peer.push(new BlockEntityDataPacket(chest, BlockEntityType.CHEST, named));
+            assertNull(bot.view().blockEntity(chest));
+            peer.push(new ClientboundBlockEntityDataPacket(Vector3i.from(2, 0, 2), BlockEntityType.CHEST, named));
             peer.barrier();
-            assertEquals(named, bot.view().block(chest).nbt());
+            assertEquals(named, bot.view().blockEntity(chest));
             changes.close();
             assertEquals(List.of(chest), changes.observer().observations().stream().map(BlockEntityChanged::pos).toList());
         });
+    }
+
+    private static ClientboundBossEventPacket addBossBar(UUID id) {
+        return new ClientboundBossEventPacket(id, Component.text("boss"), 1f, BossBarColor.RED, BossBarDivision.NONE,
+                false, false, false);
     }
 
     @Test
     void updatingAnUnknownBossBarEndsTheBot() {
         withBot((peer, bot) -> {
             var known = UUID.randomUUID();
-            peer.push(new BossBarPacket(known, new BossBarPacket.AddAction(Component.text("boss"), 1f, BossBar.Color.RED,
-                    BossBar.Overlay.PROGRESS, (byte) 0)));
-            peer.push(new BossBarPacket(known, new BossBarPacket.UpdateHealthAction(0.5f)));
+            peer.push(addBossBar(known));
+            peer.push(new ClientboundBossEventPacket(known, 0.5f));
             peer.barrier();
             assertEquals(0.5f, bot.view().hud().bossBars().get(known).health());
             // 原版客户端读取不存在的条目时出错并断开连接
-            peer.push(new BossBarPacket(UUID.randomUUID(), new BossBarPacket.UpdateHealthAction(0.5f)));
+            peer.push(new ClientboundBossEventPacket(UUID.randomUUID(), 0.5f));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
         });
@@ -212,7 +237,7 @@ class WorldPacketsTest {
     private static void waitTicks(TestPeer peer, int ticks) {
         var mark = peer.mark();
         var deadline = System.nanoTime() + TestServer.TIMEOUT.toNanos();
-        while (peer.sentSince(mark, ClientTickEndPacket.class).size() < ticks) {
+        while (peer.sentSince(mark, ServerboundClientTickEndPacket.class).size() < ticks) {
             if (System.nanoTime() > deadline) {
                 throw new AssertionError("timed out waiting for " + ticks + " ticks");
             }
@@ -227,7 +252,8 @@ class WorldPacketsTest {
             Supplier<Long> age = () -> bot.inspect(_ -> instance.state().world().worldAge());
             Supplier<Double> diameter = () -> bot.inspect(_ -> instance.state().world().border().toWorldBorder().diameter());
             // 先冻结再开始插值：两个数据包之间即使有 tick，世界边框也不推进
-            peer.push(new SetTickStatePacket(20, true), new SetTimePacket(1000, Map.of()), new WorldBorderLerpSizePacket(100, 50, 1000));
+            peer.push(new ClientboundTickingStatePacket(20, true), new ClientboundSetTimePacket(1000, Map.of()),
+                    new ClientboundSetBorderLerpSizePacket(100, 50, 1000));
             peer.barrier();
             var frozenAge = age.get();
             var frozenDiameter = diameter.get();
@@ -236,7 +262,7 @@ class WorldPacketsTest {
             assertEquals(frozenAge, age.get());
             assertEquals(frozenDiameter, diameter.get());
             // Step Tick 给出几步就正常运行几个 tick（原版 TickRateManager.tick 每次减一）
-            peer.push(new TickStepPacket(3));
+            peer.push(new ClientboundTickingStepPacket(3));
             peer.barrier();
             waitTicks(peer, 6);
             assertEquals(frozenAge + 3, age.get());
@@ -257,14 +283,16 @@ class WorldPacketsTest {
         withBot(new Pos(0.5, 200, 0.5), (_, _, _) -> {
         }, (peer, bot) -> {
             var instance = (BotInstance) bot;
-            peer.push(new SetTimePacket(1000, Map.of(WorldClock.OVERWORLD, new SetTimePacket.ClockState(0, 0f, 1f))),
-                    new WorldBorderLerpSizePacket(1000, 0, 1000));
+            var overworldClock = Key.key("overworld");
+            var clockId = TestServer.registryId(SyncedRegistries.WORLD_CLOCK, overworldClock);
+            peer.push(new ClientboundSetTimePacket(1000, Map.of(clockId, new ClockNetworkState(0, 0f, 1f))),
+                    new ClientboundSetBorderLerpSizePacket(1000, 0, 1000));
             peer.barrier();
             // 插值开始之后的第一个 tick 范围仍为起始大小，之后每个 tick 都缩小
             waitTicks(peer, 2);
             var samples = new CopyOnWriteArrayList<TickSample>();
             Function<Boolean, TickSample> sample = ended -> new TickSample(ended, instance.state().world().worldAge(),
-                    instance.state().clocks().clocks().get(WorldClock.OVERWORLD), instance.state().world().border().toWorldBorder().diameter());
+                    instance.state().clocks().clocks().get(overworldClock), instance.state().world().border().toWorldBorder().diameter());
             var moved = bot.observe(Observers.listener(PlayerMoved.class, _ -> samples.add(sample.apply(false))));
             var ticked = bot.observe(Observers.listener(BotTicked.class, _ -> samples.add(sample.apply(true))));
             waitTicks(peer, 5);
@@ -292,47 +320,89 @@ class WorldPacketsTest {
     }
 
     @Test
+    void rainAndThunderLevelsAreLimitedToZeroAndOne() {
+        withBot((peer, bot) -> {
+            var instance = (BotInstance) bot;
+            // 按协议的格式写出 Game Event 7、8，由 MCProtocolLib 解码：超出 [0, 1] 的强度被限制到这个范围，
+            // 与原版 setRainLevel、setThunderLevel 相同
+            peer.push(gameEvent(GameEvent.RAIN_LEVEL_CHANGE, 1.5f), gameEvent(GameEvent.THUNDER_LEVEL_CHANGE, -0.5f));
+            peer.barrier();
+            assertEquals(1f, (float) bot.inspect(_ -> instance.state().world().weather().rainLevel()));
+            assertEquals(0f, (float) bot.inspect(_ -> instance.state().world().weather().thunderLevel()));
+            peer.push(gameEvent(GameEvent.RAIN_LEVEL_CHANGE, 0.25f), gameEvent(GameEvent.THUNDER_LEVEL_CHANGE, 0.75f));
+            peer.barrier();
+            assertEquals(0.25f, (float) bot.inspect(_ -> instance.state().world().weather().rainLevel()));
+            assertEquals(0.75f, (float) bot.inspect(_ -> instance.state().world().weather().thunderLevel()));
+        });
+    }
+
+    private static ClientboundGameEventPacket gameEvent(GameEvent event, float value) {
+        var buffer = Unpooled.buffer();
+        buffer.writeByte(event.ordinal());
+        buffer.writeFloat(value);
+        var packet = new ClientboundGameEventPacket(buffer);
+        buffer.release();
+        return packet;
+    }
+
+    /**
+     * 玩家列表的一项；username 为 null 时没有档案（不带 ADD_PLAYER 时 MCProtocolLib 不读取档案）
+     */
+    private static PlayerListEntry entry(UUID uuid, @Nullable String username, boolean listed, int latency, GameMode gameMode,
+                                         int listOrder) {
+        return new PlayerListEntry(uuid, username == null ? null : new GameProfile(uuid, username), listed, latency, gameMode,
+                null, true, listOrder, null, 0, null, null);
+    }
+
+    private static ClientboundPlayerInfoUpdatePacket playerInfo(EnumSet<PlayerListEntryAction> actions, PlayerListEntry... entries) {
+        return new ClientboundPlayerInfoUpdatePacket(actions, entries);
+    }
+
+    @Test
     void becomingASpectatorThroughThePlayerListStopsVerticalMotion() {
         withBot((peer, bot) -> {
             // 暂停移动：速度只由数据包改变
             bot.suspendMovement();
             bot.await(state -> state.movementSuspended(), TestServer.TIMEOUT);
             var self = bot.inspect(state -> state.player().uuid());
-            var velocity = new Vec(0.25, 0.5, 0);
-            peer.push(new EntityVelocityPacket(TestServer.ENTITY_ID, velocity));
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER, PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE),
-                    List.of(new PlayerInfoUpdatePacket.Entry(self, "world", List.of(), true, 0, GameMode.SPECTATOR, null, null, 0, true))));
+            var velocity = Vector3d.from(0.25, 0.5, 0);
+            peer.push(new ClientboundSetEntityMotionPacket(TestServer.ENTITY_ID, velocity));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_GAME_MODE),
+                    entry(self, "world", true, 0, GameMode.SPECTATOR, 0)));
             peer.barrier();
             // 原版 LocalPlayer.onGameModeChanged：玩家列表中的游戏模式（新条目为生存模式）改成旁观模式时竖直速度清零
             assertEquals(new Vec(0.25, 0, 0), bot.view().player().velocity());
             assertEquals(GameMode.SPECTATOR, bot.view().player().gameMode());
             // 列表中已经是旁观模式：不再清零
-            peer.push(new EntityVelocityPacket(TestServer.ENTITY_ID, velocity));
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE),
-                    List.of(new PlayerInfoUpdatePacket.Entry(self, "world", List.of(), true, 0, GameMode.SPECTATOR, null, null, 0, true))));
+            peer.push(new ClientboundSetEntityMotionPacket(TestServer.ENTITY_ID, velocity));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.UPDATE_GAME_MODE), entry(self, null, true, 0, GameMode.SPECTATOR, 0)));
             peer.barrier();
-            assertEquals(velocity, bot.view().player().velocity());
+            assertEquals(new Vec(0.25, 0.5, 0), bot.view().player().velocity());
         });
     }
 
-    private static TeamsPacket.Settings teamSettings(String displayName) {
-        return new TeamsPacket.Settings(Component.text(displayName), Component.empty(), Component.empty(),
-                TeamsPacket.NameTagVisibility.ALWAYS, TeamsPacket.CollisionRule.ALWAYS, null, (byte) 0);
+    private static ClientboundSetPlayerTeamPacket createTeam(String name, String displayName, String... members) {
+        return new ClientboundSetPlayerTeamPacket(name, Component.text(displayName), Component.empty(), Component.empty(),
+                false, false, NameTagVisibility.ALWAYS, CollisionRule.ALWAYS, null, members);
+    }
+
+    private static ClientboundSetPlayerTeamPacket teamMembers(String name, TeamAction action, String... members) {
+        return new ClientboundSetPlayerTeamPacket(name, action, members);
     }
 
     @Test
     void joiningATeamLeavesThePreviousOne() {
         withBot((peer, bot) -> {
-            peer.push(new TeamsPacket("red", new TeamsPacket.CreateTeamAction(teamSettings("Red"), List.of("alice", "bob"))));
+            peer.push(createTeam("red", "Red", "alice", "bob"));
             // 原版 Scoreboard.addPlayerToTeam：一个名称只属于一个队伍，加入新队伍时先离开原来的队伍
-            peer.push(new TeamsPacket("blue", new TeamsPacket.CreateTeamAction(teamSettings("Blue"), List.of("alice"))));
-            peer.push(new TeamsPacket("blue", new TeamsPacket.AddEntitiesToTeamAction(List.of("bob"))));
+            peer.push(createTeam("blue", "Blue", "alice"));
+            peer.push(teamMembers("blue", TeamAction.ADD_PLAYER, "bob"));
             peer.barrier();
             var teams = bot.view().hud().teams();
             assertTrue(teams.get("red").members().isEmpty(), teams::toString);
             assertEquals(Set.of("alice", "bob"), teams.get("blue").members());
             // 原版 Scoreboard.addPlayerTeam：创建已经存在的队伍时沿用它与它的成员，更新显示设置
-            peer.push(new TeamsPacket("blue", new TeamsPacket.CreateTeamAction(teamSettings("Navy"), List.of("carol"))));
+            peer.push(createTeam("blue", "Navy", "carol"));
             peer.barrier();
             var blue = bot.view().hud().teams().get("blue");
             assertEquals(Set.of("alice", "bob", "carol"), blue.members());
@@ -343,41 +413,41 @@ class WorldPacketsTest {
     @Test
     void removingAPlayerThatIsNotInTheTeamEndsTheBot() {
         withBot((peer, bot) -> {
-            peer.push(new TeamsPacket("red", new TeamsPacket.CreateTeamAction(teamSettings("Red"), List.of("alice"))),
-                    new TeamsPacket("blue", new TeamsPacket.CreateTeamAction(teamSettings("Blue"), List.of("bob"))));
-            peer.push(new TeamsPacket("red", new TeamsPacket.RemoveEntitiesToTeamAction(List.of("alice"))));
+            peer.push(createTeam("red", "Red", "alice"), createTeam("blue", "Blue", "bob"));
+            peer.push(teamMembers("red", TeamAction.REMOVE_PLAYER, "alice"));
             // 不存在的队伍：原版 handleSetPlayerTeamPacket 什么都不做
-            peer.push(new TeamsPacket("green", new TeamsPacket.RemoveEntitiesToTeamAction(List.of("bob"))));
+            peer.push(teamMembers("green", TeamAction.REMOVE_PLAYER, "bob"));
             peer.barrier();
             assertTrue(bot.view().hud().teams().get("red").members().isEmpty());
             assertEquals(Set.of("bob"), bot.view().hud().teams().get("blue").members());
             // 原版 Scoreboard.removePlayerFromTeam：成员不在这个队伍中时抛出异常，客户端断开连接
-            peer.push(new TeamsPacket("red", new TeamsPacket.RemoveEntitiesToTeamAction(List.of("bob"))));
+            peer.push(teamMembers("red", TeamAction.REMOVE_PLAYER, "bob"));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
         });
     }
 
-    private static ScoreboardObjectivePacket objective(String name, int mode) {
-        return mode == 1 ? new ScoreboardObjectivePacket(name, (byte) mode, null, null, null)
-                : new ScoreboardObjectivePacket(name, (byte) mode, Component.text(name), ScoreboardObjectivePacket.Type.INTEGER, null);
+    private static ClientboundSetObjectivePacket objective(String name, ObjectiveAction action) {
+        return action == ObjectiveAction.REMOVE ? new ClientboundSetObjectivePacket(name)
+                : new ClientboundSetObjectivePacket(name, action, Component.text(name), ScoreType.INTEGER, null);
     }
 
     @Test
     void objectivesAndDisplaySlotsFollowTheVanillaScoreboard() {
         withBot((peer, bot) -> {
-            peer.push(objective("kills", 0), new DisplayScoreboardPacket((byte) 1, "kills"),
-                    new DisplayScoreboardPacket((byte) 2, "kills"), new DisplayScoreboardPacket((byte) 0, "missing"));
+            peer.push(objective("kills", ObjectiveAction.ADD), new ClientboundSetDisplayObjectivePacket(ScoreboardPosition.SIDEBAR, "kills"),
+                    new ClientboundSetDisplayObjectivePacket(ScoreboardPosition.BELOW_NAME, "kills"),
+                    new ClientboundSetDisplayObjectivePacket(ScoreboardPosition.PLAYER_LIST, "missing"));
             // 原版 handleSetDisplayObjective：没有这个目标时清空这个显示位置
-            peer.push(new DisplayScoreboardPacket((byte) 2, "missing"));
+            peer.push(new ClientboundSetDisplayObjectivePacket(ScoreboardPosition.BELOW_NAME, "missing"));
             peer.barrier();
-            assertEquals(Map.of(1, "kills"), bot.view().hud().displaySlots());
+            assertEquals(Map.of(ScoreboardPosition.SIDEBAR, "kills"), bot.view().hud().displaySlots());
             // 原版 Scoreboard.removeObjective：删除目标时清空指向它的显示位置，重新创建之后也不再指向它
-            peer.push(objective("kills", 1), objective("kills", 0));
+            peer.push(objective("kills", ObjectiveAction.REMOVE), objective("kills", ObjectiveAction.ADD));
             peer.barrier();
             assertEquals(Map.of(), bot.view().hud().displaySlots());
             // 原版 Scoreboard.addObjective：创建已经存在的目标时抛出异常，客户端断开连接
-            peer.push(objective("kills", 0));
+            peer.push(objective("kills", ObjectiveAction.ADD));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
         });
@@ -387,12 +457,10 @@ class WorldPacketsTest {
     void addingAListedPlayerAgainKeepsItsEntry() {
         withBot((peer, bot) -> {
             var friend = UUID.randomUUID();
-            var actions = EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER, PlayerInfoUpdatePacket.Action.UPDATE_LATENCY);
-            peer.push(new PlayerInfoUpdatePacket(actions,
-                    List.of(new PlayerInfoUpdatePacket.Entry(friend, "friend", List.of(), true, 10, GameMode.SURVIVAL, null, null, 0, true))));
+            var actions = EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_LATENCY);
+            peer.push(playerInfo(actions, entry(friend, "friend", true, 10, GameMode.SURVIVAL, 0)));
             // 原版 handlePlayerInfoUpdate 用 putIfAbsent 加入：保留原来的条目，只应用同一数据包中的其它更新
-            peer.push(new PlayerInfoUpdatePacket(actions,
-                    List.of(new PlayerInfoUpdatePacket.Entry(friend, "renamed", List.of(), true, 99, GameMode.SURVIVAL, null, null, 0, true))));
+            peer.push(playerInfo(actions, entry(friend, "renamed", true, 99, GameMode.SURVIVAL, 0)));
             peer.barrier();
             var entry = bot.view().hud().playerList().get(friend);
             assertEquals("friend", entry.username());
@@ -404,8 +472,7 @@ class WorldPacketsTest {
     void newPlayerListEntriesStartInSurvivalMode() {
         withBot((peer, bot) -> {
             var friend = UUID.randomUUID();
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER),
-                    List.of(new PlayerInfoUpdatePacket.Entry(friend, "friend", List.of(), true, 10, GameMode.CREATIVE, null, null, 3, true))));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.ADD_PLAYER), entry(friend, "friend", true, 10, GameMode.CREATIVE, 3)));
             peer.barrier();
             // 原版 PlayerInfo 的初始值：生存模式，延迟 0，不显示在列表中，排序 0；没有对应的更新时不取条目中的值
             assertEquals(new HudSnapshot.PlayerListEntry(friend, "friend", GameMode.SURVIVAL, 0, false, null, 0),
@@ -419,10 +486,9 @@ class WorldPacketsTest {
             var changes = bot.observe(Observers.observations(BossBarChanged.class));
             var known = UUID.randomUUID();
             // 原版 BossHealthOverlay 的 remove 只是从表中删除：移除没有添加过的 Boss Bar 什么都不做
-            peer.push(new BossBarPacket(UUID.randomUUID(), new BossBarPacket.RemoveAction()));
-            peer.push(new BossBarPacket(known, new BossBarPacket.AddAction(Component.text("boss"), 1f, BossBar.Color.RED,
-                    BossBar.Overlay.PROGRESS, (byte) 0)));
-            peer.push(new BossBarPacket(known, new BossBarPacket.RemoveAction()));
+            peer.push(new ClientboundBossEventPacket(UUID.randomUUID()));
+            peer.push(addBossBar(known));
+            peer.push(new ClientboundBossEventPacket(known));
             peer.barrier();
             changes.close();
             var observed = changes.observer().observations();
@@ -437,15 +503,15 @@ class WorldPacketsTest {
         withBot((peer, bot) -> {
             var stranger = UUID.randomUUID();
             var self = bot.inspect(state -> state.player().uuid());
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.UPDATE_LATENCY, PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE),
-                    List.of(new PlayerInfoUpdatePacket.Entry(stranger, "", List.of(), true, 50, GameMode.CREATIVE, null, null, 0, true),
-                            new PlayerInfoUpdatePacket.Entry(self, "", List.of(), true, 50, GameMode.CREATIVE, null, null, 0, true))));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.UPDATE_LATENCY, PlayerListEntryAction.UPDATE_GAME_MODE),
+                    entry(stranger, null, true, 50, GameMode.CREATIVE, 0),
+                    entry(self, null, true, 50, GameMode.CREATIVE, 0)));
             peer.barrier();
             assertFalse(bot.view().hud().playerList().containsKey(stranger));
             // 自己不在玩家列表中时，游戏模式的更新同样被忽略
             assertEquals(GameMode.SURVIVAL, bot.view().player().gameMode());
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER, PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE),
-                    List.of(new PlayerInfoUpdatePacket.Entry(self, "world", List.of(), true, 0, GameMode.CREATIVE, null, null, 0, true))));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_GAME_MODE),
+                    entry(self, "world", true, 0, GameMode.CREATIVE, 0)));
             peer.barrier();
             assertTrue(bot.view().hud().playerList().containsKey(self));
             assertEquals(GameMode.CREATIVE, bot.view().player().gameMode());
@@ -462,32 +528,44 @@ class WorldPacketsTest {
      */
     private static void withChatBot(BiConsumer<TestPeer, Bot> test) {
         withBot((peer, bot) -> {
-            peer.push(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER),
-                    List.of(new PlayerInfoUpdatePacket.Entry(SENDER, "sender", List.of(), false, 0, GameMode.SURVIVAL, null, null, 0, true))));
+            peer.push(playerInfo(EnumSet.of(PlayerListEntryAction.ADD_PLAYER), entry(SENDER, "sender", false, 0, GameMode.SURVIVAL, 0)));
             test.accept(peer, bot);
         });
     }
 
     /**
-     * wiki：聊天类型的编号为 {@code minecraft:chat_type} 注册表中的编号加一，0 表示数据包随后给出定义
+     * 注册表中的聊天类型：数据包中的编号为 {@code minecraft:chat_type} 注册表中的编号（MCProtocolLib 已经减去 1）
      */
-    private static int chatTypeId(RegistryKey<ChatType> type) {
-        return TestServer.vanilla().chatType().getId(type) + 1;
+    private static Holder<ChatType> chatType(String name) {
+        return Holder.ofId(TestServer.registryId(SyncedRegistries.CHAT_TYPE, Key.key(name)));
     }
 
-    private static PlayerChatMessagePacket chat(int globalIndex, List<MessageSignature.Packed> lastSeen) {
-        return chat(globalIndex, lastSeen, new MessageSignature(new byte[256]));
+    /**
+     * 已读列表中按编号引用签名缓存中的签名（MCProtocolLib 已经把编号减去 1）
+     */
+    private static MessageSignature cached(int id) {
+        return new MessageSignature(id, null);
     }
 
-    private static PlayerChatMessagePacket chat(int globalIndex, List<MessageSignature.Packed> lastSeen, MessageSignature signature) {
-        return chat(globalIndex, lastSeen, signature, "hi", null, new FilterMask(FilterMask.Type.PASS_THROUGH, new BitSet()));
+    /**
+     * 完整给出的签名：MCProtocolLib 以编号 -1 表示
+     */
+    private static MessageSignature full(byte[] signature) {
+        return new MessageSignature(-1, signature);
     }
 
-    private static PlayerChatMessagePacket chat(int globalIndex, List<MessageSignature.Packed> lastSeen, @Nullable MessageSignature signature,
-                                                String content, @Nullable Component unsignedContent, FilterMask filter) {
-        var body = new SignedMessageBody.Packed(content, Instant.now(), 0, new LastSeenMessages.Packed(lastSeen));
-        return new PlayerChatMessagePacket(globalIndex, SENDER, 0, signature, body, unsignedContent, filter,
-                chatTypeId(ChatType.CHAT), Component.text("sender"), null);
+    private static ClientboundPlayerChatPacket chat(int globalIndex, List<MessageSignature> lastSeen) {
+        return chat(globalIndex, lastSeen, new byte[256]);
+    }
+
+    private static ClientboundPlayerChatPacket chat(int globalIndex, List<MessageSignature> lastSeen, byte[] signature) {
+        return chat(globalIndex, lastSeen, signature, "hi", null, ChatFilterType.PASS_THROUGH);
+    }
+
+    private static ClientboundPlayerChatPacket chat(int globalIndex, List<MessageSignature> lastSeen, byte @Nullable [] signature,
+                                                    String content, @Nullable Component unsignedContent, ChatFilterType filter) {
+        return new ClientboundPlayerChatPacket(globalIndex, SENDER, 0, signature, content, System.currentTimeMillis(), 0,
+                lastSeen, unsignedContent, filter, chatType("chat"), Component.text("sender"), null);
     }
 
     @Test
@@ -495,15 +573,15 @@ class WorldPacketsTest {
         withChatBot((peer, bot) -> {
             // 第一条消息把自己的签名放进缓存的编号 0
             peer.push(chat(0, List.of()));
-            peer.push(chat(1, List.of(new MessageSignature.Packed(0, null))));
+            peer.push(chat(1, List.of(cached(0))));
             peer.barrier();
             assertEquals(2, bot.view().chat().size());
             // 缓存中没有编号 5 的签名：原版客户端以无效数据包断开连接
-            peer.push(chat(2, List.of(new MessageSignature.Packed(5, null))));
+            peer.push(chat(2, List.of(cached(5))));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
         });
         withBot((peer, bot) -> {
-            peer.push(new DeleteChatPacket(new MessageSignature.Packed(7, null)));
+            peer.push(new ClientboundDeleteChatPacket(cached(7)));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
         });
     }
@@ -524,24 +602,24 @@ class WorldPacketsTest {
     @Test
     void deletingAMessageNotYetAcknowledgedRemovesItFromTheSeenMessages() {
         withChatBot((peer, bot) -> {
-            var first = new MessageSignature(filled(1));
-            var second = new MessageSignature(filled(2));
+            var first = filled(1);
+            var second = filled(2);
             peer.push(chat(0, List.of(), first), chat(1, List.of(), second));
             // 原版 handleDeleteChat 调用 ignorePending：第一条还没有随 Chat Message 告知服务端，不再计入已读
-            peer.push(new DeleteChatPacket(new MessageSignature.Packed(first)));
+            peer.push(new ClientboundDeleteChatPacket(full(first)));
             peer.barrier();
             var mark = peer.mark();
             assertTrue(bot.chat("seen").await(TestServer.TIMEOUT));
-            var message = peer.awaitSent(mark, ClientChatMessagePacket.class, TestServer.TIMEOUT);
-            assertEquals(2, message.ackOffset());
-            assertEquals(1, message.ackList().cardinality());
-            assertEquals(LastSeenTracker.checksum(List.of(second)), message.checksum());
+            var message = peer.awaitSent(mark, ServerboundChatPacket.class, TestServer.TIMEOUT);
+            assertEquals(2, message.getOffset());
+            assertEquals(1, message.getAcknowledgedMessages().cardinality());
+            assertEquals(LastSeenTracker.checksum(List.of(new Signature(second))), message.getChecksum());
             // 已经告知过的消息被删除时保持已读
-            peer.push(new DeleteChatPacket(new MessageSignature.Packed(second)));
+            peer.push(new ClientboundDeleteChatPacket(full(second)));
             peer.barrier();
             mark = peer.mark();
             assertTrue(bot.chat("still seen").await(TestServer.TIMEOUT));
-            assertEquals(1, peer.awaitSent(mark, ClientChatMessagePacket.class, TestServer.TIMEOUT).ackList().cardinality());
+            assertEquals(1, peer.awaitSent(mark, ServerboundChatPacket.class, TestServer.TIMEOUT).getAcknowledgedMessages().cardinality());
         });
     }
 
@@ -551,12 +629,12 @@ class WorldPacketsTest {
             peer.push(chat(0, List.of()));
             peer.barrier();
             var mark = peer.mark();
-            peer.push(new StartConfigurationPacket());
-            var ack = peer.awaitSent(mark, ClientConfigurationAckPacket.class, TestServer.TIMEOUT);
+            peer.push(new ClientboundStartConfigurationPacket());
+            var ack = peer.awaitSent(mark, ServerboundConfigurationAcknowledgedPacket.class, TestServer.TIMEOUT);
             // 原版 handleConfigurationStart：未确认的消息数大于 0 时先发送 Acknowledge Message
             var sent = peer.sentSince(mark);
-            assertEquals(new ClientChatAckPacket(1), sent.get(sent.indexOf(ack) - 1));
-            assertEquals(1, peer.sentSince(mark, ClientChatAckPacket.class).size());
+            assertEquals(new ServerboundChatAckPacket(1), sent.get(sent.indexOf(ack) - 1));
+            assertEquals(1, peer.sentSince(mark, ServerboundChatAckPacket.class).size());
         });
     }
 
@@ -570,48 +648,51 @@ class WorldPacketsTest {
     void loginRestartsTheMessageSignatureCache() {
         withChatBot((peer, bot) -> {
             peer.push(chat(0, List.of()));
-            peer.push(chat(1, List.of(new MessageSignature.Packed(0, null))));
+            peer.push(chat(1, List.of(cached(0))));
             peer.barrier();
             // 原版 handleLogin 新建 MessageSignatureCache：之前的签名不再能按编号引用
             peer.push(TestServer.joinPacket(GameMode.SURVIVAL));
-            peer.push(chat(0, List.of(new MessageSignature.Packed(0, null))));
+            peer.push(chat(0, List.of(cached(0))));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
         });
     }
 
     @Test
-    void filteredPlayerChatFollowsTheVanillaClient() {
+    void fullyFilteredPlayerChatIsNotShown() {
         withChatBot((peer, bot) -> {
-            var shown = new MessageSignature(filled(1));
-            var mask = new BitSet();
-            mask.set(1, 3);
-            // 原版 FilterMask.applyWithFormatting：部分过滤时显示过滤之后的消息正文（不使用未签名内容），被过滤的字符换成 #
-            peer.push(chat(0, List.of(), shown, "hello", Component.text("unsigned"), new FilterMask(FilterMask.Type.PARTIALLY_FILTERED, mask)));
+            var shown = filled(1);
+            peer.push(chat(0, List.of(), shown, "hello", null, ChatFilterType.PASS_THROUGH));
             // 原版 ChatListener.showMessageToPlayer：完全过滤的消息不显示
-            peer.push(chat(1, List.of(), new MessageSignature(filled(2)), "secret", null,
-                    new FilterMask(FilterMask.Type.FULLY_FILTERED, new BitSet())));
+            peer.push(chat(1, List.of(), filled(2), "secret", null, ChatFilterType.FULLY_FILTERED));
             peer.barrier();
             var lines = bot.view().chat();
             assertEquals(1, lines.size());
-            var filteredStyle = Style.style(NamedTextColor.DARK_GRAY, HoverEvent.showText(Component.translatable("chat.filtered")));
-            assertEquals(Component.text().append(Component.text("h"), Component.text("##", filteredStyle), Component.text("lo")).build(),
-                    lines.getFirst().message());
-            assertEquals("h##lo", lines.getFirst().plainText());
+            assertEquals(Component.text("hello"), lines.getFirst().message());
             // 原版 markMessageAsProcessed(signature, false)：没有显示的消息只计入未确认的消息数，不计入已读
             var mark = peer.mark();
             assertTrue(bot.chat("seen").await(TestServer.TIMEOUT));
-            var message = peer.awaitSent(mark, ClientChatMessagePacket.class, TestServer.TIMEOUT);
-            assertEquals(2, message.ackOffset());
-            assertEquals(1, message.ackList().cardinality());
-            assertEquals(LastSeenTracker.checksum(List.of(shown)), message.checksum());
+            var message = peer.awaitSent(mark, ServerboundChatPacket.class, TestServer.TIMEOUT);
+            assertEquals(2, message.getOffset());
+            assertEquals(1, message.getAcknowledgedMessages().cardinality());
+            assertEquals(LastSeenTracker.checksum(List.of(new Signature(shown))), message.getChecksum());
+        });
+    }
+
+    @Test
+    void partiallyFilteredPlayerChatEndsTheBot() {
+        withChatBot((peer, bot) -> {
+            // 待办 T2：MCProtocolLib 解码部分过滤的消息时不读取过滤标记，本库不支持这种消息，bot 因异常结束
+            peer.push(chat(0, List.of(), filled(1), "hello", null, ChatFilterType.PARTIALLY_FILTERED));
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
+            assertInstanceOf(UnsupportedOperationException.class, bot.failure());
         });
     }
 
     @Test
     void chatFromPlayersOutsideThePlayerListShowsAValidationError() {
         withBot((peer, bot) -> {
-            var signature = new MessageSignature(filled(3));
+            var signature = filled(3);
             peer.push(chat(0, List.of(), signature));
             peer.barrier();
             // 原版 handleChatMessageError：不显示这条消息，代替它显示 chat.validation_error
@@ -619,44 +700,61 @@ class WorldPacketsTest {
             assertEquals(Component.translatable("chat.validation_error", NamedTextColor.RED, TextDecoration.ITALIC), line.message());
             assertEquals(SENDER, line.sender());
             // 代替显示的文本没有签名，Delete Message 不删除它
-            peer.push(new DeleteChatPacket(new MessageSignature.Packed(signature)));
+            peer.push(new ClientboundDeleteChatPacket(full(signature)));
             peer.barrier();
             assertEquals(1, bot.view().chat().size());
             // 签名只计入未确认的消息数，不计入已读（原版 markMessageAsProcessed(signature, false)）
             var mark = peer.mark();
             assertTrue(bot.chat("seen").await(TestServer.TIMEOUT));
-            var message = peer.awaitSent(mark, ClientChatMessagePacket.class, TestServer.TIMEOUT);
-            assertEquals(1, message.ackOffset());
-            assertEquals(0, message.ackList().cardinality());
+            var message = peer.awaitSent(mark, ServerboundChatPacket.class, TestServer.TIMEOUT);
+            assertEquals(1, message.getOffset());
+            assertEquals(0, message.getAcknowledgedMessages().cardinality());
         });
     }
 
     @Test
     void chatLinesRecordTheChatTypeAndTheNames() {
         withChatBot((peer, bot) -> {
-            var body = new SignedMessageBody.Packed("hi", Instant.now(), 0, new LastSeenMessages.Packed(List.of()));
-            peer.push(new PlayerChatMessagePacket(0, SENDER, 0, null, body, null, new FilterMask(FilterMask.Type.PASS_THROUGH, new BitSet()),
-                    chatTypeId(ChatType.MSG_COMMAND_INCOMING), Component.text("alice"), Component.text("bob")));
-            peer.push(new DisguisedChatPacket(Component.text("disguised"), chatTypeId(ChatType.SAY_COMMAND), Component.text("server"), null));
-            peer.push(new SystemChatPacket(Component.text("system"), false));
+            peer.push(new ClientboundPlayerChatPacket(0, SENDER, 0, null, "hi", System.currentTimeMillis(), 0, List.of(), null,
+                    ChatFilterType.PASS_THROUGH, chatType("msg_command_incoming"), Component.text("alice"), Component.text("bob")));
+            peer.push(new ClientboundDisguisedChatPacket(Component.text("disguised"), chatType("say_command"), Component.text("server"), null));
+            peer.push(new ClientboundSystemChatPacket(Component.text("system"), false));
             peer.barrier();
             assertEquals(List.of(
-                    new ChatLine(ChatKind.PLAYER, SENDER, ChatType.MSG_COMMAND_INCOMING, Component.text("alice"), Component.text("bob"),
-                            Component.text("hi"), "hi"),
-                    new ChatLine(ChatKind.DISGUISED, null, ChatType.SAY_COMMAND, Component.text("server"), null,
+                    new ChatLine(ChatKind.PLAYER, SENDER, Key.key("msg_command_incoming"), null, Component.text("alice"),
+                            Component.text("bob"), Component.text("hi"), "hi"),
+                    new ChatLine(ChatKind.DISGUISED, null, Key.key("say_command"), null, Component.text("server"), null,
                             Component.text("disguised"), "disguised"),
-                    new ChatLine(ChatKind.SYSTEM, null, null, null, null, Component.text("system"), "system")), bot.view().chat());
-            // 编号 0 表示数据包随后给出聊天类型的定义，Minestom 的数据包不能表示（M18）：bot 因异常结束
-            peer.push(new DisguisedChatPacket(Component.text("inline"), 0, Component.text("server"), null));
-            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
-            assertInstanceOf(IllegalStateException.class, bot.failure());
+                    new ChatLine(ChatKind.SYSTEM, null, null, null, null, null, Component.text("system"), "system")), bot.view().chat());
         });
         withBot((peer, bot) -> {
             // 编号不在 minecraft:chat_type 注册表中：原版解码时出错，客户端断开连接
-            peer.push(new DisguisedChatPacket(Component.text("unknown"), TestServer.vanilla().chatType().size() + 1,
-                    Component.text("server"), null));
+            var unknown = TestServer.registryEntries(SyncedRegistries.CHAT_TYPE).size();
+            peer.push(new ClientboundDisguisedChatPacket(Component.text("unknown"), Holder.ofId(unknown), Component.text("server"), null));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
+        });
+    }
+
+    @Test
+    void chatTypesDefinedInThePacketAreKeptInTheChatLine() {
+        var decoration = new ChatType.ChatTypeDecorationImpl("chat.type.text",
+                List.of(ChatTypeDecoration.Parameter.SENDER, ChatTypeDecoration.Parameter.CONTENT), NbtMap.EMPTY);
+        var inline = new ChatType(decoration, decoration);
+        withChatBot((peer, bot) -> {
+            // 聊天类型随数据包给出定义时没有注册表中的名称
+            peer.push(new ClientboundPlayerChatPacket(0, SENDER, 0, null, "hi", System.currentTimeMillis(), 0, List.of(), null,
+                    ChatFilterType.PASS_THROUGH, Holder.ofCustom(inline), Component.text("alice"), null));
+            peer.push(new ClientboundDisguisedChatPacket(Component.text("disguised"), Holder.ofCustom(inline), Component.text("server"), null));
+            peer.barrier();
+            var lines = bot.view().chat();
+            assertEquals(2, lines.size());
+            for (var line : lines) {
+                assertNull(line.chatType());
+                assertEquals(inline, line.inlineChatType());
+            }
+            assertEquals(new ChatLine(ChatKind.PLAYER, SENDER, null, inline, Component.text("alice"), null, Component.text("hi"), "hi"),
+                    lines.getFirst());
         });
     }
 
@@ -665,9 +763,14 @@ class WorldPacketsTest {
         withBot((_, bot) -> {
             var instance = (BotInstance) bot;
             // 原版 Player.createAttributes：移动速度为 (double) 0.1F，攻击伤害为 1
-            assertEquals((double) 0.1F, (double) bot.inspect(_ -> instance.state().player().attributes().value(Attribute.MOVEMENT_SPEED)));
-            assertEquals(1.0, (double) bot.inspect(_ -> instance.state().player().attributes().value(Attribute.ATTACK_DAMAGE)));
+            assertEquals((double) 0.1F, (double) bot.inspect(_ -> instance.state().player().attributes()
+                    .value(AttributeType.Builtin.MOVEMENT_SPEED)));
+            assertEquals(1.0, (double) bot.inspect(_ -> instance.state().player().attributes().value(AttributeType.Builtin.ATTACK_DAMAGE)));
         });
+    }
+
+    private static ClientboundGameEventPacket gameMode(GameMode gameMode) {
+        return new ClientboundGameEventPacket(GameEvent.CHANGE_GAME_MODE, gameMode);
     }
 
     @Test
@@ -675,32 +778,66 @@ class WorldPacketsTest {
         withBot((peer, bot) -> {
             // 原版 GameType.updatePlayerAbilities：创造模式可以飞行、瞬间破坏、无敌；旁观模式可以飞行、无敌并且正在飞行；
             // 生存与冒险模式这几项都为 false；冒险模式与旁观模式不能建造
-            peer.push(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.CHANGE_GAMEMODE, GameMode.CREATIVE.ordinal()));
+            peer.push(gameMode(GameMode.CREATIVE));
             peer.barrier();
             assertEquals(new AbilitiesSnapshot(true, false, true, true, true, 0.05f, 0.1f), bot.view().player().abilities());
-            peer.push(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.CHANGE_GAMEMODE, GameMode.SPECTATOR.ordinal()));
+            peer.push(gameMode(GameMode.SPECTATOR));
             peer.barrier();
             assertEquals(new AbilitiesSnapshot(true, true, true, false, false, 0.05f, 0.1f), bot.view().player().abilities());
-            peer.push(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.CHANGE_GAMEMODE, GameMode.SURVIVAL.ordinal()));
+            peer.push(gameMode(GameMode.SURVIVAL));
             peer.barrier();
             assertEquals(new AbilitiesSnapshot(false, false, false, false, true, 0.05f, 0.1f), bot.view().player().abilities());
-            peer.push(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.CHANGE_GAMEMODE, GameMode.ADVENTURE.ordinal()));
+            peer.push(gameMode(GameMode.ADVENTURE));
             peer.barrier();
             assertEquals(new AbilitiesSnapshot(false, false, false, false, false, 0.05f, 0.1f), bot.view().player().abilities());
         });
     }
 
-    private static SpawnEntityPacket pig(int id) {
-        return new SpawnEntityPacket(id, UUID.randomUUID(), EntityType.PIG, new Pos(2.5, 0, 2.5), 0, 0, Vec.ZERO);
+    @Test
+    void entityEventsAreObserved() {
+        withBot((peer, bot) -> {
+            var events = bot.observe(Observers.observations(EntityStatusReceived.class));
+            peer.push(spawn(100, EntityType.PIG), new ClientboundEntityEventPacket(100, EntityEvent.LIVING_DEATH));
+            peer.barrier();
+            events.close();
+            assertEquals(List.of(new EntityStatusReceived(100, EntityEvent.LIVING_DEATH)), events.observer().observations());
+        });
+    }
+
+    @Test
+    void damageEventsNameTheDamageTypeAndTheSources() {
+        withBot((peer, bot) -> {
+            var damages = bot.observe(Observers.observations(EntityDamaged.class));
+            var generic = TestServer.registryId(SyncedRegistries.DAMAGE_TYPE, Key.key("generic"));
+            var arrow = TestServer.registryId(SyncedRegistries.DAMAGE_TYPE, Key.key("arrow"));
+            // MCProtocolLib 以 -1 表示没有来源实体
+            peer.push(new ClientboundDamageEventPacket(100, generic, -1, -1, null),
+                    new ClientboundDamageEventPacket(100, arrow, 101, 102, Vector3d.from(1, 2, 3)));
+            peer.barrier();
+            damages.close();
+            assertEquals(List.of(new EntityDamaged(100, Key.key("generic"), null, null, null),
+                            new EntityDamaged(100, Key.key("arrow"), 101, 102, new Vec(1, 2, 3))),
+                    damages.observer().observations());
+            // 伤害类型的编号不在注册表中：原版解码时出错，客户端断开连接
+            bot.observe(Observers.observations(EntityDamaged.class));
+            var unknown = TestServer.registryEntries(SyncedRegistries.DAMAGE_TYPE).size();
+            peer.push(new ClientboundDamageEventPacket(100, unknown, -1, -1, null));
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
+            assertInstanceOf(IllegalStateException.class, bot.failure());
+        });
+    }
+
+    private static ClientboundAddEntityPacket spawn(int id, EntityType type) {
+        return new ClientboundAddEntityPacket(id, UUID.randomUUID(), type, 2.5, 0, 2.5, 0, 0, 0);
     }
 
     @Test
     void passengersThatWouldFormACycleAreRejected() {
         withBot((peer, bot) -> {
-            peer.push(pig(100), pig(101), pig(102));
+            peer.push(spawn(100, EntityType.PIG), spawn(101, EntityType.PIG), spawn(102, EntityType.PIG));
             // 100 乘 101，101 乘 102；再让 102 乘 100 会形成循环，原版 startRiding 拒绝
-            peer.push(new SetPassengersPacket(101, List.of(100)), new SetPassengersPacket(102, List.of(101)),
-                    new SetPassengersPacket(100, List.of(102)));
+            peer.push(new ClientboundSetPassengersPacket(101, new int[]{100}), new ClientboundSetPassengersPacket(102, new int[]{101}),
+                    new ClientboundSetPassengersPacket(100, new int[]{102}));
             peer.barrier();
             assertNull(bot.view().entity(102).vehicle());
             assertEquals(List.of(), bot.view().entity(100).passengers());
@@ -710,7 +847,7 @@ class WorldPacketsTest {
             bot.await(state -> state.ticks() >= ticks + 3, TestServer.TIMEOUT);
 
             // 实体乘坐自己：原版之后的乘坐计算会无限循环，bot 因异常结束
-            peer.push(new SetPassengersPacket(102, List.of(102)));
+            peer.push(new ClientboundSetPassengersPacket(102, new int[]{102}));
             assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
             assertInstanceOf(IllegalStateException.class, bot.failure());
         });
@@ -719,13 +856,13 @@ class WorldPacketsTest {
     @Test
     void passengersLeaveTheirOldVehicleAndUnknownOnesAreSkipped() {
         withBot((peer, bot) -> {
-            peer.push(pig(100), pig(101), pig(102));
-            peer.push(new SetPassengersPacket(101, List.of(100, 999)));
+            peer.push(spawn(100, EntityType.PIG), spawn(101, EntityType.PIG), spawn(102, EntityType.PIG));
+            peer.push(new ClientboundSetPassengersPacket(101, new int[]{100, 999}));
             peer.barrier();
             // 模型中没有的乘客编号被跳过
             assertEquals(List.of(100), bot.view().entity(101).passengers());
             // 100 改乘 102：先离开 101（原版 startRiding 中的 stopRiding）
-            peer.push(new SetPassengersPacket(102, List.of(100)));
+            peer.push(new ClientboundSetPassengersPacket(102, new int[]{100}));
             peer.barrier();
             assertEquals(List.of(), bot.view().entity(101).passengers());
             assertEquals(List.of(100), bot.view().entity(102).passengers());
@@ -736,11 +873,13 @@ class WorldPacketsTest {
     @Test
     void synchronizeVehiclePositionRotatesTheVelocityAndLimitsThePitch() {
         withBot((peer, bot) -> {
-            peer.push(new SpawnEntityPacket(100, UUID.randomUUID(), EntityType.MINECART, new Pos(2.5, 0, 2.5), 0, 0, new Vec(0, 0, 1)));
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.MINECART, 2.5, 0, 2.5,
+                    Vector3d.from(0, 0, 1), 0, 0, 0));
             // 原版 PositionMoveRotation.calculateAbsolute：俯仰角从 0 变成 90，带 ROTATE_DELTA，速度先绕 x 轴旋转 -90 度，
             // (0, 0, 1) 变成 (0, -1, 0)
-            peer.push(new EntityTeleportPacket(100, new Pos(0, 0, 0, 0, 90), Vec.ZERO,
-                    RelativeFlags.COORD | RelativeFlags.YAW | RelativeFlags.DELTA_COORD | RelativeFlags.ROTATE_DELTA, true));
+            peer.push(new ClientboundTeleportEntityPacket(100, Vector3d.ZERO, Vector3d.ZERO, 0, 90,
+                    List.of(PositionElement.X, PositionElement.Y, PositionElement.Z, PositionElement.Y_ROT,
+                            PositionElement.DELTA_X, PositionElement.DELTA_Y, PositionElement.DELTA_Z, PositionElement.ROTATE_DELTA), true));
             peer.barrier();
             var cart = bot.view().entity(100);
             assertEquals(new Vec(2.5, 0, 2.5), cart.position().asVec());
@@ -749,10 +888,11 @@ class WorldPacketsTest {
             assertEquals(-1, cart.velocity().y(), 1e-6);
             assertEquals(0, cart.velocity().z(), 1e-6);
             // 俯仰角限制到 [-90, 90]：相对的 60 加上原来的 90，以及绝对的 -120
-            peer.push(new EntityTeleportPacket(100, new Pos(0, 0, 0, 0, 60), Vec.ZERO, RelativeFlags.COORD | RelativeFlags.VIEW, true));
+            peer.push(new ClientboundTeleportEntityPacket(100, Vector3d.ZERO, Vector3d.ZERO, 0, 60,
+                    List.of(PositionElement.X, PositionElement.Y, PositionElement.Z, PositionElement.Y_ROT, PositionElement.X_ROT), true));
             peer.barrier();
             assertEquals(90, bot.view().entity(100).position().pitch());
-            peer.push(new EntityTeleportPacket(100, new Pos(2.5, 0, 2.5, 0, -120), Vec.ZERO, 0, true));
+            peer.push(new ClientboundTeleportEntityPacket(100, Vector3d.from(2.5, 0, 2.5), Vector3d.ZERO, 0, -120, List.of(), true));
             peer.barrier();
             assertEquals(-90, bot.view().entity(100).position().pitch());
         });
@@ -762,8 +902,9 @@ class WorldPacketsTest {
     void teleportEntityIgnoresTheVelocityAndLocallyControlledEntities() {
         withBot((peer, bot) -> {
             // 原版 handleEntityPositionSync：位置、朝向与是否着地取数据包的值，速度不变
-            peer.push(new SpawnEntityPacket(100, UUID.randomUUID(), EntityType.PIG, new Pos(2.5, 0, 2.5), 0, 0, new Vec(0, 0, 1)));
-            peer.push(new EntityPositionSyncPacket(100, new Vec(5, 0, 5), new Vec(1, 1, 1), 30, 10, true));
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.PIG, 2.5, 0, 2.5,
+                    Vector3d.from(0, 0, 1), 0, 0, 0));
+            peer.push(new ClientboundEntityPositionSyncPacket(100, Vector3d.from(5, 0, 5), Vector3d.from(1, 1, 1), 30, 10, true));
             peer.barrier();
             var pig = bot.view().entity(100);
             assertEquals(new Pos(5, 0, 5, 30, 10), pig.position());
@@ -772,51 +913,60 @@ class WorldPacketsTest {
 
             // 本地玩家控制的船（原版 isLocalInstanceAuthoritative）不改变；下船之后照常应用
             var boat = new Pos(1.5, 0, 0.5);
-            peer.push(new SpawnEntityPacket(101, UUID.randomUUID(), EntityType.OAK_BOAT, boat, 0, 0, Vec.ZERO),
-                    new SetPassengersPacket(101, List.of(TestServer.ENTITY_ID)));
-            peer.push(new EntityPositionSyncPacket(101, new Vec(9, 0, 9), Vec.ZERO, 45, 0, true));
+            peer.push(new ClientboundAddEntityPacket(101, UUID.randomUUID(), EntityType.OAK_BOAT, boat.x(), boat.y(), boat.z(), 0, 0, 0),
+                    new ClientboundSetPassengersPacket(101, new int[]{TestServer.ENTITY_ID}));
+            peer.push(new ClientboundEntityPositionSyncPacket(101, Vector3d.from(9, 0, 9), Vector3d.ZERO, 45, 0, true));
             peer.barrier();
             assertEquals(boat, bot.view().entity(101).position());
             assertFalse(bot.view().entity(101).onGround());
-            peer.push(new SetPassengersPacket(101, List.of()),
-                    new EntityPositionSyncPacket(101, new Vec(9, 0, 9), Vec.ZERO, 45, 0, true));
+            peer.push(new ClientboundSetPassengersPacket(101, new int[0]),
+                    new ClientboundEntityPositionSyncPacket(101, Vector3d.from(9, 0, 9), Vector3d.ZERO, 45, 0, true));
             peer.barrier();
             assertEquals(new Pos(9, 0, 9, 45, 0), bot.view().entity(101).position());
         });
     }
 
+    private static ClientboundSetEntityDataPacket metadata(int entityId, EntityMetadata<?, ?>... entries) {
+        return new ClientboundSetEntityDataPacket(entityId, entries);
+    }
+
+    private static EntityMetadata<?, ?> flag(EntityMeta<Boolean> meta, boolean value) {
+        return new BooleanEntityMetadata(meta.index(), MetadataTypes.BOOLEAN, value);
+    }
+
+    private static EntityMetadata<?, ?> pose(Pose pose) {
+        return new ObjectEntityMetadata<>(EntityMetaIndex.POSE.index(), MetadataTypes.POSE, pose);
+    }
+
     @Test
     void entityBoundingBoxesFollowBabiesAndFixedSizes() {
         withBot((peer, bot) -> {
-            var scaled = List.of(new EntityAttributesPacket.Property(Attribute.SCALE, 2, List.of()));
+            var scaled = List.of(new Attribute(AttributeType.Builtin.SCALE, 2));
             // 幼年僵尸（原版 Zombie.BABY_DIMENSIONS）；幼年牛按 Cow.BABY_DIMENSIONS 再乘以 scale；
             // 史莱姆不会是幼年（原版 canBeABaby 为 false），幼年标记被忽略
-            peer.push(spawn(100, EntityType.ZOMBIE), new EntityMetaDataPacket(100, Map.of(MetadataDef.Zombie.IS_BABY.index(), Metadata.Boolean(true))));
-            peer.push(spawn(101, EntityType.COW), new EntityMetaDataPacket(101, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true))),
-                    new EntityAttributesPacket(101, scaled));
-            peer.push(spawn(102, EntityType.SLIME), new EntityMetaDataPacket(102, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true))));
+            peer.push(spawn(100, EntityType.ZOMBIE), metadata(100, flag(EntityMetaIndex.ZOMBIE_IS_BABY, true)));
+            peer.push(spawn(101, EntityType.COW), metadata(101, flag(EntityMetaIndex.AGEABLE_IS_BABY, true)),
+                    new ClientboundUpdateAttributesPacket(101, scaled));
+            peer.push(spawn(102, EntityType.SLIME), metadata(102, flag(EntityMetaIndex.AGEABLE_IS_BABY, true)));
             // 幼年骆驼坐下（原版 Camel.BABY_SITTING_DIMENSIONS）
-            peer.push(spawn(103, EntityType.CAMEL), new EntityMetaDataPacket(103, Map.of(MetadataDef.AgeableMob.IS_BABY.index(), Metadata.Boolean(true),
-                    MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SITTING))));
+            peer.push(spawn(103, EntityType.CAMEL), metadata(103, flag(EntityMetaIndex.AGEABLE_IS_BABY, true), pose(Pose.SITTING)));
             // scale 为 2 的玩家：潜行的尺寸乘以 scale，死亡与睡觉为固定尺寸 0.2，不乘；睡觉的村民同样
-            peer.push(spawn(104, EntityType.PLAYER), new EntityAttributesPacket(104, scaled),
-                    new EntityMetaDataPacket(104, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SNEAKING))));
-            peer.push(spawn(105, EntityType.PLAYER), new EntityAttributesPacket(105, scaled),
-                    new EntityMetaDataPacket(105, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.DYING))));
-            peer.push(spawn(106, EntityType.VILLAGER), new EntityAttributesPacket(106, scaled),
-                    new EntityMetaDataPacket(106, Map.of(MetadataDef.POSE.index(), Metadata.Pose(EntityPose.SLEEPING))));
+            peer.push(spawn(104, EntityType.PLAYER), new ClientboundUpdateAttributesPacket(104, scaled),
+                    metadata(104, pose(Pose.SNEAKING)));
+            peer.push(spawn(105, EntityType.PLAYER), new ClientboundUpdateAttributesPacket(105, scaled),
+                    metadata(105, pose(Pose.DYING)));
+            peer.push(spawn(106, EntityType.VILLAGER), new ClientboundUpdateAttributesPacket(106, scaled),
+                    metadata(106, pose(Pose.SLEEPING)));
             peer.barrier();
+            var slimeWidth = EntityTypeData.width(EntityType.SLIME);
             assertEquals(new BoundingBox(0.49, 0.98, 0.49), bot.view().entity(100).boundingBox());
             assertEquals(new BoundingBox(0.9, 1.4, 0.9), bot.view().entity(101).boundingBox());
-            assertEquals(EntityType.SLIME.boundingBox(), bot.view().entity(102).boundingBox());
+            assertEquals(new BoundingBox(slimeWidth, EntityTypeData.height(EntityType.SLIME), slimeWidth),
+                    bot.view().entity(102).boundingBox());
             assertEquals(new BoundingBox(0.95, 0.425, 0.95), bot.view().entity(103).boundingBox());
             assertEquals(new BoundingBox(1.2, 3.0, 1.2), bot.view().entity(104).boundingBox());
             assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(105).boundingBox());
             assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(106).boundingBox());
         });
-    }
-
-    private static SpawnEntityPacket spawn(int id, EntityType type) {
-        return new SpawnEntityPacket(id, UUID.randomUUID(), type, new Pos(2.5, 0, 2.5), 0, 0, Vec.ZERO);
     }
 }

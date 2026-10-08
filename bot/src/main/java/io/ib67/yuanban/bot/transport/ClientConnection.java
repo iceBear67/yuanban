@@ -1,6 +1,6 @@
 package io.ib67.yuanban.bot.transport;
 
-import net.minestom.server.network.packet.client.ClientPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -20,13 +20,11 @@ public interface ClientConnection {
     int serverPort();
 
     /**
-     * 只由调度线程调用；本轮的数据包一次交出，保持顺序。
+     * 只由调度线程调用；本轮的数据包一次交出，保持顺序，全部是发往服务端的数据包。
      *
-     * @return 数据包交给连接之后完成：TCP 连接在写出到套接字之后，对象级连接在交给服务端之后
-     * （还没有玩家时由监听器处理完毕，之后放进玩家的数据包队列）；
-     * 连接在写出之前关闭时以异常完成
+     * @return 数据包交给连接之后完成（TCP 连接在写进套接字之后）；连接在写出之前关闭时以异常完成
      */
-    CompletableFuture<Void> send(List<ClientPacket> packets);
+    CompletableFuture<Void> send(List<MinecraftPacket> packets);
 
     /**
      * 关闭连接，不等待对端读取：已经交出的数据包按顺序写出，写到连接不能再立即接受数据为止，没有写出的部分被丢弃

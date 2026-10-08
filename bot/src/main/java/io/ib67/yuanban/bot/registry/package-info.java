@@ -1,5 +1,5 @@
 /**
- * 与服务端编号一致的注册表、标签表与原版注册表。
+ * 服务端发来的同步注册表与标签表。
  */
 @ApiStatus.Internal
 package io.ib67.yuanban.bot.registry;

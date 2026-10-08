@@ -20,18 +20,18 @@ public final class CookieStore {
     /**
      * @throws IllegalArgumentException 数据超过 5 KiB
      */
-    public void store(String key, byte[] value) {
+    public void store(Key key, byte[] value) {
         if (value.length > MAX_SIZE) {
             throw new IllegalArgumentException("cookie " + key + " is " + value.length + " bytes, the limit is " + MAX_SIZE);
         }
-        cookies.put(Key.key(key), value.clone());
+        cookies.put(key, value.clone());
     }
 
     /**
      * @return 保存的数据；没有时为 null
      */
-    public byte @Nullable [] get(String key) {
-        var value = cookies.get(Key.key(key));
+    public byte @Nullable [] get(Key key) {
+        var value = cookies.get(key);
         return value == null ? null : value.clone();
     }
 }

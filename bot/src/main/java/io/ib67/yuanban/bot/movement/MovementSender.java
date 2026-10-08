@@ -2,10 +2,10 @@ package io.ib67.yuanban.bot.movement;
 
 import io.ib67.yuanban.bot.protocol.Outbox;
 import net.minestom.server.coordinate.Pos;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionStatusPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerStatusOnlyPacket;
 
 /**
  * 在每次模拟之后发送移动包：位置变化发送位置，朝向变化发送朝向，两者都变化时发送 Set Player Position and Rotation；
@@ -30,13 +30,14 @@ public final class MovementSender {
                 || positionReminder >= POSITION_REMINDER_TICKS;
         var rotationChanged = position.yaw() != lastPosition.yaw() || position.pitch() != lastPosition.pitch();
         if (positionChanged && rotationChanged) {
-            outbox.send(new ClientPlayerPositionAndRotationPacket(position, onGround, horizontalCollision));
+            outbox.send(new ServerboundMovePlayerPosRotPacket(onGround, horizontalCollision, position.x(), position.y(),
+                    position.z(), position.yaw(), position.pitch()));
         } else if (positionChanged) {
-            outbox.send(new ClientPlayerPositionPacket(position, onGround, horizontalCollision));
+            outbox.send(new ServerboundMovePlayerPosPacket(onGround, horizontalCollision, position.x(), position.y(), position.z()));
         } else if (rotationChanged) {
-            outbox.send(new ClientPlayerRotationPacket(position.yaw(), position.pitch(), onGround, horizontalCollision));
+            outbox.send(new ServerboundMovePlayerRotPacket(onGround, horizontalCollision, position.yaw(), position.pitch()));
         } else if (onGround != lastOnGround || horizontalCollision != lastHorizontalCollision) {
-            outbox.send(new ClientPlayerPositionStatusPacket(onGround, horizontalCollision));
+            outbox.send(new ServerboundMovePlayerStatusOnlyPacket(onGround, horizontalCollision));
         }
         if (positionChanged) {
             lastPosition = lastPosition.withCoord(position);

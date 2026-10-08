@@ -1,7 +1,9 @@
 package io.ib67.yuanban.bot.protocol;
 
-import net.minestom.server.network.packet.server.common.KeepAlivePacket;
-import net.minestom.server.network.packet.server.play.BundlePacket;
+import io.netty.buffer.Unpooled;
+import net.kyori.adventure.key.Key;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDelimiterPacket;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,25 +12,32 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class BufferAndBatchTest {
     private static InboundPacket packet(long id) {
-        return new InboundPacket(new KeepAlivePacket(id), null);
+        return new InboundPacket(new ClientboundKeepAlivePacket(id), null);
+    }
+
+    /**
+     * Bundle Delimiter 没有字段，MCProtocolLib 只提供从缓冲区解码的构造方法
+     */
+    private static InboundPacket delimiter() {
+        return new InboundPacket(new ClientboundDelimiterPacket(Unpooled.EMPTY_BUFFER), null);
     }
 
     @Test
     void bundleIsReleasedAtTheClosingDelimiter() {
         var buffer = new BundleBuffer();
         assertEquals(1, buffer.accept(packet(1)).size());
-        assertNull(buffer.accept(new InboundPacket(new BundlePacket(), null)));
+        assertNull(buffer.accept(delimiter()));
         assertNull(buffer.accept(packet(2)));
         assertNull(buffer.accept(packet(3)));
-        var bundle = buffer.accept(new InboundPacket(new BundlePacket(), null));
+        var bundle = buffer.accept(delimiter());
         assertEquals(2, bundle.size());
-        assertEquals(new KeepAlivePacket(2), bundle.getFirst().packet());
+        assertEquals(new ClientboundKeepAlivePacket(2), bundle.getFirst().packet());
     }
 
     @Test
     void bundleLargerThan4096PacketsIsRejected() {
         var buffer = new BundleBuffer();
-        buffer.accept(new InboundPacket(new BundlePacket(), null));
+        buffer.accept(delimiter());
         for (int i = 0; i < BundleBuffer.MAX_BUNDLE_SIZE; i++) {
             buffer.accept(packet(i));
         }
@@ -49,8 +58,8 @@ class BufferAndBatchTest {
     @Test
     void cookiesAreLimitedToFiveKibibytes() {
         var cookies = new CookieStore();
-        cookies.store("minecraft:a", new byte[CookieStore.MAX_SIZE]);
-        assertEquals(CookieStore.MAX_SIZE, cookies.get("minecraft:a").length);
-        assertThrows(IllegalArgumentException.class, () -> cookies.store("minecraft:b", new byte[CookieStore.MAX_SIZE + 1]));
+        cookies.store(Key.key("a"), new byte[CookieStore.MAX_SIZE]);
+        assertEquals(CookieStore.MAX_SIZE, cookies.get(Key.key("a")).length);
+        assertThrows(IllegalArgumentException.class, () -> cookies.store(Key.key("b"), new byte[CookieStore.MAX_SIZE + 1]));
     }
 }

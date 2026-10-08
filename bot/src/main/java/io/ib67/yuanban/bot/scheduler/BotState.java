@@ -10,11 +10,12 @@ import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.player.PlayerLoadTracker;
 import io.ib67.yuanban.bot.protocol.CookieStore;
 import io.ib67.yuanban.bot.protocol.Outbox;
-import io.ib67.yuanban.bot.registry.ClientRegistries;
+import io.ib67.yuanban.bot.registry.SyncedRegistries;
 import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.world.ClientWorld;
 import io.ib67.yuanban.bot.world.WorldClocks;
-import net.minestom.server.network.packet.server.common.ServerLinksPacket;
+import net.kyori.adventure.key.Key;
+import org.geysermc.mcprotocollib.protocol.data.game.ServerLink;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -36,12 +37,12 @@ public final class BotState {
     private WorldClocks clocks = new WorldClocks();
     private @Nullable ClientWorld world;
     private @Nullable WorldInfo worldInfo;
-    private @Nullable ClientRegistries registries;
+    private @Nullable SyncedRegistries registries;
     private TagTable tags = TagTable.EMPTY;
     private long ticks;
     private @Nullable String serverBrand;
-    private List<String> featureFlags = List.of();
-    private List<ServerLinksPacket.Entry> serverLinks = List.of();
+    private List<Key> featureFlags = List.of();
+    private List<ServerLink> serverLinks = List.of();
     private final BooleanSupplier onSchedulerThread;
 
     BotState(BotOptions options, ObservationDispatcher observations, LocalPlayer player, BooleanSupplier onSchedulerThread) {
@@ -156,14 +157,14 @@ public final class BotState {
     /**
      * @throws IllegalStateException 还没有完成配置
      */
-    public ClientRegistries registries() {
+    public SyncedRegistries registries() {
         if (registries == null) {
             throw new IllegalStateException("the bot has not finished configuration");
         }
         return registries;
     }
 
-    public void registries(ClientRegistries registries) {
+    public void registries(SyncedRegistries registries) {
         this.registries = registries;
     }
 
@@ -191,19 +192,19 @@ public final class BotState {
         this.serverBrand = serverBrand;
     }
 
-    public List<String> featureFlags() {
+    public List<Key> featureFlags() {
         return featureFlags;
     }
 
-    public void featureFlags(List<String> featureFlags) {
+    public void featureFlags(List<Key> featureFlags) {
         this.featureFlags = List.copyOf(featureFlags);
     }
 
-    public List<ServerLinksPacket.Entry> serverLinks() {
+    public List<ServerLink> serverLinks() {
         return serverLinks;
     }
 
-    public void serverLinks(List<ServerLinksPacket.Entry> serverLinks) {
+    public void serverLinks(List<ServerLink> serverLinks) {
         this.serverLinks = List.copyOf(serverLinks);
     }
 }

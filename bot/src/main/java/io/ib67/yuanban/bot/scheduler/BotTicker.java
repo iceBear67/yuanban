@@ -2,9 +2,9 @@ package io.ib67.yuanban.bot.scheduler;
 
 import io.ib67.yuanban.bot.observe.BotTicked;
 import net.minestom.server.coordinate.CoordConversion;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.network.packet.client.play.ClientPlayerLoadedPacket;
-import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
 
 /**
  * tick 内的顺序：推进计数 → 快捷栏同步 → Player Loaded → 手部交互 → 其它实体 → 移动 → 世界边框、World Age 与时钟
@@ -36,7 +36,7 @@ final class BotTicker {
                 || player.dead();
         // 原版 ClientPacketListener.tick 中的 tickClientLoad：自 Login (play) 或 Respawn 起超过 30 秒时，条件不满足也发送
         if (state.loadTracker().tick(ready, System.nanoTime())) {
-            state.outbox().send(new ClientPlayerLoadedPacket());
+            state.outbox().send(ServerboundPlayerLoadedPacket.INSTANCE);
             bot.markLoaded();
         }
         dispatcher.flush();
@@ -59,7 +59,7 @@ final class BotTicker {
             state.clocks().tick(world.worldAge());
         }
 
-        state.outbox().send(new ClientTickEndPacket());
+        state.outbox().send(ServerboundClientTickEndPacket.INSTANCE);
         if (dispatcher.wants(BotTicked.class)) {
             dispatcher.emit(new BotTicked(tick));
         }

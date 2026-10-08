@@ -1,8 +1,9 @@
 package io.ib67.yuanban.bot.view;
 
 import net.kyori.adventure.text.Component;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.network.packet.server.play.ScoreboardObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreType;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreboardPosition;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
@@ -21,7 +22,7 @@ public record HudSnapshot(Map<UUID, BossBarSnapshot> bossBars,
                           @Nullable Component title, @Nullable Component subtitle, @Nullable TitleTimes titleTimes,
                           @Nullable Component actionBar,
                           Map<UUID, PlayerListEntry> playerList, Component header, Component footer,
-                          Map<String, Objective> objectives, Map<Integer, String> displaySlots,
+                          Map<String, Objective> objectives, Map<ScoreboardPosition, String> displaySlots,
                           Map<String, Team> teams,
                           @Nullable Component serverMotd) {
     public HudSnapshot {
@@ -47,10 +48,10 @@ public record HudSnapshot(Map<UUID, BossBarSnapshot> bossBars,
     /**
      * 计分板目标
      *
+     * @param type   分数的显示类型
      * @param scores 分数持有者到分数
      */
-    public record Objective(String name, Component displayName, ScoreboardObjectivePacket.@Nullable Type type,
-                            Map<String, Integer> scores) {
+    public record Objective(String name, Component displayName, ScoreType type, Map<String, Integer> scores) {
         public Objective {
             scores = Map.copyOf(scores);
         }

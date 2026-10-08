@@ -1,17 +1,18 @@
 package io.ib67.yuanban.bot.interaction;
 
 import io.ib67.yuanban.bot.movement.Rotation;
+import io.ib67.yuanban.bot.protocol.Vectors;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
 import io.ib67.yuanban.bot.scheduler.BotState;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.block.BlockFace;
-import net.minestom.server.network.packet.client.play.ClientAnimationPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerBlockPlacementPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
@@ -25,8 +26,8 @@ public final class UseItemOnTask extends HandAction {
     private static final BoundingBox POINT = new BoundingBox(1.0E-7, 1.0E-7, 1.0E-7);
 
     private final Point position;
-    private final BlockFace face;
-    private final PlayerHand hand;
+    private final Direction face;
+    private final Hand hand;
     private final Point cursor;
     private @Nullable Rotation rotation;
     private boolean sent;
@@ -34,7 +35,7 @@ public final class UseItemOnTask extends HandAction {
     /**
      * @param cursor 光标在方块中的位置，各分量在 [0, 1] 之间
      */
-    public UseItemOnTask(ActionImpl handle, Point position, BlockFace face, PlayerHand hand, Point cursor) {
+    public UseItemOnTask(ActionImpl handle, Point position, Direction face, Hand hand, Point cursor) {
         super(handle);
         this.position = new Vec(position.blockX(), position.blockY(), position.blockZ());
         this.face = face;
@@ -45,9 +46,9 @@ public final class UseItemOnTask extends HandAction {
     /**
      * 该面的中心作为光标
      */
-    public static Point faceCenter(BlockFace face) {
-        var direction = face.toDirection();
-        return new Vec(0.5 + direction.normalX() * 0.5, 0.5 + direction.normalY() * 0.5, 0.5 + direction.normalZ() * 0.5);
+    public static Point faceCenter(Direction face) {
+        var normal = Directions.normal(face);
+        return new Vec(0.5 + normal.x() * 0.5, 0.5 + normal.y() * 0.5, 0.5 + normal.z() * 0.5);
     }
 
     @Override
@@ -69,9 +70,9 @@ public final class UseItemOnTask extends HandAction {
             return;
         }
         var sequence = controller.sequence().next();
-        state.outbox().send(new ClientPlayerBlockPlacementPacket(hand, position, face,
+        state.outbox().send(new ServerboundUseItemOnPacket(Vectors.blockPos(position), face, hand,
                 (float) cursor.x(), (float) cursor.y(), (float) cursor.z(), insideBlock(state), false, sequence));
-        state.outbox().send(new ClientAnimationPacket(hand));
+        state.outbox().send(new ServerboundSwingPacket(hand));
         controller.sequence().await(sequence, handle::succeed);
     }
 
@@ -85,7 +86,8 @@ public final class UseItemOnTask extends HandAction {
         var eye = player.eyePosition();
         var look = player.position();
         var attributes = player.attributes();
-        var range = Math.max(attributes.value(Attribute.BLOCK_INTERACTION_RANGE), attributes.value(Attribute.ENTITY_INTERACTION_RANGE));
+        var range = Math.max(attributes.value(AttributeType.Builtin.BLOCK_INTERACTION_RANGE),
+                attributes.value(AttributeType.Builtin.ENTITY_INTERACTION_RANGE));
         var to = eye.add(new Rotation(look.yaw(), look.pitch()).viewVector().mul(range));
         var test = eye.add(to.sub(eye).mul(0.001));
         var block = state.world().getBlock(position, Block.Getter.Condition.TYPE);

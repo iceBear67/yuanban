@@ -7,9 +7,10 @@ import net.minestom.server.collision.PhysicsResult;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.attribute.Attribute;
+import net.kyori.adventure.key.Key;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
@@ -46,8 +47,8 @@ public final class LocalPlayer {
     private int totalExperience;
     private final AttributeMap attributes = new AttributeMap(AttributeMap.PLAYER_BASE);
     private final EffectMap effects = new EffectMap();
-    private final Map<String, Integer> cooldowns = new HashMap<>();
-    private final Map<Integer, Metadata.Entry<?>> metadata = new Int2ObjectOpenHashMap<>();
+    private final Map<Key, Integer> cooldowns = new HashMap<>();
+    private final Map<Integer, EntityMetadata<?, ?>> metadata = new Int2ObjectOpenHashMap<>();
     private int heldSlot;
     private Pos position = new Pos(0, 0, 0, -180, 0);
     private Vec velocity = Vec.ZERO;
@@ -147,11 +148,14 @@ public final class LocalPlayer {
         return effects;
     }
 
-    public Map<String, Integer> cooldowns() {
+    /**
+     * 物品冷却：冷却组 → 剩余的 tick 数
+     */
+    public Map<Key, Integer> cooldowns() {
         return cooldowns;
     }
 
-    public Map<Integer, Metadata.Entry<?>> metadata() {
+    public Map<Integer, EntityMetadata<?, ?>> metadata() {
         return metadata;
     }
 
@@ -271,7 +275,7 @@ public final class LocalPlayer {
     }
 
     public double scale() {
-        return attributes.value(Attribute.SCALE);
+        return attributes.value(AttributeType.Builtin.SCALE);
     }
 
     public double eyeHeight() {

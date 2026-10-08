@@ -3,20 +3,21 @@ package io.ib67.yuanban.bot.world;
 import io.ib67.yuanban.bot.ChunkNotLoadedException;
 import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.entity.EntityStore;
+import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
 import net.kyori.adventure.key.Key;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
-import net.minestom.server.entity.EntityType;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.palette.Palette;
-import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.world.Difficulty;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.palette.PaletteType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.setting.Difficulty;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
@@ -250,7 +251,7 @@ public final class ClientWorld implements Block.Getter {
      * @param blockEntities 以 {@link CoordConversion#chunkBlockIndex} 为键、发给客户端的方块实体 NBT；
      *                      方块实体的方块由区段中该位置的方块决定
      */
-    public void installChunk(int chunkX, int chunkZ, SectionRef[] sections, Map<Integer, CompoundBinaryTag> blockEntities) {
+    public void installChunk(int chunkX, int chunkZ, SectionRef[] sections, Map<Integer, NbtMap> blockEntities) {
         if (sections.length != height / 16) {
             throw new IllegalArgumentException("chunk " + chunkX + ", " + chunkZ + " has " + sections.length
                     + " sections, dimension height " + height + " requires " + height / 16);
@@ -302,17 +303,17 @@ public final class ClientWorld implements Block.Getter {
     /**
      * Chunk Biomes：依次读取每个区段的生物群系
      *
-     * @param serializer 生物群系调色板的编解码器，按生物群系数量决定直接调色板的位数
+     * @param biomeCount 生物群系注册表的条目数，决定直接调色板的位数
      * @return 区块是否已加载
      */
-    public boolean setBiomes(int chunkX, int chunkZ, byte[] data, NetworkBuffer.Type<Palette> serializer) {
+    public boolean setBiomes(int chunkX, int chunkZ, byte[] data, int biomeCount) {
         var column = chunks.get(CoordConversion.chunkIndex(chunkX, chunkZ));
         if (column == null) {
             return false;
         }
-        var buffer = NetworkBuffer.wrap(data, 0, data.length);
+        var buffer = Unpooled.wrappedBuffer(data);
         for (int i = 0; i < column.sectionCount(); i++) {
-            column.section(i).setBiomes(buffer.read(serializer));
+            column.section(i).setBiomes(MinecraftTypes.readDataPalette(buffer, PaletteType.BIOME, biomeCount));
         }
         return true;
     }
@@ -335,7 +336,7 @@ public final class ClientWorld implements Block.Getter {
     }
 
     /**
-     * 方块；维度高度范围之外为空气，{@code condition} 为 NONE 时附加方块实体的 NBT
+     * 方块，不带 NBT（方块实体的 NBT 由 {@link #blockEntity} 读取）；维度高度范围之外为空气。{@code condition} 不影响结果
      *
      * @throws ChunkNotLoadedException 所在区块没有加载
      */
@@ -348,14 +349,20 @@ public final class ClientWorld implements Block.Getter {
         if (column == null) {
             throw new ChunkNotLoadedException(x >> 4, z >> 4);
         }
-        var block = Objects.requireNonNull(Block.fromStateId(column.section((y - minY) >> 4).block(x & 15, y & 15, z & 15)));
-        if (condition == Condition.NONE && block.blockEntityType() != null) {
-            var nbt = blockEntities.get(x, y, z);
-            if (nbt != null) {
-                return block.withNbt(nbt);
-            }
+        return Objects.requireNonNull(Block.fromStateId(column.section((y - minY) >> 4).block(x & 15, y & 15, z & 15)));
+    }
+
+    /**
+     * 方块实体发给客户端的 NBT
+     *
+     * @return 这个位置没有方块实体数据时为 null
+     * @throws ChunkNotLoadedException 所在区块没有加载
+     */
+    public @Nullable NbtMap blockEntity(int x, int y, int z) {
+        if (!chunkLoaded(x >> 4, z >> 4)) {
+            throw new ChunkNotLoadedException(x >> 4, z >> 4);
         }
-        return block;
+        return blockEntities.get(x, y, z);
     }
 
     /**

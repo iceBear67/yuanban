@@ -5,21 +5,22 @@ import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.decode.SectionDecoder;
 import io.ib67.yuanban.bot.decode.SectionPool;
+import io.ib67.yuanban.bot.interaction.HandController;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.registry.TagTable;
+import io.ib67.yuanban.bot.view.ActiveEffect;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import io.ib67.yuanban.bot.world.ClientWorld;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.item.component.UseEffects;
-import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
-import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
-import net.minestom.server.potion.Potion;
-import net.minestom.server.potion.PotionEffect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -40,7 +41,8 @@ class KinematicsTest {
         var world = new ClientWorld(Key.key("minecraft:overworld"), 0, -64, 384, 12, 12);
         for (int x = -2; x <= 12; x++) {
             for (int z = -2; z <= 2; z++) {
-                var decoded = decoder.decode(TestServer.flatChunk().packet(x, z, TestServer.biomeCount()), 24, TestServer.biomeCount());
+                var decoded = decoder.decode(TestServer.flatChunk().packet(x, z, TestServer.biomeCount()), -64, 384,
+                        TestServer.biomeCount());
                 world.installChunk(x, z, decoded.sections(), Map.of());
             }
         }
@@ -59,13 +61,20 @@ class KinematicsTest {
     }
 
     /**
+     * 持续时间无限、没有任何标记的效果
+     */
+    private static ActiveEffect infinite(Effect effect, int amplifier) {
+        return new ActiveEffect(effect, amplifier, ActiveEffect.INFINITE_DURATION, false, false, false, false);
+    }
+
+    /**
      * 持续移动直到速度稳定，返回每秒的水平速度
      */
     private static double steadySpeed(MovementMode mode) {
         var world = flatWorld();
         var player = standingPlayer(world);
         if (mode == MovementMode.SPRINT) {
-            player.attributes().addModifier(Attribute.MOVEMENT_SPEED, MovementController.SPRINTING);
+            player.attributes().addModifier(AttributeType.Builtin.MOVEMENT_SPEED, MovementController.SPRINTING);
         }
         if (mode == MovementMode.SNEAK) {
             player.sneaking(true);
@@ -99,7 +108,7 @@ class KinematicsTest {
         var world = flatWorld();
         var player = standingPlayer(world);
         if (jumpBoostLevel > 0) {
-            player.effects().put(new Potion(PotionEffect.JUMP_BOOST, jumpBoostLevel - 1, Potion.INFINITE_DURATION));
+            player.effects().put(infinite(Effect.JUMP_BOOST, jumpBoostLevel - 1));
         }
         var start = player.position().y();
         Kinematics.step(player, world, TagTable.EMPTY, new MoveIntent(Vec.ZERO, MovementMode.WALK, true), false, null);
@@ -127,8 +136,8 @@ class KinematicsTest {
         assertEquals(2.5168, jumpHeight(2), 0.0001);
     }
 
-    private static void attribute(LocalPlayer player, Attribute attribute, double value) {
-        player.attributes().apply(List.of(new EntityAttributesPacket.Property(attribute, value, List.of())));
+    private static void attribute(LocalPlayer player, AttributeType attribute, double value) {
+        player.attributes().apply(List.of(new Attribute(attribute, value)));
     }
 
     private static LocalPlayer airbornePlayer(ClientWorld world, double y) {
@@ -144,7 +153,7 @@ class KinematicsTest {
         var world = flatWorld();
         var player = airbornePlayer(world, 10);
         // 允许飞行并且正在飞行，飞行速度 0.05（原版默认值）
-        player.abilities().apply(new PlayerAbilitiesPacket((byte) 0x06, 0.05f, 0.1f));
+        player.abilities().apply(new ClientboundPlayerAbilitiesPacket(false, true, true, false, 0.05f, 0.1f));
         var intent = new MoveIntent(EAST, sprinting ? MovementMode.SPRINT : MovementMode.WALK, false);
         // 空中的阻力为 0.91，速度收敛得比地面慢；空中没有碰撞，飞出已加载的区块之前把玩家放回起点，速度不变
         for (int i = 0; i < 200; i++) {
@@ -174,10 +183,10 @@ class KinematicsTest {
         var player = standingPlayer(world);
         var intent = new MoveIntent(EAST, MovementMode.WALK, false);
         for (int i = 0; i < 60; i++) {
-            Kinematics.step(player, world, TagTable.EMPTY, intent, false, UseEffects.DEFAULT);
+            Kinematics.step(player, world, TagTable.EMPTY, intent, false, HandController.DEFAULT_USE_EFFECTS);
         }
         var before = player.position().x();
-        Kinematics.step(player, world, TagTable.EMPTY, intent, false, UseEffects.DEFAULT);
+        Kinematics.step(player, world, TagTable.EMPTY, intent, false, HandController.DEFAULT_USE_EFFECTS);
         // 原版 modifyInput：输入乘以物品的速度系数（默认 0.2），稳定速度为步行的 0.2 倍
         assertEquals(4.317 * 0.2, (player.position().x() - before) * 20, 0.001);
     }
@@ -197,18 +206,19 @@ class KinematicsTest {
         var world = flatWorld();
         // 缓降：下落时重力不超过 0.01，竖直速度趋向 -0.01 × 0.98 / (1 - 0.98) = -0.49
         var slow = airbornePlayer(world, 300);
-        slow.effects().put(new Potion(PotionEffect.SLOW_FALLING, 0, Potion.INFINITE_DURATION));
+        slow.effects().put(infinite(Effect.SLOW_FALLING, 0));
         assertEquals(-0.49, verticalVelocityAfter(slow, world, 400), 1e-3);
 
         // 飘浮：竖直速度每 tick 向 0.05 × (等级) 靠近 20%，再乘以 0.98，趋向 0.0098 / 0.216
         var levitating = airbornePlayer(world, 10);
-        levitating.effects().put(new Potion(PotionEffect.LEVITATION, 0, Potion.INFINITE_DURATION));
+        levitating.effects().put(infinite(Effect.LEVITATION, 0));
         assertEquals(0.0098 / 0.216, verticalVelocityAfter(levitating, world, 200), 1e-4);
         assertTrue(levitating.position().y() > 10);
 
         // NoGravity：没有重力，静止的玩家停在空中
         var floating = airbornePlayer(world, 10);
-        floating.metadata().put(MetadataDef.HAS_NO_GRAVITY.index(), Metadata.Boolean(true));
+        var noGravity = EntityMetaIndex.HAS_NO_GRAVITY.index();
+        floating.metadata().put(noGravity, new BooleanEntityMetadata(noGravity, MetadataTypes.BOOLEAN, true));
         assertEquals(0, verticalVelocityAfter(floating, world, 20), 0.0);
         assertEquals(10, floating.position().y(), 0.0);
     }
@@ -218,7 +228,7 @@ class KinematicsTest {
         var world = flatWorld();
         // air_drag_modifier 为 0：空气阻力为 1，竖直速度每 tick 只减去重力
         var noDrag = airbornePlayer(world, 50);
-        attribute(noDrag, Attribute.AIR_DRAG_MODIFIER, 0);
+        attribute(noDrag, AttributeType.Builtin.AIR_DRAG_MODIFIER, 0);
         assertEquals(-0.08, verticalVelocityAfter(noDrag, world, 1), 1e-9);
         assertEquals(-0.16, verticalVelocityAfter(noDrag, world, 1), 1e-9);
 
@@ -243,13 +253,13 @@ class KinematicsTest {
         for (int x = -2; x <= 12; x++) {
             for (int z = -2; z <= 2; z++) {
                 var chunk = TestServer.flatChunk().fill(-1, -1, Block.SOUL_SAND);
-                var decoded = decoder.decode(chunk.packet(x, z, TestServer.biomeCount()), 24, TestServer.biomeCount());
+                var decoded = decoder.decode(chunk.packet(x, z, TestServer.biomeCount()), -64, 384, TestServer.biomeCount());
                 world.installChunk(x, z, decoded.sections(), Map.of());
             }
         }
         var player = new LocalPlayer(UUID.randomUUID(), "test");
         player.position(new Pos(0.5, 0, 0.5, -90, 0));
-        attribute(player, Attribute.MOVEMENT_EFFICIENCY, 1);
+        attribute(player, AttributeType.Builtin.MOVEMENT_EFFICIENCY, 1);
         var intent = new MoveIntent(EAST, MovementMode.WALK, false);
         for (int i = 0; i < 60; i++) {
             Kinematics.step(player, world, TagTable.EMPTY, intent, false, null);
@@ -270,7 +280,7 @@ class KinematicsTest {
                 if (x == 0 && z == 0) {
                     chunk.set(0, -1, 0, Block.ICE);
                 }
-                var decoded = decoder.decode(chunk.packet(x, z, TestServer.biomeCount()), 24, TestServer.biomeCount());
+                var decoded = decoder.decode(chunk.packet(x, z, TestServer.biomeCount()), -64, 384, TestServer.biomeCount());
                 world.installChunk(x, z, decoded.sections(), Map.of());
             }
         }

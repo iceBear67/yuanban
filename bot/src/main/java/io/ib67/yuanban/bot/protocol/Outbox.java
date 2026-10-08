@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.protocol;
 
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
-import net.minestom.server.network.packet.client.ClientPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,10 +11,10 @@ import java.util.List;
  * 协议状态机与各控制器只把数据包写入这里，由调度循环一次交给连接。
  */
 public final class Outbox {
-    private final List<ClientPacket> packets = new ArrayList<>();
+    private final List<MinecraftPacket> packets = new ArrayList<>();
     private final List<ActionImpl> completeOnWrite = new ArrayList<>();
 
-    public void send(ClientPacket packet) {
+    public void send(MinecraftPacket packet) {
         packets.add(packet);
     }
 
@@ -28,7 +28,7 @@ public final class Outbox {
     /**
      * 待发送的数据包（不取出）
      */
-    public List<ClientPacket> packets() {
+    public List<MinecraftPacket> packets() {
         return List.copyOf(packets);
     }
 
@@ -46,6 +46,6 @@ public final class Outbox {
         return batch;
     }
 
-    public record Batch(List<ClientPacket> packets, List<ActionImpl> completeOnWrite) {
+    public record Batch(List<MinecraftPacket> packets, List<ActionImpl> completeOnWrite) {
     }
 }

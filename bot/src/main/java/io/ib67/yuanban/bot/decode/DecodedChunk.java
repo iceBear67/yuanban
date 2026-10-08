@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.decode;
 
 import io.ib67.yuanban.bot.world.SectionRef;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
+import org.cloudburstmc.nbt.NbtMap;
 
 import java.util.Map;
 
@@ -10,5 +10,5 @@ import java.util.Map;
  *
  * @param blockEntities 以 {@code CoordConversion.chunkBlockIndex} 为键、发给客户端的方块实体 NBT
  */
-public record DecodedChunk(int x, int z, SectionRef[] sections, Map<Integer, CompoundBinaryTag> blockEntities) {
+public record DecodedChunk(int x, int z, SectionRef[] sections, Map<Integer, NbtMap> blockEntities) {
 }

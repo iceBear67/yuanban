@@ -1,26 +1,38 @@
 package io.ib67.yuanban.bot;
 
+import io.ib67.yuanban.bot.data.BlockStates;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.palette.Palette;
-import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.server.play.ChunkDataPacket;
-import net.minestom.server.network.packet.server.play.data.ChunkData;
-import net.minestom.server.network.packet.server.play.data.LightData;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkSection;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.DataPalette;
+import org.geysermc.mcprotocollib.protocol.data.game.level.LightUpdateData;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityInfo;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityType;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.Arrays;
 import java.util.BitSet;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
- * 用 Minestom 的调色板与序列化器生成 Chunk Data and Update Light 数据包。
+ * 用 MCProtocolLib 的调色板与 {@link MinecraftTypes#writeChunkSection} 生成 Chunk Data and Update Light 数据包。
+ * 每个区段的生物群系只有一种。
  */
 public final class ChunkBuilder {
     private final int minY;
-    private final Palette[] blocks;
-    private final Palette[] biomes;
-    private final Map<Integer, Block> blockEntities = new HashMap<>();
+    private final DataPalette[] blocks;
+    private final int[] biomes;
+    private final Map<Integer, BlockEntityInfo> blockEntities = new LinkedHashMap<>();
 
     /**
      * @param minY   维度最低 y
@@ -28,11 +40,10 @@ public final class ChunkBuilder {
      */
     public ChunkBuilder(int minY, int height) {
         this.minY = minY;
-        this.blocks = new Palette[height / 16];
-        this.biomes = new Palette[height / 16];
+        this.blocks = new DataPalette[height / 16];
+        this.biomes = new int[height / 16];
         for (int i = 0; i < blocks.length; i++) {
-            blocks[i] = Palette.blocks();
-            biomes[i] = Palette.biomes();
+            blocks[i] = DataPalette.createForBlockState(Block.AIR.stateId(), BlockStates.REGISTRY_SIZE);
         }
     }
 
@@ -52,10 +63,13 @@ public final class ChunkBuilder {
     }
 
     /**
-     * 加入一个方块实体（Chunk Data 的方块实体列表）；区段中这个位置的方块不变，需要时另外用 {@link #set} 设置
+     * 加入一个方块实体（Chunk Data 的方块实体列表）；区段中这个位置的方块不变，需要时另外用 {@link #set} 设置。
+     * 坐标为区块内坐标（x、z 为 0 到 15），y 为世界坐标
+     *
+     * @param nbt 为 null 时写入 TAG_END（方块实体没有发给客户端的数据）
      */
-    public ChunkBuilder blockEntity(int x, int y, int z, Block block) {
-        blockEntities.put(CoordConversion.chunkBlockIndex(x, y, z), block);
+    public ChunkBuilder blockEntity(int x, int y, int z, BlockEntityType type, @Nullable NbtMap nbt) {
+        blockEntities.put(CoordConversion.chunkBlockIndex(x, y, z), new BlockEntityInfo(x, y, z, type, nbt));
         return this;
     }
 
@@ -63,9 +77,7 @@ public final class ChunkBuilder {
      * 每个区段的生物群系都设为同一个编号
      */
     public ChunkBuilder biome(int biomeId) {
-        for (var palette : biomes) {
-            palette.fill(biomeId);
-        }
+        Arrays.fill(biomes, biomeId);
         return this;
     }
 
@@ -73,31 +85,9 @@ public final class ChunkBuilder {
      * Chunk Biomes 中一个区块的数据：依次为每个区段的生物群系调色板
      */
     public byte[] biomeData(int biomeCount) {
-        var serializer = Palette.biomeSerializer(biomeCount);
-        return NetworkBuffer.makeArray(buffer -> {
-            for (var palette : biomes) {
-                buffer.write(serializer, palette);
-            }
-        });
-    }
-
-    /**
-     * 原版写出的一个生物群系直接调色板：位数一个字节，然后是原版 {@code SimpleBitStorage} 的排列
-     * （每个 long 放 {@code 64 / bits} 个编号，从低位开始，编号不跨 long）
-     *
-     * @param bits 原版直接调色板的位数 {@code ceillog2(生物群系数量)}
-     * @param ids  64 个格子的生物群系编号，下标为 {@code y × 16 + z × 4 + x}
-     */
-    public static byte[] vanillaDirectBiomes(int bits, int[] ids) {
-        var perLong = 64 / bits;
-        var longs = new long[(ids.length + perLong - 1) / perLong];
-        for (int i = 0; i < ids.length; i++) {
-            longs[i / perLong] |= (long) ids[i] << (i % perLong * bits);
-        }
-        return NetworkBuffer.makeArray(buffer -> {
-            buffer.write(NetworkBuffer.BYTE, (byte) bits);
-            for (var value : longs) {
-                buffer.write(NetworkBuffer.LONG, value);
+        return write(buffer -> {
+            for (var biome : biomes) {
+                MinecraftTypes.writeDataPalette(buffer, DataPalette.createForBiome(biome, biomeCount));
             }
         });
     }
@@ -116,18 +106,45 @@ public final class ChunkBuilder {
         return this;
     }
 
+    /**
+     * 全部区段的数据，方块数为非空气方块的数量
+     */
     public byte[] data(int biomeCount) {
-        var type = ChunkData.Section.networkType(biomeCount);
-        return NetworkBuffer.makeArray(buffer -> {
+        return write(buffer -> {
             for (int i = 0; i < blocks.length; i++) {
-                var count = (short) blocks[i].count();
-                buffer.write(type, new ChunkData.Section(count, (short) 0, blocks[i], biomes[i]));
+                var section = new ChunkSection(nonAir(blocks[i]), 0, blocks[i], DataPalette.createForBiome(biomes[i], biomeCount));
+                MinecraftTypes.writeChunkSection(buffer, section);
             }
         });
     }
 
-    public ChunkDataPacket packet(int chunkX, int chunkZ, int biomeCount) {
-        var light = new LightData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of());
-        return new ChunkDataPacket(chunkX, chunkZ, new ChunkData(Map.of(), data(biomeCount), blockEntities), light);
+    public ClientboundLevelChunkWithLightPacket packet(int chunkX, int chunkZ, int biomeCount) {
+        var light = new LightUpdateData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of());
+        return new ClientboundLevelChunkWithLightPacket(chunkX, chunkZ, data(biomeCount), Map.of(),
+                blockEntities.values().toArray(BlockEntityInfo[]::new), light);
+    }
+
+    private static int nonAir(DataPalette palette) {
+        int count = 0;
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    if (!Objects.requireNonNull(Block.fromStateId(palette.get(x, y, z))).air()) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    private static byte[] write(Consumer<ByteBuf> writer) {
+        var buffer = Unpooled.buffer();
+        try {
+            writer.accept(buffer);
+            return ByteBufUtil.getBytes(buffer);
+        } finally {
+            buffer.release();
+        }
     }
 }

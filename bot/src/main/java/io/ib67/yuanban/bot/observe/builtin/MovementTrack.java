@@ -2,7 +2,7 @@ package io.ib67.yuanban.bot.observe.builtin;
 
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 
 /**
  * 一个被跟踪实体的移动。

@@ -6,12 +6,16 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.experimental.Accessors;
-import net.minestom.server.entity.MainHand;
-import net.minestom.server.message.ChatMessageType;
-import net.minestom.server.network.player.ClientSettings;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.HandPreference;
+import org.geysermc.mcprotocollib.protocol.data.game.setting.ChatVisibility;
+import org.geysermc.mcprotocollib.protocol.data.game.setting.ParticleStatus;
+import org.geysermc.mcprotocollib.protocol.data.game.setting.SkinPart;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundClientInformationPacket;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 单个 bot 的选项。
@@ -65,6 +69,9 @@ public final class BotOptions {
 
     // Client Information 的内容
 
+    /**
+     * 发送时转换为原版的语言代码格式：语言与国家用下划线连接，全部小写（例如 {@code en_us}）；没有国家时只有语言
+     */
     @NonNull
     @Builder.Default
     private final Locale locale = Locale.US;
@@ -72,19 +79,23 @@ public final class BotOptions {
     private final int viewDistance = 2;
     @NonNull
     @Builder.Default
-    private final ChatMessageType chatMode = ChatMessageType.FULL;
+    private final ChatVisibility chatMode = ChatVisibility.FULL;
     @Builder.Default
     private final boolean chatColors = true;
-    @Builder.Default
-    private final byte skinParts = 0x7F;
+    /**
+     * 显示的皮肤部分，默认全部
+     */
     @NonNull
     @Builder.Default
-    private final MainHand mainHand = MainHand.RIGHT;
+    private final Set<SkinPart> skinParts = Set.of(SkinPart.values());
+    @NonNull
+    @Builder.Default
+    private final HandPreference mainHand = HandPreference.RIGHT_HAND;
     @Builder.Default
     private final boolean allowServerListings = true;
     @NonNull
     @Builder.Default
-    private final ClientSettings.ParticleSetting particleSetting = ClientSettings.ParticleSetting.ALL;
+    private final ParticleStatus particleSetting = ParticleStatus.ALL;
 
     /**
      * 聊天日志保存的最大条数
@@ -93,10 +104,12 @@ public final class BotOptions {
     private final int chatLogSize = 256;
 
     /**
-     * Client Information 数据包的内容，文本过滤为 false
+     * Client Information 数据包，文本过滤为 false
      */
-    public ClientSettings clientSettings() {
-        return new ClientSettings(locale, (byte) viewDistance, chatMode, chatColors, skinParts, mainHand,
-                false, allowServerListings, particleSetting);
+    public ServerboundClientInformationPacket clientInformation() {
+        var country = locale.getCountry();
+        var language = country.isEmpty() ? locale.getLanguage() : locale.getLanguage() + "_" + country;
+        return new ServerboundClientInformationPacket(language.toLowerCase(Locale.ROOT), viewDistance, chatMode, chatColors,
+                List.copyOf(skinParts), mainHand, false, allowServerListings, particleSetting);
     }
 }

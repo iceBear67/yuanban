@@ -1,6 +1,7 @@
 package io.ib67.yuanban.bot;
 
-import net.minestom.server.network.packet.client.play.ClientClickWindowPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
 
 /**
  * 物品栏操作，全部为一次性请求，作用于执行时打开的窗口（没有打开窗口时为窗口 0）。
@@ -11,33 +12,38 @@ public interface InventoryActions {
      * 发送 Click Container
      *
      * @param slot   窗口槽位
-     * @param button 按键，含义随模式变化，见 wiki Click Container
-     * @param mode   模式
+     * @param type   模式（wiki Click Container 的 Mode）
+     * @param action 这个模式下的按键（wiki Click Container 的 Button），类型必须与模式对应：
+     *               {@code CLICK_ITEM} 对应 {@code ClickItemAction}，{@code SHIFT_CLICK_ITEM} 对应 {@code ShiftClickItemAction}，
+     *               {@code MOVE_TO_HOTBAR_SLOT} 对应 {@code MoveToHotbarAction}，{@code CREATIVE_GRAB_MAX_STACK} 对应
+     *               {@code CreativeGrabAction}，{@code DROP_ITEM} 对应 {@code DropItemAction}，{@code SPREAD_ITEM} 对应
+     *               {@code SpreadItemAction}，{@code FILL_STACK} 对应 {@code FillStackAction}
+     * @throws IllegalArgumentException 按键与模式不对应，或者点击窗口外的两种 {@code DropItemAction} 的槽位不是 -999
      */
-    Action click(int slot, int button, ClientClickWindowPacket.ClickType mode);
+    Action click(int slot, ContainerActionType type, ContainerAction action);
 
     /**
-     * 左键点击：模式 PICKUP，按键 0
+     * 左键点击：模式 CLICK_ITEM，按键 LEFT_CLICK
      */
     Action leftClick(int slot);
 
     /**
-     * 右键点击：模式 PICKUP，按键 1
+     * 右键点击：模式 CLICK_ITEM，按键 RIGHT_CLICK
      */
     Action rightClick(int slot);
 
     /**
-     * Shift 左键点击：模式 QUICK_MOVE，按键 0
+     * Shift 左键点击：模式 SHIFT_CLICK_ITEM，按键 LEFT_CLICK
      */
     Action shiftClick(int slot);
 
     /**
-     * 与快捷栏交换：模式 SWAP，按键为快捷栏槽位（0 到 8）
+     * 与快捷栏交换：模式 MOVE_TO_HOTBAR_SLOT，按键为快捷栏槽位（0 到 8）
      */
     Action swapWithHotbar(int slot, int hotbarSlot);
 
     /**
-     * 丢出槽位中的物品：模式 THROW，按键 0 丢出一个，1 丢出整组
+     * 丢出槽位中的物品：模式 DROP_ITEM，按键 DROP_FROM_SELECTED 丢出一个，DROP_SELECTED_STACK 丢出整组
      */
     Action dropSlot(int slot, boolean wholeStack);
 

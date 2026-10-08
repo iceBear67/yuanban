@@ -7,9 +7,9 @@ import io.ib67.yuanban.bot.view.BotView;
 import io.ib67.yuanban.bot.view.StateReader;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Point;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.instance.block.BlockFace;
-import net.minestom.server.network.packet.client.ClientPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
@@ -72,7 +72,7 @@ public interface Bot {
     /**
      * 等同于 {@code observeDuring(Observers.blockBroken(pos), bot -> bot.attemptBreakBlock(pos, face))}
      */
-    ObservedAction<BlockBrokenObserver> breakBlock(Point pos, BlockFace face);
+    ObservedAction<BlockBrokenObserver> breakBlock(Point pos, Direction face);
 
     /**
      * 注册一个 {@code Observers.condition(condition)} 并等它关闭。等待期间执行推进函数。
@@ -122,22 +122,22 @@ public interface Bot {
 
     Action attemptBreakBlock(Point pos);
 
-    Action attemptBreakBlock(Point pos, BlockFace face);
+    Action attemptBreakBlock(Point pos, Direction face);
 
-    Action placeBlock(Point against, BlockFace face, PlayerHand hand);
+    Action placeBlock(Point against, Direction face, Hand hand);
 
     /**
      * @param cursor 光标在方块中的位置，各分量在 [0, 1] 之间
      */
-    Action useItemOn(Point pos, BlockFace face, PlayerHand hand, Point cursor);
+    Action useItemOn(Point pos, Direction face, Hand hand, Point cursor);
 
-    Action useItem(PlayerHand hand);
+    Action useItem(Hand hand);
 
-    Action useItem(PlayerHand hand, int holdTicks);
+    Action useItem(Hand hand, int holdTicks);
 
     Action attack(int entityId);
 
-    Action interact(int entityId, PlayerHand hand);
+    Action interact(int entityId, Hand hand);
 
     // 一次性请求
 
@@ -167,8 +167,10 @@ public interface Bot {
 
     /**
      * 发送任意数据包，用于本库没有封装的操作
+     *
+     * @throws IllegalArgumentException 不是客户端发往服务端的数据包
      */
-    Action send(ClientPacket packet);
+    Action send(MinecraftPacket packet);
 
     // movement suspension
 

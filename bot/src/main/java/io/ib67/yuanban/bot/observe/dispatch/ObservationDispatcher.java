@@ -7,8 +7,7 @@ import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observer;
 import io.ib67.yuanban.bot.observe.PacketReceived;
 import io.ib67.yuanban.bot.observe.PacketSent;
-import net.minestom.server.network.packet.client.ClientPacket;
-import net.minestom.server.network.packet.server.ServerPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -42,11 +41,11 @@ public final class ObservationDispatcher {
         return !index.observations(type).isEmpty();
     }
 
-    public boolean wantsReceived(Class<? extends ServerPacket> type) {
+    public boolean wantsReceived(Class<? extends MinecraftPacket> type) {
         return !index.received(type).isEmpty();
     }
 
-    public boolean wantsSent(Class<? extends ClientPacket> type) {
+    public boolean wantsSent(Class<? extends MinecraftPacket> type) {
         return !index.sent(type).isEmpty();
     }
 
@@ -69,13 +68,13 @@ public final class ObservationDispatcher {
         pending.add(new Pending(++sequence, observation));
     }
 
-    public void emitReceived(ServerPacket packet) {
+    public void emitReceived(MinecraftPacket packet) {
         if (wantsReceived(packet.getClass())) {
             emit(new PacketReceived(packet));
         }
     }
 
-    public void emitSent(ClientPacket packet) {
+    public void emitSent(MinecraftPacket packet) {
         if (wantsSent(packet.getClass())) {
             emit(new PacketSent(packet));
         }

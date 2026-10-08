@@ -50,6 +50,7 @@ import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.protocol.BundleBuffer;
 import io.ib67.yuanban.bot.protocol.InboundPacket;
 import io.ib67.yuanban.bot.protocol.Outbox;
+import io.ib67.yuanban.bot.protocol.PacketDirection;
 import io.ib67.yuanban.bot.protocol.ProtocolMachine;
 import io.ib67.yuanban.bot.transport.ClientConnection;
 import io.ib67.yuanban.bot.transport.InboundSink;
@@ -58,17 +59,17 @@ import io.ib67.yuanban.bot.view.BotView;
 import io.ib67.yuanban.bot.view.StateReader;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Point;
-import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.instance.block.BlockFace;
-import net.minestom.server.network.packet.client.ClientPacket;
-import net.minestom.server.network.packet.client.play.ClientChatMessagePacket;
-import net.minestom.server.network.packet.client.play.ClientCommandChatPacket;
-import net.minestom.server.network.packet.client.play.ClientHeldItemChangePacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.client.play.ClientStatusPacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.registry.Registries;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.security.SecureRandom;
@@ -914,7 +915,7 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     @Override
-    public ObservedAction<BlockBrokenObserver> breakBlock(Point pos, BlockFace face) {
+    public ObservedAction<BlockBrokenObserver> breakBlock(Point pos, Direction face) {
         return observeDuring(Observers.blockBroken(pos), bot -> bot.attemptBreakBlock(pos, face));
     }
 
@@ -1014,28 +1015,28 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     @Override
-    public Action attemptBreakBlock(Point pos, BlockFace face) {
+    public Action attemptBreakBlock(Point pos, Direction face) {
         return handAction("attemptBreakBlock " + pos + " " + face, action -> new DigTask(action, pos, face));
     }
 
     @Override
-    public Action placeBlock(Point against, BlockFace face, PlayerHand hand) {
+    public Action placeBlock(Point against, Direction face, Hand hand) {
         var cursor = UseItemOnTask.faceCenter(face);
         return handAction("placeBlock " + against + " " + face, action -> new UseItemOnTask(action, against, face, hand, cursor));
     }
 
     @Override
-    public Action useItemOn(Point pos, BlockFace face, PlayerHand hand, Point cursor) {
+    public Action useItemOn(Point pos, Direction face, Hand hand, Point cursor) {
         return handAction("useItemOn " + pos + " " + face, action -> new UseItemOnTask(action, pos, face, hand, cursor));
     }
 
     @Override
-    public Action useItem(PlayerHand hand) {
+    public Action useItem(Hand hand) {
         return handAction("useItem " + hand, action -> new UseItemTask(action, hand, 0));
     }
 
     @Override
-    public Action useItem(PlayerHand hand, int holdTicks) {
+    public Action useItem(Hand hand, int holdTicks) {
         if (holdTicks <= 0) {
             throw new IllegalArgumentException("holdTicks must be positive, got " + holdTicks);
         }
@@ -1048,7 +1049,7 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     @Override
-    public Action interact(int entityId, PlayerHand hand) {
+    public Action interact(int entityId, Hand hand) {
         return handAction("interact " + entityId, action -> new InteractTask(action, entityId, hand));
     }
 
@@ -1059,7 +1060,7 @@ public final class BotInstance implements Bot, ObservationHost {
         }
         return oneShot("chat", _ -> {
             var update = state.chat().lastSeen().update();
-            state.outbox().send(new ClientChatMessagePacket(message, System.currentTimeMillis(), random.nextLong(), null,
+            state.outbox().send(new ServerboundChatPacket(message, System.currentTimeMillis(), random.nextLong(), null,
                     update.messageCount(), update.acknowledged(), update.checksum()));
         });
     }
@@ -1069,7 +1070,7 @@ public final class BotInstance implements Bot, ObservationHost {
         if (command.length() > MAX_COMMAND_LENGTH) {
             throw new IllegalArgumentException("command exceeds " + MAX_COMMAND_LENGTH + " characters");
         }
-        return oneShot("command", _ -> state.outbox().send(new ClientCommandChatPacket(command)));
+        return oneShot("command", _ -> state.outbox().send(new ServerboundChatCommandPacket(command)));
     }
 
     @Override
@@ -1078,7 +1079,7 @@ public final class BotInstance implements Bot, ObservationHost {
             throw new IllegalArgumentException("hotbar slot must be within [0, 8], got " + slot);
         }
         return oneShot("selectHotbar " + slot, _ -> {
-            state.outbox().send(new ClientHeldItemChangePacket((short) slot));
+            state.outbox().send(new ServerboundSetCarriedItemPacket(slot));
             hand.carriedItemSent(slot);
             var player = state.player();
             var old = player.heldSlot();
@@ -1091,20 +1092,19 @@ public final class BotInstance implements Bot, ObservationHost {
 
     @Override
     public Action swapHands() {
-        return oneShot("swapHands", _ -> state.outbox().send(new ClientPlayerActionPacket(
-                ClientPlayerActionPacket.Status.SWAP_ITEM_HAND, Vec.ZERO, BlockFace.BOTTOM, 0)));
+        return oneShot("swapHands", _ -> state.outbox().send(new ServerboundPlayerActionPacket(
+                PlayerAction.SWAP_HANDS, Vector3i.ZERO, Direction.DOWN, 0)));
     }
 
     @Override
     public Action drop(boolean wholeStack) {
-        return oneShot("drop", _ -> state.outbox().send(new ClientPlayerActionPacket(
-                wholeStack ? ClientPlayerActionPacket.Status.DROP_ITEM_STACK : ClientPlayerActionPacket.Status.DROP_ITEM,
-                Vec.ZERO, BlockFace.BOTTOM, 0)));
+        return oneShot("drop", _ -> state.outbox().send(new ServerboundPlayerActionPacket(
+                wholeStack ? PlayerAction.DROP_ITEM_STACK : PlayerAction.DROP_ITEM, Vector3i.ZERO, Direction.DOWN, 0)));
     }
 
     @Override
     public Action respawn() {
-        return oneShot("respawn", _ -> state.outbox().send(new ClientStatusPacket(ClientStatusPacket.Action.PERFORM_RESPAWN)));
+        return oneShot("respawn", _ -> state.outbox().send(new ServerboundClientCommandPacket(ClientCommand.PERFORM_RESPAWN)));
     }
 
     @Override
@@ -1113,7 +1113,8 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     @Override
-    public Action send(ClientPacket packet) {
+    public Action send(MinecraftPacket packet) {
+        PacketDirection.requireServerbound(packet.getClass());
         return oneShot("send " + packet.getClass().getSimpleName(), _ -> state.outbox().send(packet));
     }
 
@@ -1153,7 +1154,7 @@ public final class BotInstance implements Bot, ObservationHost {
 
     /**
      * 一条连接的入站入口：做解码上下文的处理，然后放进 bot 的入站队列。调用不会并发，按到达顺序：
-     * TCP 连接在入站线程上调用；对象级连接在发送数据包的服务端线程上调用，由连接的锁保证不并发
+     * TCP 连接在 Netty 事件循环上调用；其它连接实现必须串行调用（{@link InboundSink}）
      */
     private final class Sink implements InboundSink {
         private final int target;
@@ -1164,14 +1165,9 @@ public final class BotInstance implements Bot, ObservationHost {
         }
 
         @Override
-        public void accept(ServerPacket packet) {
+        public void accept(MinecraftPacket packet) {
             inbound.add(new Received(target, new InboundPacket(packet, decode.process(packet))));
             scheduler.wakeup();
-        }
-
-        @Override
-        public Registries registries() {
-            return decode.registries();
         }
 
         @Override

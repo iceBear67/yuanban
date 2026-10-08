@@ -3,10 +3,9 @@ package io.ib67.yuanban.bot;
 import io.ib67.yuanban.bot.transport.ClientConnection;
 import io.ib67.yuanban.bot.transport.InboundSink;
 import io.ib67.yuanban.bot.transport.Transport;
-import net.minestom.server.network.packet.client.ClientPacket;
-import net.minestom.server.network.packet.client.common.ClientKeepAlivePacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.common.KeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundKeepAlivePacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
@@ -18,13 +17,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 
 /**
- * 测试中扮演服务端一侧的连接对端：测试线程作为入站线程，把 Minestom 的数据包 record 交给 bot；
+ * 测试中扮演服务端一侧的连接对端：测试线程按顺序把 MCProtocolLib 的数据包对象交给 bot；
  * bot 发出的数据包按顺序记录下来。
  */
 public final class TestPeer implements Transport {
     private static final AtomicLong BARRIER = new AtomicLong(1_000_000);
 
-    private final List<ClientPacket> sent = new ArrayList<>();
+    private final List<MinecraftPacket> sent = new ArrayList<>();
     private volatile @Nullable InboundSink sink;
     private volatile boolean closedByBot;
     private volatile @Nullable CompletableFuture<Void> heldWrites;
@@ -44,7 +43,7 @@ public final class TestPeer implements Transport {
             }
 
             @Override
-            public CompletableFuture<Void> send(List<ClientPacket> packets) {
+            public CompletableFuture<Void> send(List<MinecraftPacket> packets) {
                 synchronized (sent) {
                     sent.addAll(packets);
                     sent.notifyAll();
@@ -66,15 +65,15 @@ public final class TestPeer implements Transport {
     }
 
     /**
-     * 按顺序把数据包交给 bot（测试线程作为入站线程）
+     * 按顺序把数据包交给 bot（测试线程串行调用 {@link InboundSink#accept}）
      */
-    public void push(ServerPacket... packets) {
+    public void push(MinecraftPacket... packets) {
         for (var packet : packets) {
             sink().accept(packet);
         }
     }
 
-    public void push(List<? extends ServerPacket> packets) {
+    public void push(List<? extends MinecraftPacket> packets) {
         packets.forEach(packet -> sink().accept(packet));
     }
 
@@ -101,7 +100,7 @@ public final class TestPeer implements Transport {
     /**
      * 到目前为止 bot 发出的全部数据包
      */
-    public List<ClientPacket> sent() {
+    public List<MinecraftPacket> sent() {
         synchronized (sent) {
             return List.copyOf(sent);
         }
@@ -116,20 +115,20 @@ public final class TestPeer implements Transport {
     /**
      * 从 mark 开始 bot 发出的数据包
      */
-    public List<ClientPacket> sentSince(int mark) {
+    public List<MinecraftPacket> sentSince(int mark) {
         synchronized (sent) {
             return List.copyOf(sent.subList(mark, sent.size()));
         }
     }
 
-    public <P extends ClientPacket> List<P> sentSince(int mark, Class<P> type) {
+    public <P extends MinecraftPacket> List<P> sentSince(int mark, Class<P> type) {
         return sentSince(mark).stream().filter(type::isInstance).map(type::cast).toList();
     }
 
     /**
      * 等到 bot 从 mark 开始发出一个满足条件的数据包
      */
-    public <P extends ClientPacket> P awaitSent(int mark, Class<P> type, Predicate<P> filter, Duration timeout) {
+    public <P extends MinecraftPacket> P awaitSent(int mark, Class<P> type, Predicate<P> filter, Duration timeout) {
         var deadline = System.nanoTime() + timeout.toNanos();
         synchronized (sent) {
             while (true) {
@@ -153,7 +152,7 @@ public final class TestPeer implements Transport {
         }
     }
 
-    public <P extends ClientPacket> P awaitSent(int mark, Class<P> type, Duration timeout) {
+    public <P extends MinecraftPacket> P awaitSent(int mark, Class<P> type, Duration timeout) {
         return awaitSent(mark, type, _ -> true, timeout);
     }
 
@@ -163,7 +162,7 @@ public final class TestPeer implements Transport {
     public void barrier() {
         var id = BARRIER.incrementAndGet();
         var mark = mark();
-        push(new KeepAlivePacket(id));
-        awaitSent(mark, ClientKeepAlivePacket.class, packet -> packet.id() == id, Duration.ofSeconds(10));
+        push(new ClientboundKeepAlivePacket(id));
+        awaitSent(mark, ServerboundKeepAlivePacket.class, packet -> packet.getPingId() == id, Duration.ofSeconds(10));
     }
 }

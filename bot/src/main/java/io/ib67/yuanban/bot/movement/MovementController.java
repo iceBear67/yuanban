@@ -7,22 +7,24 @@ import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.observe.PlayerMoved;
 import io.ib67.yuanban.bot.player.AttributeMap;
 import io.ib67.yuanban.bot.player.LocalPlayer;
+import io.ib67.yuanban.bot.protocol.Vectors;
 import io.ib67.yuanban.bot.scheduler.BotState;
 import io.ib67.yuanban.bot.world.ClientWorld;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.attribute.Attribute;
-import net.minestom.server.entity.attribute.AttributeModifier;
-import net.minestom.server.entity.attribute.AttributeOperation;
-import net.minestom.server.item.component.UseEffects;
-import net.minestom.server.network.packet.client.play.ClientEntityActionPacket;
-import net.minestom.server.network.packet.client.play.ClientInputPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerAbilitiesPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientVehicleMovePacket;
-import net.minestom.server.potion.PotionEffect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeModifier;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.ModifierOperation;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerState;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.UseEffects;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundMoveVehiclePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerCommandPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayDeque;
@@ -43,11 +45,16 @@ public final class MovementController {
      * 疾跑修饰符（原版 {@code LivingEntity.SPEED_MODIFIER_SPRINTING}）
      */
     static final AttributeModifier SPRINTING = new AttributeModifier(AttributeMap.SPRINTING_ID, 0.3,
-            AttributeOperation.ADD_MULTIPLIED_TOTAL);
+            ModifierOperation.ADD_MULTIPLIED_TOTAL);
     /**
      * 期望方向相对朝向的分量超过这个值时视为按下对应的按键
      */
     static final double INPUT_THRESHOLD = 1.0E-3;
+    /**
+     * 没有按下任何按键的 Player Input（原版新玩家的 {@code lastSentInput}）
+     */
+    private static final ServerboundPlayerInputPacket NO_INPUT =
+            new ServerboundPlayerInputPacket(false, false, false, false, false, false, false);
 
     private final BotState state;
     private final ArrayDeque<MovementAction> queue = new ArrayDeque<>();
@@ -55,7 +62,10 @@ public final class MovementController {
     private MovementSender sender = new MovementSender();
     private @Nullable MovementAction current;
     private MoveIntent lastIntent = MoveIntent.NONE;
-    private byte lastInputFlags;
+    /**
+     * 上一次发送的 Player Input
+     */
+    private ServerboundPlayerInputPacket lastInput = NO_INPUT;
     /**
      * 本地的疾跑状态（属性上带疾跑修饰符）
      */
@@ -156,7 +166,7 @@ public final class MovementController {
             // 原版新玩家的 wasSprinting 取旧玩家此刻的疾跑状态
             sentSprinting = sprinting;
         } else {
-            lastInputFlags = 0;
+            lastInput = NO_INPUT;
             sprinting = false;
             sentSprinting = false;
         }
@@ -246,7 +256,7 @@ public final class MovementController {
         var player = state.player();
         if (player.onGround() && player.abilities().flying() && player.gameMode() != GameMode.SPECTATOR) {
             player.abilities().stopFlying();
-            state.outbox().send(new ClientPlayerAbilitiesPacket((byte) 0));
+            state.outbox().send(new ServerboundPlayerAbilitiesPacket(false));
         }
     }
 
@@ -323,14 +333,16 @@ public final class MovementController {
             }
         }
         var look = player.position();
-        state.outbox().send(new ClientPlayerRotationPacket(look.yaw(), look.pitch(), false, false));
+        state.outbox().send(new ServerboundMovePlayerRotPacket(false, false, look.yaw(), look.pitch()));
         var root = vehicle;
         while (root.vehicle() != null) {
             var below = (int) root.vehicle();
             root = Objects.requireNonNull(state.world().entities().get(below), () -> "unknown vehicle " + below);
         }
         if (VehicleControl.controlledBy(root, state)) {
-            state.outbox().send(new ClientVehicleMovePacket(root.position(), root.onGround()));
+            var position = root.position();
+            state.outbox().send(new ServerboundMoveVehiclePacket(Vectors.vector(position), position.yaw(), position.pitch(),
+                    root.onGround()));
             sendSprintingIfNeeded();
         }
     }
@@ -343,8 +355,8 @@ public final class MovementController {
             return;
         }
         sentSprinting = sprinting;
-        state.outbox().send(new ClientEntityActionPacket(state.player().entityId(), sprinting
-                ? ClientEntityActionPacket.Action.START_SPRINTING : ClientEntityActionPacket.Action.STOP_SPRINTING, 0));
+        state.outbox().send(new ServerboundPlayerCommandPacket(state.player().entityId(), sprinting
+                ? PlayerState.START_SPRINTING : PlayerState.STOP_SPRINTING));
     }
 
     /**
@@ -399,7 +411,7 @@ public final class MovementController {
         var player = state.player();
         var sprintKey = intent.mode() == MovementMode.SPRINT && intent.moving();
         var forward = forwardInput(intent, rotation) > INPUT_THRESHOLD;
-        var possible = player.effects().get(PotionEffect.BLINDNESS) == null && (vehicle != null
+        var possible = player.effects().get(Effect.BLINDNESS) == null && (vehicle != null
                 ? VehicleControl.canSprint(vehicle) && VehicleControl.controlledBy(vehicle, state)
                 : player.food() > 6 || player.abilities().allowFlying());
         // 与原版相同，先判断开始，再判断停止：顶住墙壁时开始之后在同一个 tick 里立即停止
@@ -415,9 +427,9 @@ public final class MovementController {
         }
         sprinting = now;
         if (now) {
-            player.attributes().addModifier(Attribute.MOVEMENT_SPEED, SPRINTING);
+            player.attributes().addModifier(AttributeType.Builtin.MOVEMENT_SPEED, SPRINTING);
         } else {
-            player.attributes().removeModifier(Attribute.MOVEMENT_SPEED, AttributeMap.SPRINTING_ID);
+            player.attributes().removeModifier(AttributeType.Builtin.MOVEMENT_SPEED, AttributeMap.SPRINTING_ID);
         }
     }
 
@@ -434,13 +446,13 @@ public final class MovementController {
      * Player Input：前、后、左、右按期望移动方向相对当前朝向的分量符号确定；跳跃为本 tick 是否起跳；
      * 疾跑为疾跑键（移动方式为 {@code SPRINT} 并且期望移动方向不为零，原版 {@code keyPresses.sprint}），与本地的疾跑状态无关
      */
-    private ClientInputPacket inputPacket(MoveIntent intent, Rotation rotation) {
+    private ServerboundPlayerInputPacket inputPacket(MoveIntent intent, Rotation rotation) {
         var yaw = Math.toRadians(rotation.yaw());
         var direction = intent.direction();
         var forward = forwardInput(intent, rotation);
         var left = Math.cos(yaw) * direction.x() + Math.sin(yaw) * direction.z();
         var jump = intent.jump() && state.player().onGround();
-        return new ClientInputPacket(forward > INPUT_THRESHOLD, forward < -INPUT_THRESHOLD,
+        return new ServerboundPlayerInputPacket(forward > INPUT_THRESHOLD, forward < -INPUT_THRESHOLD,
                 left > INPUT_THRESHOLD, left < -INPUT_THRESHOLD, jump,
                 intent.mode() == MovementMode.SNEAK, intent.mode() == MovementMode.SPRINT && intent.moving());
     }
@@ -448,9 +460,9 @@ public final class MovementController {
     /**
      * 与上次发送的不同时发送 Player Input
      */
-    private void sendInput(ClientInputPacket packet) {
-        if (packet.flags() != lastInputFlags) {
-            lastInputFlags = packet.flags();
+    private void sendInput(ServerboundPlayerInputPacket packet) {
+        if (!packet.equals(lastInput)) {
+            lastInput = packet;
             state.outbox().send(packet);
         }
     }

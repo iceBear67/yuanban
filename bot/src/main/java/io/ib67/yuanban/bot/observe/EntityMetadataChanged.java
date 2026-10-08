@@ -1,6 +1,6 @@
 package io.ib67.yuanban.bot.observe;
 
-import net.minestom.server.entity.Metadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
 
 import java.util.Map;
 
@@ -9,7 +9,7 @@ import java.util.Map;
  *
  * @param changed 数据包中的条目，按索引
  */
-public record EntityMetadataChanged(int entityId, Map<Integer, Metadata.Entry<?>> changed) implements Observation {
+public record EntityMetadataChanged(int entityId, Map<Integer, EntityMetadata<?, ?>> changed) implements Observation {
     public EntityMetadataChanged {
         changed = Map.copyOf(changed);
     }

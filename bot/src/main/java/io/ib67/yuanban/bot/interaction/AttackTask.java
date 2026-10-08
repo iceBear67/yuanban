@@ -3,14 +3,15 @@ package io.ib67.yuanban.bot.interaction;
 import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.movement.Rotation;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.network.packet.client.play.ClientAnimationPacket;
-import net.minestom.server.network.packet.client.play.ClientAttackPacket;
-import net.minestom.server.network.packet.client.play.ClientSpectatorActionPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSpectatorActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
+import java.util.OptionalInt;
 
 /**
  * {@code attack}：先看向目标实体包围盒中心，服务端收到这个朝向之后（{@link HandController#aimed}）发送 Attack 与 Swing Arm
@@ -51,10 +52,10 @@ public final class AttackTask extends HandAction {
         sent = true;
         if (state.player().gameMode() == GameMode.SPECTATOR) {
             // 原版 startAttack：旁观模式下点击实体只发送带这个实体编号的 Spectator Action（MultiPlayerGameMode.spectate），不攻击、不挥手
-            state.outbox().send(new ClientSpectatorActionPacket(entityId));
+            state.outbox().send(new ServerboundSpectatorActionPacket(OptionalInt.of(entityId)));
         } else {
-            state.outbox().send(new ClientAttackPacket(entityId));
-            state.outbox().send(new ClientAnimationPacket(PlayerHand.MAIN));
+            state.outbox().send(new ServerboundAttackPacket(entityId));
+            state.outbox().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
         }
         state.outbox().completeWhenWritten(handle);
     }

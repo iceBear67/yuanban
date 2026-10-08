@@ -3,11 +3,14 @@ package io.ib67.yuanban.bot.interaction;
 import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.movement.MovementController;
 import io.ib67.yuanban.bot.movement.Rotation;
+import io.ib67.yuanban.bot.data.Items;
 import io.ib67.yuanban.bot.scheduler.BotState;
-import net.minestom.server.component.DataComponents;
-import net.minestom.server.item.component.UseEffects;
-import net.minestom.server.network.packet.client.play.ClientHeldItemChangePacket;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.UseEffects;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Objects;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -23,6 +26,10 @@ public final class HandController {
      * 原版 {@code MultiPlayerGameMode}：挖掘完成或者瞬间破坏之后的挖掘延迟
      */
     public static final int DESTROY_DELAY_TICKS = 5;
+    /**
+     * 原版 {@code UseEffects.DEFAULT}：物品没有 {@code use_effects} 组件时使用
+     */
+    public static final UseEffects DEFAULT_USE_EFFECTS = new UseEffects(false, true, 0.2F);
 
     private final BotState state;
     private final MovementController movement;
@@ -67,7 +74,7 @@ public final class HandController {
         var selected = state.player().heldSlot();
         if (selected != carriedIndex) {
             carriedIndex = selected;
-            state.outbox().send(new ClientHeldItemChangePacket((short) selected));
+            state.outbox().send(new ServerboundSetCarriedItemPacket(selected));
         }
     }
 
@@ -110,15 +117,15 @@ public final class HandController {
     }
 
     /**
-     * 正在使用的物品的 {@code use_effects} 组件（没有这个组件时为原版的默认值 {@link UseEffects#DEFAULT}）；
+     * 正在使用的物品的 {@code use_effects} 组件（没有这个组件时为原版的默认值 {@link #DEFAULT_USE_EFFECTS}，空手使用时同样如此）；
      * 没有在使用物品时为 null。移动步骤按它减速、判断能否开始疾跑
      */
     public @Nullable UseEffects itemInUse() {
-        if (current == null || current.handle().isDone()) {
+        if (current == null || current.handle().isDone() || !current.usingItem()) {
             return null;
         }
-        var item = current.itemInUse();
-        return item == null ? null : item.get(DataComponents.USE_EFFECTS, UseEffects.DEFAULT);
+        return Objects.requireNonNullElse(Items.component(current.itemInUse(), DataComponentTypes.USE_EFFECTS),
+                DEFAULT_USE_EFFECTS);
     }
 
     /**

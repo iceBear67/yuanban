@@ -1,16 +1,19 @@
 package io.ib67.yuanban.bot.movement;
 
+import io.ib67.yuanban.bot.data.ItemData;
+import io.ib67.yuanban.bot.data.Items;
 import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.inventory.Window;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.scheduler.BotState;
-import net.minestom.server.component.DataComponents;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.EquipmentSlot;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.item.Material;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
+import net.kyori.adventure.key.Key;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 import java.util.Set;
@@ -29,7 +32,9 @@ import java.util.Set;
  * 并且允许这个实体类型装备，实体可以使用这个槽位（存活，不是幼年；马类与鹦鹉螺还要已被驯服，羊驼没有限制）。
  */
 final class VehicleControl {
-    private static final String ENTITY_TYPE_REGISTRY = "minecraft:entity_type";
+    private static final Key ENTITY_TYPE_REGISTRY = Key.key("entity_type");
+    private static final int CARROT_ON_A_STICK = ItemData.id(Key.key("carrot_on_a_stick"));
+    private static final int WARPED_FUNGUS_ON_A_STICK = ItemData.id(Key.key("warped_fungus_on_a_stick"));
     private static final Set<EntityType> SADDLED_HORSES = Set.of(EntityType.HORSE, EntityType.DONKEY, EntityType.MULE,
             EntityType.SKELETON_HORSE, EntityType.ZOMBIE_HORSE, EntityType.CAMEL, EntityType.CAMEL_HUSK);
     private static final Set<EntityType> LLAMAS = Set.of(EntityType.LLAMA, EntityType.TRADER_LLAMA);
@@ -49,20 +54,21 @@ final class VehicleControl {
             return true;
         }
         if (SADDLED_HORSES.contains(type) || NAUTILUSES.contains(type)) {
-            var tamed = SADDLED_HORSES.contains(type) ? flag(vehicle, MetadataDef.AbstractHorse.IS_TAME)
-                    : flag(vehicle, MetadataDef.TameableAnimal.IS_TAMED);
+            var tamed = SADDLED_HORSES.contains(type)
+                    ? EntityMetaIndex.get(vehicle.metadata(), EntityMetaIndex.HORSE_IS_TAME)
+                    : EntityMetaIndex.get(vehicle.metadata(), EntityMetaIndex.TAMEABLE_IS_TAMED);
             return equipped(vehicle, EquipmentSlot.SADDLE, alive(vehicle) && !baby(vehicle) && tamed, tags);
         }
         if (LLAMAS.contains(type)) {
             return equipped(vehicle, EquipmentSlot.SADDLE, true, tags);
         }
         if (type == EntityType.PIG || type == EntityType.STRIDER) {
-            var rod = type == EntityType.PIG ? Material.CARROT_ON_A_STICK : Material.WARPED_FUNGUS_ON_A_STICK;
+            var rod = type == EntityType.PIG ? CARROT_ON_A_STICK : WARPED_FUNGUS_ON_A_STICK;
             return equipped(vehicle, EquipmentSlot.SADDLE, alive(vehicle) && !baby(vehicle), tags) && holding(state, player, rod);
         }
         if (type == EntityType.HAPPY_GHAST) {
             return equipped(vehicle, EquipmentSlot.BODY, alive(vehicle) && !baby(vehicle), tags)
-                    && !flag(vehicle, MetadataDef.HappyGhast.STAYS_STILL);
+                    && !EntityMetaIndex.get(vehicle.metadata(), EntityMetaIndex.HAPPY_GHAST_STAYS_STILL);
         }
         return false;
     }
@@ -75,11 +81,11 @@ final class VehicleControl {
     }
 
     private static boolean equipped(ClientEntity entity, EquipmentSlot slot, boolean canUseSlot, TagTable tags) {
-        var item = entity.equipment().getOrDefault(slot, ItemStack.AIR);
-        if (item.isAir() || !canUseSlot) {
+        var item = entity.equipment().get(slot);
+        if (item == null || !canUseSlot) {
             return false;
         }
-        var equippable = item.get(DataComponents.EQUIPPABLE);
+        var equippable = Items.component(item, DataComponentTypes.EQUIPPABLE);
         if (equippable == null || equippable.slot() != slot) {
             return false;
         }
@@ -87,41 +93,28 @@ final class VehicleControl {
         if (allowed == null) {
             return true;
         }
-        var tagKey = allowed.key();
-        if (tagKey != null) {
-            return tags.contains(ENTITY_TYPE_REGISTRY, tagKey.key().asString(), entity.type().id());
+        var tag = allowed.getLocation();
+        if (tag != null) {
+            return tags.contains(ENTITY_TYPE_REGISTRY, tag, entity.type().ordinal());
         }
-        for (var key : allowed) {
-            if (key.key().equals(entity.type().key())) {
-                return true;
-            }
-        }
-        return false;
+        return Objects.requireNonNull(allowed.getHolders()).contains(entity.type().ordinal());
     }
 
-    private static boolean holding(BotState state, LocalPlayer player, Material material) {
+    private static boolean holding(BotState state, LocalPlayer player, int itemId) {
         var window = state.inventory().player();
-        return window.get(Window.PLAYER_HOTBAR_START + player.heldSlot()).material() == material
-                || window.get(Window.PLAYER_OFFHAND).material() == material;
+        return is(window.get(Window.PLAYER_HOTBAR_START + player.heldSlot()), itemId)
+                || is(window.get(Window.PLAYER_OFFHAND), itemId);
+    }
+
+    private static boolean is(@Nullable ItemStack item, int itemId) {
+        return item != null && item.getId() == itemId;
     }
 
     private static boolean alive(ClientEntity entity) {
-        var health = entity.metadata().get(MetadataDef.LivingEntity.HEALTH.index());
-        return (health == null ? MetadataDef.LivingEntity.HEALTH.defaultValue() : (Float) health.value()) > 0;
+        return EntityMetaIndex.get(entity.metadata(), EntityMetaIndex.LIVING_HEALTH) > 0;
     }
 
     private static boolean baby(ClientEntity entity) {
-        return flag(entity, MetadataDef.AgeableMob.IS_BABY);
-    }
-
-    private static boolean flag(ClientEntity entity, MetadataDef.Entry<Boolean> entry) {
-        var value = entity.metadata().get(entry.index());
-        if (value == null) {
-            return Objects.requireNonNull(entry.defaultValue());
-        }
-        if (entry instanceof MetadataDef.Entry.BitMask mask) {
-            return ((Byte) value.value() & mask.bitMask()) != 0;
-        }
-        return (Boolean) value.value();
+        return EntityMetaIndex.get(entity.metadata(), EntityMetaIndex.AGEABLE_IS_BABY);
     }
 }

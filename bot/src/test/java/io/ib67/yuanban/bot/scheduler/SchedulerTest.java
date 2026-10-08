@@ -21,23 +21,25 @@ import io.ib67.yuanban.bot.transport.Transport;
 import io.ib67.yuanban.bot.view.StateReader;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.instance.block.BlockFace;
-import net.minestom.server.network.packet.client.play.ClientChatMessagePacket;
-import net.minestom.server.network.packet.client.play.ClientInputPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerLoadedPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientTickEndPacket;
-import net.minestom.server.network.packet.client.play.ClientUseItemPacket;
-import net.minestom.server.network.packet.server.common.TransferPacket;
-import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
-import net.minestom.server.network.packet.server.play.ChangeGameStatePacket;
-import net.minestom.server.network.packet.server.play.PlayerPositionAndLookPacket;
-import net.minestom.server.network.packet.server.play.RespawnPacket;
-import net.minestom.server.network.packet.server.play.UpdateHealthPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.GameEvent;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundTransferPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundGameEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -70,14 +72,14 @@ class SchedulerTest {
             });
             var chat = bot.chat("hello");
             peer.barrier();
-            assertTrue(peer.sentSince(0, ClientChatMessagePacket.class).isEmpty());
+            assertTrue(peer.sentSince(0, ServerboundChatPacket.class).isEmpty());
             TestServer.join(peer, new Pos(0.5, 0, 0.5));
             assertTrue(chat.await(TIMEOUT));
             var sent = peer.sent();
-            var loaded = indexOf(sent, ClientPlayerLoadedPacket.class);
-            var message = indexOf(sent, ClientChatMessagePacket.class);
+            var loaded = indexOf(sent, ServerboundPlayerLoadedPacket.class);
+            var message = indexOf(sent, ServerboundChatPacket.class);
             assertTrue(message > loaded);
-            assertEquals("hello", ((ClientChatMessagePacket) sent.get(message)).message());
+            assertEquals("hello", ((ServerboundChatPacket) sent.get(message)).getMessage());
         }
     }
 
@@ -89,25 +91,25 @@ class SchedulerTest {
             });
             var spawn = new Pos(0.5, 0, 0.5);
             peer.push(TestServer.joinPacket(GameMode.SURVIVAL));
-            peer.push(new PlayerPositionAndLookPacket(1, spawn, Vec.ZERO, 0, 0, 0));
+            peer.push(new ClientboundPlayerPositionPacket(1, spawn.x(), spawn.y(), spawn.z(), 0, 0, 0, 0, 0));
             peer.push(TestServer.flatChunk().packet(0, 0, TestServer.biomeCount()));
             var chat = bot.chat("hello");
             // 原版客户端没有按 tick 计算的超时：收到 Game Event 13 之前一直不发送 Player Loaded，不执行请求
             var mark = peer.mark();
             var deadline = System.nanoTime() + TIMEOUT.toNanos();
-            while (peer.sentSince(mark, ClientTickEndPacket.class).size() < 70) {
+            while (peer.sentSince(mark, ServerboundClientTickEndPacket.class).size() < 70) {
                 assertTrue(System.nanoTime() < deadline, "timed out waiting for ticks");
                 Thread.onSpinWait();
             }
-            assertTrue(peer.sentSince(0, ClientPlayerLoadedPacket.class).isEmpty());
-            assertTrue(peer.sentSince(0, ClientChatMessagePacket.class).isEmpty());
+            assertTrue(peer.sentSince(0, ServerboundPlayerLoadedPacket.class).isEmpty());
+            assertTrue(peer.sentSince(0, ServerboundChatPacket.class).isEmpty());
             assertFalse(bot.view().loaded());
             assertFalse(chat.future().isDone());
 
-            peer.push(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.LEVEL_CHUNKS_LOAD_START, 0));
+            peer.push(new ClientboundGameEventPacket(GameEvent.LEVEL_CHUNKS_LOAD_START, null));
             assertTrue(chat.await(TIMEOUT));
             var sent = peer.sent();
-            assertTrue(indexOf(sent, ClientChatMessagePacket.class) > indexOf(sent, ClientPlayerLoadedPacket.class));
+            assertTrue(indexOf(sent, ServerboundChatPacket.class) > indexOf(sent, ServerboundPlayerLoadedPacket.class));
         }
     }
 
@@ -173,9 +175,9 @@ class SchedulerTest {
             var mark = peer.mark();
             var first = bot.rotate(10, 0);
             var second = bot.rotate(20, 0);
-            var use = bot.useItem(PlayerHand.MAIN);
-            var useItem = peer.awaitSent(mark, ClientUseItemPacket.class, TIMEOUT);
-            assertEquals(1, useItem.sequence());
+            var use = bot.useItem(Hand.MAIN_HAND);
+            var useItem = peer.awaitSent(mark, ServerboundUseItemPacket.class, TIMEOUT);
+            assertEquals(1, useItem.getSequence());
             assertTrue(first.await(TIMEOUT));
             assertTrue(second.await(TIMEOUT));
             // 动作在 tick 中执行完毕，这个 tick 的数据包在同一轮的最后才交给连接：屏障的应答在之后的一轮发出，那时它们都已经记录
@@ -185,12 +187,12 @@ class SchedulerTest {
             var rotations = new ArrayList<Float>();
             var ticksBetween = 0;
             for (var packet : peer.sentSince(mark)) {
-                if (packet instanceof ClientPlayerRotationPacket rotation) {
-                    rotations.add(rotation.yaw());
-                } else if (packet instanceof ClientPlayerPositionAndRotationPacket both) {
-                    rotations.add(both.position().yaw());
+                if (packet instanceof ServerboundMovePlayerRotPacket rotation) {
+                    rotations.add(rotation.getYaw());
+                } else if (packet instanceof ServerboundMovePlayerPosRotPacket both) {
+                    rotations.add(both.getYaw());
                 }
-                if (packet instanceof ClientTickEndPacket && rotations.size() == 1) {
+                if (packet instanceof ServerboundClientTickEndPacket && rotations.size() == 1) {
                     ticksBetween++;
                 }
             }
@@ -198,7 +200,7 @@ class SchedulerTest {
             assertTrue(ticksBetween >= 1);
             // 手部动作在收到确认时执行完毕，不受移动队列影响
             assertFalse(use.future().isDone());
-            peer.push(new AcknowledgeBlockChangePacket(1));
+            peer.push(new ClientboundBlockChangedAckPacket(1));
             assertTrue(use.await(TIMEOUT));
         }
     }
@@ -233,15 +235,15 @@ class SchedulerTest {
             var bot = TestServer.joinedBot(runtime, peer, "digger", new Pos(0.5, 0, 0.5));
             var mark = peer.mark();
             var dig = bot.attemptBreakBlock(new Vec(1, -1, 0));
-            var started = peer.awaitSent(mark, ClientPlayerActionPacket.class,
-                    packet -> packet.status() == ClientPlayerActionPacket.Status.STARTED_DIGGING, TIMEOUT);
-            assertEquals(1, started.sequence());
+            var started = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
+                    packet -> packet.getAction() == PlayerAction.START_DIGGING, TIMEOUT);
+            assertEquals(1, started.getSequence());
             dig.cancel();
             assertFalse(dig.await(TIMEOUT));
-            var cancelled = peer.awaitSent(mark, ClientPlayerActionPacket.class,
-                    packet -> packet.status() == ClientPlayerActionPacket.Status.CANCELLED_DIGGING, TIMEOUT);
-            assertEquals(BlockFace.BOTTOM, cancelled.blockFace());
-            assertEquals(0, cancelled.sequence());
+            var cancelled = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
+                    packet -> packet.getAction() == PlayerAction.CANCEL_DIGGING, TIMEOUT);
+            assertEquals(Direction.DOWN, cancelled.getFace());
+            assertEquals(0, cancelled.getSequence());
         }
     }
 
@@ -272,12 +274,12 @@ class SchedulerTest {
             var bot = TestServer.joinedBot(runtime, peer, "rebuild", new Pos(0.5, 0, 0.5));
             var mark = peer.mark();
             var moving = bot.moveForward(1000);
-            var using = bot.useItem(PlayerHand.MAIN);
+            var using = bot.useItem(Hand.MAIN_HAND);
             // 请求在调度的第 3 步入队，晚于同一轮中的入站数据包：等两个动作都开始执行之后再重建世界
-            peer.awaitSent(mark, ClientUseItemPacket.class, TIMEOUT);
-            peer.awaitSent(mark, ClientInputPacket.class, ClientInputPacket::forward, TIMEOUT);
-            var spawnInfo = TestServer.joinPacket(GameMode.SURVIVAL).playerSpawnInfo();
-            peer.push(new RespawnPacket(spawnInfo, (byte) 0));
+            peer.awaitSent(mark, ServerboundUseItemPacket.class, TIMEOUT);
+            peer.awaitSent(mark, ServerboundPlayerInputPacket.class, ServerboundPlayerInputPacket::isForward, TIMEOUT);
+            var spawnInfo = TestServer.joinPacket(GameMode.SURVIVAL).getCommonPlayerSpawnInfo();
+            peer.push(new ClientboundRespawnPacket(spawnInfo, false, false));
             assertFalse(moving.await(TIMEOUT));
             assertFalse(using.await(TIMEOUT));
             assertEquals(ActionCancelledException.WORLD_REBUILT,
@@ -294,10 +296,10 @@ class SchedulerTest {
             var bot = TestServer.joinedBot(runtime, peer, "mortal", new Pos(0.5, 0, 0.5));
             var mark = peer.mark();
             var moving = bot.moveForward(1000);
-            var using = bot.useItem(PlayerHand.MAIN);
-            peer.awaitSent(mark, ClientInputPacket.class, ClientInputPacket::forward, TIMEOUT);
-            peer.awaitSent(mark, ClientUseItemPacket.class, TIMEOUT);
-            peer.push(new UpdateHealthPacket(0, 20, 5));
+            var using = bot.useItem(Hand.MAIN_HAND);
+            peer.awaitSent(mark, ServerboundPlayerInputPacket.class, ServerboundPlayerInputPacket::isForward, TIMEOUT);
+            peer.awaitSent(mark, ServerboundUseItemPacket.class, TIMEOUT);
+            peer.push(new ClientboundSetHealthPacket(0, 20, 5));
             assertFalse(moving.await(TIMEOUT));
             assertFalse(using.await(TIMEOUT));
             assertEquals(ActionCancelledException.PLAYER_DIED,
@@ -317,16 +319,16 @@ class SchedulerTest {
             assertThrows(IllegalStateException.class, () -> bot.view().player());
             assertThrows(IllegalStateException.class, () -> bot.view().block(0, 0, 0));
             var rotate = bot.rotate(30, 0);
-            var use = bot.useItem(PlayerHand.MAIN);
+            var use = bot.useItem(Hand.MAIN_HAND);
             peer.barrier();
-            assertTrue(peer.sentSince(0, ClientUseItemPacket.class).isEmpty());
+            assertTrue(peer.sentSince(0, ServerboundUseItemPacket.class).isEmpty());
             // 第一次 Login (play) 不取消它们，加载之后执行
             TestServer.join(peer, new Pos(0.5, 0, 0.5));
             assertTrue(rotate.await(TIMEOUT));
-            var useItem = peer.awaitSent(0, ClientUseItemPacket.class, TIMEOUT);
+            var useItem = peer.awaitSent(0, ServerboundUseItemPacket.class, TIMEOUT);
             var sent = peer.sent();
-            assertTrue(sent.indexOf(useItem) > indexOf(sent, ClientPlayerLoadedPacket.class));
-            peer.push(new AcknowledgeBlockChangePacket(useItem.sequence()));
+            assertTrue(sent.indexOf(useItem) > indexOf(sent, ServerboundPlayerLoadedPacket.class));
+            peer.push(new ClientboundBlockChangedAckPacket(useItem.getSequence()));
             assertTrue(use.await(TIMEOUT));
         }
     }
@@ -347,7 +349,7 @@ class SchedulerTest {
         var peer = new TestPeer();
         var bot = TestServer.configuredBot(runtime, peer, "late", options -> options.transportResolver((_, _) -> slow));
         TestServer.join(peer, new Pos(0.5, 0, 0.5));
-        peer.push(new TransferPacket("other.invalid", 25565));
+        peer.push(new ClientboundTransferPacket("other.invalid", 25565));
         // Transfer 关闭旧连接之后，Transfer 线程在打开新连接时阻塞
         var transferred = System.nanoTime() + TIMEOUT.toNanos();
         while (!peer.closedByBot()) {

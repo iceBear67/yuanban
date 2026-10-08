@@ -12,27 +12,34 @@ import io.ib67.yuanban.bot.observe.PacketReceived;
 import io.ib67.yuanban.bot.observe.PacketSent;
 import io.ib67.yuanban.bot.observe.Region;
 import io.ib67.yuanban.bot.observe.WorldClosed;
-import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.GameMode;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.network.packet.client.play.ClientChatMessagePacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
-import net.minestom.server.network.packet.server.play.BlockChangePacket;
-import net.minestom.server.network.packet.server.play.DestroyEntitiesPacket;
-import net.minestom.server.network.packet.server.play.EntityPositionSyncPacket;
-import net.minestom.server.network.packet.server.play.EntitySoundEffectPacket;
-import net.minestom.server.network.packet.server.play.ParticlePacket;
-import net.minestom.server.network.packet.server.play.RespawnPacket;
-import net.minestom.server.network.packet.server.play.SpawnEntityPacket;
-import net.minestom.server.network.packet.server.play.SystemChatPacket;
-import net.minestom.server.network.packet.server.play.UpdateHealthPacket;
-import net.minestom.server.particle.Particle;
-import net.minestom.server.sound.SoundEvent;
+import org.cloudburstmc.math.vector.Vector3d;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockChangeEntry;
+import org.geysermc.mcprotocollib.protocol.data.game.level.particle.Particle;
+import org.geysermc.mcprotocollib.protocol.data.game.level.particle.ParticleType;
+import org.geysermc.mcprotocollib.protocol.data.game.level.sound.BuiltinSound;
+import org.geysermc.mcprotocollib.protocol.data.game.level.sound.SoundCategory;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSoundEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityPositionSyncPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRemoveEntitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelParticlesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -49,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BuiltinObserversTest {
     private static final Duration TIMEOUT = TestServer.TIMEOUT;
+    private static final Particle FLAME = new Particle(ParticleType.FLAME, null);
 
     private static void withBot(BiConsumer<TestPeer, Bot> test) {
         try (var runtime = BotRuntime.create()) {
@@ -58,12 +66,25 @@ class BuiltinObserversTest {
         }
     }
 
-    private static ParticlePacket particle(double x, double y, double z) {
-        return new ParticlePacket(Particle.FLAME, false, false, x, y, z, 0.1f, 0.2f, 0.3f, 0.5f, 4);
+    private static ClientboundLevelParticlesPacket particle(double x, double y, double z) {
+        return new ClientboundLevelParticlesPacket(FLAME, false, false, x, y, z, 0.1f, 0.2f, 0.3f, 0.5f, 4);
     }
 
-    private static SpawnEntityPacket zombie(int id, double x, double z) {
-        return new SpawnEntityPacket(id, UUID.randomUUID(), EntityType.ZOMBIE, new Pos(x, 0, z), 0, 0, Vec.ZERO);
+    private static ClientboundAddEntityPacket zombie(int id, double x, double z) {
+        return new ClientboundAddEntityPacket(id, UUID.randomUUID(), EntityType.ZOMBIE, x, 0, z, 0, 0, 0);
+    }
+
+    private static ClientboundEntityPositionSyncPacket positionSync(int id, double x, double y, double z) {
+        return new ClientboundEntityPositionSyncPacket(id, Vector3d.from(x, y, z), Vector3d.ZERO, 0, 0, true);
+    }
+
+    private static ClientboundBlockUpdatePacket blockUpdate(Vec pos, Block block) {
+        return new ClientboundBlockUpdatePacket(new BlockChangeEntry(Vector3i.from(pos.blockX(), pos.blockY(), pos.blockZ()),
+                block.stateId()));
+    }
+
+    private static ClientboundSystemChatPacket chat(Component message) {
+        return new ClientboundSystemChatPacket(message, false);
     }
 
     @Test
@@ -77,7 +98,7 @@ class BuiltinObserversTest {
             assertEquals(1, observer.particles().size());
             assertTrue(observer.truncated());
             var record = observer.particles().getFirst();
-            assertEquals(Particle.FLAME, record.particle());
+            assertEquals(FLAME, record.particle());
             assertEquals(new Vec(10, 0, 10), record.center());
             assertEquals(4, record.count());
             assertEquals(2, observer.worlds().getFirst().state().count());
@@ -95,8 +116,8 @@ class BuiltinObserversTest {
             var chat = Observers.chatMessages().limit(1);
             var actionBars = Observers.actionBars();
             var damage = Observers.damageTaken();
-            var packets = Observers.packets(SystemChatPacket.class);
-            var sent = Observers.sentPackets(ClientChatMessagePacket.class);
+            var packets = Observers.packets(ClientboundSystemChatPacket.class);
+            var sent = Observers.sentPackets(ServerboundChatPacket.class);
             var observations = Observers.observations(BlockChanged.class);
             for (Observer observer : List.<Observer>of(particles, sounds, blocks, chat, actionBars, damage, packets, sent, observations)) {
                 bot.observe(observer);
@@ -120,6 +141,12 @@ class BuiltinObserversTest {
         assertThrows(IllegalArgumentException.class, () -> Observers.observations(PacketSent.class));
         assertThrows(IllegalArgumentException.class, () -> Observers.listener(PacketReceived.class, _ -> {
         }));
+        // 数据包类的方向不对时同样在调用线程上失败
+        assertThrows(IllegalArgumentException.class, () -> Observers.packets(ServerboundKeepAlivePacket.class));
+        assertThrows(IllegalArgumentException.class, () -> Observers.firstPacket(ServerboundKeepAlivePacket.class, _ -> true));
+        assertThrows(IllegalArgumentException.class, () -> Observers.packetListener(ServerboundKeepAlivePacket.class, _ -> {
+        }));
+        assertThrows(IllegalArgumentException.class, () -> Observers.sentPackets(ClientboundKeepAlivePacket.class));
     }
 
     @Test
@@ -127,8 +154,8 @@ class BuiltinObserversTest {
         withBot((peer, bot) -> {
             var handle = bot.observe(Observers.sounds(Region.around(new Vec(2, 0, 2), 1)));
             peer.push(zombie(7, 2, 2), zombie(8, 30, 30));
-            peer.push(new EntitySoundEffectPacket(SoundEvent.ENTITY_ZOMBIE_AMBIENT, Sound.Source.HOSTILE, 7, 1, 1, 0),
-                    new EntitySoundEffectPacket(SoundEvent.ENTITY_ZOMBIE_AMBIENT, Sound.Source.HOSTILE, 8, 1, 1, 0));
+            peer.push(new ClientboundSoundEntityPacket(BuiltinSound.ENTITY_ZOMBIE_AMBIENT, SoundCategory.HOSTILE, 7, 1, 1, 0),
+                    new ClientboundSoundEntityPacket(BuiltinSound.ENTITY_ZOMBIE_AMBIENT, SoundCategory.HOSTILE, 8, 1, 1, 0));
             peer.barrier();
             handle.close();
             assertEquals(List.of(7), handle.observer().sounds().stream().map(SoundRecord::entityId).toList());
@@ -144,13 +171,13 @@ class BuiltinObserversTest {
             var closing = bot.observe(Observers.movementOf(entity -> entity.type() == EntityType.ZOMBIE,
                     MovementCriteria.create().atLeast(2).towards(new Vec(10, 0, 0), 30).entities(2)));
             peer.push(zombie(11, 0, 5), zombie(12, 0, 8));
-            peer.push(new EntityPositionSyncPacket(10, new Vec(3, 0, 0), Vec.ZERO, 0, 0, true));
+            peer.push(positionSync(10, 3, 0, 0));
             // 方向不满足：向 -x 移动
-            peer.push(new EntityPositionSyncPacket(12, new Vec(-3, 0, 8), Vec.ZERO, 0, 0, true));
-            peer.push(new DestroyEntitiesPacket(List.of(10)));
+            peer.push(positionSync(12, -3, 0, 8));
+            peer.push(new ClientboundRemoveEntitiesPacket(new int[]{10}));
             peer.barrier();
             assertTrue(closing.isOpen());
-            peer.push(new EntityPositionSyncPacket(11, new Vec(3, 0, 4), Vec.ZERO, 0, 0, true));
+            peer.push(positionSync(11, 3, 0, 4));
             assertEquals(CloseReason.BY_OBSERVER, closing.awaitClose(TIMEOUT));
             assertTrue(closing.observer().met());
             assertEquals(List.of(10, 11), closing.observer().metBy().stream().map(MovementTrack::entityId).toList());
@@ -186,8 +213,7 @@ class BuiltinObserversTest {
             assertTrue(alreadyStone.observer().met());
 
             var waiting = bot.observe(Observers.blockAt(new Vec(1, -1, 0), block -> block.compare(Block.GOLD_BLOCK)));
-            peer.push(new BlockChangePacket(new Vec(1, -1, 0), Block.DIRT.stateId()),
-                    new BlockChangePacket(new Vec(1, -1, 0), Block.GOLD_BLOCK.stateId()));
+            peer.push(blockUpdate(new Vec(1, -1, 0), Block.DIRT), blockUpdate(new Vec(1, -1, 0), Block.GOLD_BLOCK));
             assertEquals(CloseReason.BY_OBSERVER, waiting.awaitClose(TIMEOUT));
             assertEquals(2, waiting.observer().history().size());
             assertEquals(Block.GOLD_BLOCK, waiting.observer().current());
@@ -198,8 +224,8 @@ class BuiltinObserversTest {
     void blockBrokenClosesOnWorldChange() {
         withBot((peer, bot) -> {
             var handle = bot.observe(Observers.blockBroken(new Vec(0, -1, 0)));
-            peer.push(new BlockChangePacket(new Vec(0, -1, 0), Block.STONE.stateId()));
-            peer.push(new RespawnPacket(TestServer.joinPacket(GameMode.SURVIVAL).playerSpawnInfo(), (byte) 0));
+            peer.push(blockUpdate(new Vec(0, -1, 0), Block.STONE));
+            peer.push(new ClientboundRespawnPacket(TestServer.joinPacket(GameMode.SURVIVAL).getCommonPlayerSpawnInfo(), false, false));
             assertEquals(CloseReason.BY_OBSERVER, handle.awaitClose(TIMEOUT));
             assertFalse(handle.observer().broken());
         });
@@ -251,9 +277,9 @@ class BuiltinObserversTest {
             assertTrue(near.observer().met());
             assertFalse(forward.await(TIMEOUT));
 
-            var finished = peer.awaitSent(mark, ClientPlayerActionPacket.class,
-                    packet -> packet.status() == ClientPlayerActionPacket.Status.FINISHED_DIGGING, TIMEOUT);
-            peer.push(new BlockChangePacket(dirt, Block.AIR.stateId()), new AcknowledgeBlockChangePacket(finished.sequence()));
+            var finished = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
+                    packet -> packet.getAction() == PlayerAction.FINISH_DIGGING, TIMEOUT);
+            peer.push(blockUpdate(dirt, Block.AIR), new ClientboundBlockChangedAckPacket(finished.getSequence()));
             var result = broken.await(TIMEOUT);
             assertTrue(result.broken());
             assertEquals(Block.DIRT, result.original());
@@ -280,11 +306,11 @@ class BuiltinObserversTest {
 
             var hello = bot.observe(Observers.firstChat(line -> line.plainText().contains("hello")));
             var damage = bot.observe(Observers.damageTaken());
-            peer.push(new SystemChatPacket(Component.text("nothing"), false), new SystemChatPacket(Component.text("say hello"), false));
+            peer.push(chat(Component.text("nothing")), chat(Component.text("say hello")));
             assertEquals(CloseReason.BY_OBSERVER, hello.awaitClose(TIMEOUT));
             assertEquals("say hello", hello.observer().matched().orElseThrow().plainText());
 
-            peer.push(new UpdateHealthPacket(15, 20, 5), new UpdateHealthPacket(18, 20, 5));
+            peer.push(new ClientboundSetHealthPacket(15, 20, 5), new ClientboundSetHealthPacket(18, 20, 5));
             peer.barrier();
             damage.close();
             assertEquals(1, damage.observer().damages().size());
@@ -303,7 +329,7 @@ class BuiltinObserversTest {
             var join = Component.text("> ").append(Component.translatable("multiplayer.player.joined", Component.text("alice")));
             var death = Component.translatable("chat.type.announcement", Component.text("server"),
                     Component.translatable("death.attack.player", Component.text("alice"), Component.text("bob")));
-            peer.push(new SystemChatPacket(other, false), new SystemChatPacket(join, false), new SystemChatPacket(death, false));
+            peer.push(chat(other), chat(join), chat(death));
             assertEquals(CloseReason.BY_OBSERVER, joined.awaitClose(TIMEOUT));
             var line = joined.observer().matched().orElseThrow();
             assertEquals(join, line.message());

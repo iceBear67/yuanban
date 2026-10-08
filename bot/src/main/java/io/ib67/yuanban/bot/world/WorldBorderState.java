@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.world;
 
 import net.minestom.server.instance.WorldBorder;
-import net.minestom.server.network.packet.server.play.InitializeWorldBorderPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundInitializeBorderPacket;
 
 /**
  * 世界边框（原版 {@code WorldBorder}）。由 Initialize World Border 与各个 Set Border 包更新；插值时间以 tick 计（原版与 Minestom 相同），
@@ -34,17 +34,17 @@ public final class WorldBorderState {
     /**
      * 原版 {@code handleInitializeBorder}：插值时间大于 0 时从旧的大小插值到新的大小，否则直接设为新的大小
      */
-    public void initialize(InitializeWorldBorderPacket packet) {
-        centerX = packet.x();
-        centerZ = packet.z();
-        if (packet.speed() > 0) {
-            lerp(packet.oldDiameter(), packet.newDiameter(), packet.speed());
+    public void initialize(ClientboundInitializeBorderPacket packet) {
+        centerX = packet.getNewCenterX();
+        centerZ = packet.getNewCenterZ();
+        if (packet.getLerpTime() > 0) {
+            lerp(packet.getOldSize(), packet.getNewSize(), packet.getLerpTime());
         } else {
-            size(packet.newDiameter());
+            size(packet.getNewSize());
         }
-        portalBoundary = packet.portalTeleportBoundary();
-        warningTime = packet.warningTime();
-        warningBlocks = packet.warningBlocks();
+        portalBoundary = packet.getNewAbsoluteMaxSize();
+        warningTime = packet.getWarningTime();
+        warningBlocks = packet.getWarningBlocks();
     }
 
     public void center(double x, double z) {

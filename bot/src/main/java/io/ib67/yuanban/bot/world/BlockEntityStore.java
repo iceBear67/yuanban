@@ -2,20 +2,20 @@ package io.ib67.yuanban.bot.world;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
+import org.cloudburstmc.nbt.NbtMap;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 方块实体的 NBT，按方块坐标保存。坐标按原版 {@code BlockPos.asLong} 的布局编码（x、z 各 26 位，y 12 位）。
  */
 public final class BlockEntityStore {
-    private final Long2ObjectMap<CompoundBinaryTag> entries = new Long2ObjectOpenHashMap<>();
+    private final Long2ObjectMap<NbtMap> entries = new Long2ObjectOpenHashMap<>();
 
-    public @Nullable CompoundBinaryTag get(int x, int y, int z) {
+    public @Nullable NbtMap get(int x, int y, int z) {
         return entries.get(encode(x, y, z));
     }
 
-    public void put(int x, int y, int z, CompoundBinaryTag nbt) {
+    public void put(int x, int y, int z, NbtMap nbt) {
         entries.put(encode(x, y, z), nbt);
     }
 

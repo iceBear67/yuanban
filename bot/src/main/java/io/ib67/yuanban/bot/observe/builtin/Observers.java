@@ -13,10 +13,9 @@ import io.ib67.yuanban.bot.view.EntitySnapshot;
 import io.ib67.yuanban.bot.view.StateReader;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.network.packet.client.ClientPacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.particle.Particle;
-import net.minestom.server.sound.SoundEvent;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.level.particle.Particle;
+import org.geysermc.mcprotocollib.protocol.data.game.level.sound.Sound;
 
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -42,7 +41,7 @@ public final class Observers {
         return sounds(region, _ -> true);
     }
 
-    public static SoundObserver sounds(Region region, Predicate<SoundEvent> filter) {
+    public static SoundObserver sounds(Region region, Predicate<Sound> filter) {
         return new SoundObserver(region, filter);
     }
 
@@ -74,19 +73,31 @@ public final class Observers {
         return new DamageObserver();
     }
 
-    public static <P extends ServerPacket> PacketObserver<P> packets(Class<P> type) {
+    /**
+     * @throws IllegalArgumentException type 不是服务端发往客户端的数据包类
+     */
+    public static <P extends MinecraftPacket> PacketObserver<P> packets(Class<P> type) {
         return packets(type, _ -> true);
     }
 
-    public static <P extends ServerPacket> PacketObserver<P> packets(Class<P> type, Predicate<P> filter) {
+    /**
+     * @throws IllegalArgumentException type 不是服务端发往客户端的数据包类
+     */
+    public static <P extends MinecraftPacket> PacketObserver<P> packets(Class<P> type, Predicate<P> filter) {
         return new PacketObserver<>(type, filter);
     }
 
-    public static <P extends ClientPacket> SentPacketObserver<P> sentPackets(Class<P> type) {
+    /**
+     * @throws IllegalArgumentException type 不是客户端发往服务端的数据包类
+     */
+    public static <P extends MinecraftPacket> SentPacketObserver<P> sentPackets(Class<P> type) {
         return sentPackets(type, _ -> true);
     }
 
-    public static <P extends ClientPacket> SentPacketObserver<P> sentPackets(Class<P> type, Predicate<P> filter) {
+    /**
+     * @throws IllegalArgumentException type 不是客户端发往服务端的数据包类
+     */
+    public static <P extends MinecraftPacket> SentPacketObserver<P> sentPackets(Class<P> type, Predicate<P> filter) {
         return new SentPacketObserver<>(type, filter);
     }
 
@@ -128,7 +139,10 @@ public final class Observers {
         return new FirstObserver<>(type, filter);
     }
 
-    public static <P extends ServerPacket> FirstPacketObserver<P> firstPacket(Class<P> type, Predicate<P> filter) {
+    /**
+     * @throws IllegalArgumentException type 不是服务端发往客户端的数据包类
+     */
+    public static <P extends MinecraftPacket> FirstPacketObserver<P> firstPacket(Class<P> type, Predicate<P> filter) {
         return new FirstPacketObserver<>(type, filter);
     }
 
@@ -187,12 +201,15 @@ public final class Observers {
 
     /**
      * 回调在调度线程上执行，不保存状态
+     *
+     * @throws IllegalArgumentException type 不是服务端发往客户端的数据包类
      */
-    public static <P extends ServerPacket> Observer packetListener(Class<P> type, Consumer<P> consumer) {
+    public static <P extends MinecraftPacket> Observer packetListener(Class<P> type, Consumer<P> consumer) {
+        var subscription = Subscription.NONE.received(type);
         return new Observer() {
             @Override
             public Subscription subscription() {
-                return Subscription.NONE.received(type);
+                return subscription;
             }
 
             @Override

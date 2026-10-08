@@ -7,9 +7,10 @@ import io.ib67.yuanban.bot.observe.Region;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.WorldBoundObserver;
 import io.ib67.yuanban.bot.observe.WorldInfo;
-import net.minestom.server.network.packet.server.play.EntitySoundEffectPacket;
-import net.minestom.server.network.packet.server.play.SoundEffectPacket;
-import net.minestom.server.sound.SoundEvent;
+import net.minestom.server.coordinate.Vec;
+import org.geysermc.mcprotocollib.protocol.data.game.level.sound.Sound;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSoundEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSoundPacket;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -19,10 +20,10 @@ import java.util.function.Predicate;
  */
 public final class SoundObserver extends WorldBoundObserver<Records<SoundRecord>> {
     private final Region region;
-    private final Predicate<SoundEvent> filter;
+    private final Predicate<Sound> filter;
     private int limit = Integer.MAX_VALUE;
 
-    SoundObserver(Region region, Predicate<SoundEvent> filter) {
+    SoundObserver(Region region, Predicate<Sound> filter) {
         this.region = region;
         this.filter = filter;
     }
@@ -52,7 +53,7 @@ public final class SoundObserver extends WorldBoundObserver<Records<SoundRecord>
 
     @Override
     protected Subscription worldSubscription() {
-        return Subscription.NONE.received(SoundEffectPacket.class, EntitySoundEffectPacket.class);
+        return Subscription.NONE.received(ClientboundSoundPacket.class, ClientboundSoundEntityPacket.class);
     }
 
     @Override
@@ -66,16 +67,19 @@ public final class SoundObserver extends WorldBoundObserver<Records<SoundRecord>
             return;
         }
         switch (packet) {
-            case SoundEffectPacket sound -> {
-                if (region.contains(sound.origin()) && filter.test(sound.soundEvent())) {
-                    world.add(new SoundRecord(sound.soundEvent(), sound.source(), sound.origin(), sound.volume(), sound.pitch(), null));
+            case ClientboundSoundPacket sound -> {
+                // MCProtocolLib 已经把坐标除以 8
+                var origin = new Vec(sound.getX(), sound.getY(), sound.getZ());
+                if (region.contains(origin) && filter.test(sound.getSound())) {
+                    world.add(new SoundRecord(sound.getSound(), sound.getCategory(), origin, sound.getVolume(),
+                            sound.getPitch(), null));
                 }
             }
-            case EntitySoundEffectPacket sound -> {
-                var entity = context.state().entity(sound.entityId());
-                if (entity != null && region.contains(entity.position()) && filter.test(sound.soundEvent())) {
-                    world.add(new SoundRecord(sound.soundEvent(), sound.source(), entity.position().asVec(), sound.volume(),
-                            sound.pitch(), sound.entityId()));
+            case ClientboundSoundEntityPacket sound -> {
+                var entity = context.state().entity(sound.getEntityId());
+                if (entity != null && region.contains(entity.position()) && filter.test(sound.getSound())) {
+                    world.add(new SoundRecord(sound.getSound(), sound.getCategory(), entity.position().asVec(),
+                            sound.getVolume(), sound.getPitch(), sound.getEntityId()));
                 }
             }
             default -> {

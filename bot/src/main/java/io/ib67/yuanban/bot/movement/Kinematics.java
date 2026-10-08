@@ -5,7 +5,9 @@ import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.player.Interpolation;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.registry.TagTable;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import io.ib67.yuanban.bot.world.ClientWorld;
+import net.kyori.adventure.key.Key;
 import net.minestom.server.collision.Aerodynamics;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.collision.PhysicsResult;
@@ -14,12 +16,11 @@ import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.item.component.UseEffects;
-import net.minestom.server.potion.PotionEffect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.UseEffects;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -57,6 +58,9 @@ public final class Kinematics {
      * 原版 {@code LivingEntity.noJumpDelay}：起跳之后按住跳跃不再起跳的 tick 数
      */
     static final int JUMP_DELAY_TICKS = 10;
+    private static final Key BLOCK_REGISTRY = Key.key("block");
+    private static final Key WALLS = Key.key("walls");
+    private static final Key FENCE_GATES = Key.key("fence_gates");
 
     private Kinematics() {
     }
@@ -115,7 +119,7 @@ public final class Kinematics {
             inputScale *= itemInUse.speedMultiplier();
         }
         if (shift && !flying) {
-            inputScale *= (float) attributes.value(Attribute.SNEAKING_SPEED);
+            inputScale *= (float) attributes.value(AttributeType.Builtin.SNEAKING_SPEED);
         }
         // 原版 LivingEntity.aiStep：按住跳跃、着地并且起跳延迟为 0 时起跳；飞行时不起跳（isAffectedByFluids 为 false）
         var onGround = player.onGround();
@@ -130,12 +134,12 @@ public final class Kinematics {
 
         // 原版 travelInAir：着地时的摩擦按移动之前脚下的方块读取
         var blockFriction = onGround ? modifiedFriction(block(world, below(world, tags, player, position)).friction(),
-                (float) attributes.value(Attribute.FRICTION_MODIFIER)) : 1.0F;
+                (float) attributes.value(AttributeType.Builtin.FRICTION_MODIFIER)) : 1.0F;
         var speed = frictionInfluencedSpeed(player, onGround, blockFriction, flying, sprinting);
         var verticalBeforeTravel = velocity.y();
         velocity = velocity.add(intent.direction().mul((double) inputScale * speed));
 
-        var airDragModifier = (float) attributes.value(Attribute.AIR_DRAG_MODIFIER);
+        var airDragModifier = (float) attributes.value(AttributeType.Builtin.AIR_DRAG_MODIFIER);
         var friction = blockFriction * modifiedFriction(AIR_DRAG, airDragModifier);
         var hasPhysics = player.gameMode() != GameMode.SPECTATOR;
         checkLoaded(world, position, velocity, boundingBox);
@@ -151,7 +155,7 @@ public final class Kinematics {
         var newPosition = result.newPosition().withView(yaw, position.pitch());
         var collided = result.newVelocity();
         double movementY;
-        var levitation = player.effects().get(PotionEffect.LEVITATION);
+        var levitation = player.effects().get(Effect.LEVITATION);
         if (levitation != null) {
             movementY = collided.y() + (0.05 * (levitation.amplifier() + 1) - collided.y()) * 0.2;
         } else {
@@ -222,9 +226,9 @@ public final class Kinematics {
      */
     private static Vec jumpFromGround(LocalPlayer player, ClientWorld world, TagTable tags, Pos position, Vec velocity,
                                       boolean sprinting) {
-        var jumpBoost = player.effects().get(PotionEffect.JUMP_BOOST);
+        var jumpBoost = player.effects().get(Effect.JUMP_BOOST);
         var jumpBoostPower = jumpBoost != null ? 0.1F * (jumpBoost.amplifier() + 1.0F) : 0.0F;
-        var jumpPower = (float) player.attributes().value(Attribute.JUMP_STRENGTH) * 1.0F * jumpFactor(player, world, tags, position)
+        var jumpPower = (float) player.attributes().value(AttributeType.Builtin.JUMP_STRENGTH) * 1.0F * jumpFactor(player, world, tags, position)
                 + jumpBoostPower;
         if (jumpPower <= 1.0E-5F) {
             return velocity;
@@ -252,7 +256,7 @@ public final class Kinematics {
     private static float frictionInfluencedSpeed(LocalPlayer player, boolean onGround, float blockFriction, boolean flying,
                                                  boolean sprinting) {
         if (onGround) {
-            var speed = (float) player.attributes().value(Attribute.MOVEMENT_SPEED);
+            var speed = (float) player.attributes().value(AttributeType.Builtin.MOVEMENT_SPEED);
             return blockFriction > 0.6 ? speed * (0.21600002F / (blockFriction * blockFriction * blockFriction)) : speed;
         }
         if (flying) {
@@ -269,9 +273,9 @@ public final class Kinematics {
      * @param verticalVelocity 碰撞之后的竖直速度
      */
     private static double effectiveGravity(LocalPlayer player, double verticalVelocity) {
-        var noGravity = player.metadata().get(MetadataDef.HAS_NO_GRAVITY.index());
-        var gravity = noGravity != null && (Boolean) noGravity.value() ? 0.0 : player.attributes().value(Attribute.GRAVITY);
-        return verticalVelocity <= 0.0 && player.effects().get(PotionEffect.SLOW_FALLING) != null ? Math.min(gravity, 0.01) : gravity;
+        var noGravity = EntityMetaIndex.get(player.metadata(), EntityMetaIndex.HAS_NO_GRAVITY);
+        var gravity = noGravity ? 0.0 : player.attributes().value(AttributeType.Builtin.GRAVITY);
+        return verticalVelocity <= 0.0 && player.effects().get(Effect.SLOW_FALLING) != null ? Math.min(gravity, 0.01) : gravity;
     }
 
     /**
@@ -306,8 +310,7 @@ public final class Kinematics {
             return new Vec(position.blockX(), y, position.blockZ());
         }
         var block = block(world, support);
-        if (tags.contains("minecraft:block", "minecraft:walls", block.id())
-                || tags.contains("minecraft:block", "minecraft:fence_gates", block.id())) {
+        if (tags.contains(BLOCK_REGISTRY, WALLS, block.id()) || tags.contains(BLOCK_REGISTRY, FENCE_GATES, block.id())) {
             return support;
         }
         return new Vec(support.blockX(), y, support.blockZ());
@@ -323,7 +326,7 @@ public final class Kinematics {
         if (here.id() != Block.WATER.id() && here.id() != Block.BUBBLE_COLUMN.id() && factor == 1.0) {
             factor = block(world, below(world, tags, player, position)).speedFactor();
         }
-        var efficiency = (float) player.attributes().value(Attribute.MOVEMENT_EFFICIENCY);
+        var efficiency = (float) player.attributes().value(AttributeType.Builtin.MOVEMENT_EFFICIENCY);
         return factor + efficiency * (1.0F - factor);
     }
 

@@ -3,18 +3,17 @@ package io.ib67.yuanban.bot.inventory;
 import io.ib67.yuanban.bot.view.WindowSnapshot;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import net.kyori.adventure.text.Component;
-import net.minestom.server.inventory.InventoryType;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.network.packet.server.play.TradeListPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundMerchantOffersPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 
 /**
  * 一个窗口的槽位（wiki Inventory）。一般的窗口排列为：独有槽位，然后主物品栏 27 格，然后快捷栏 9 格；
- * 合成器的结果槽位排在快捷栏之后；讲台不包含玩家物品栏。窗口 0 的排列见 wiki Inventory。
+ * 合成器的结果槽位排在快捷栏之后；讲台不包含玩家物品栏。窗口 0 的排列见 wiki Inventory。空槽位为 null。
  */
 public final class Window {
     /**
@@ -26,13 +25,13 @@ public final class Window {
     public static final int PLAYER_OFFHAND = 45;
 
     private final int id;
-    private final @Nullable InventoryType type;
+    private final @Nullable ContainerType type;
     private final Component title;
     private final int mainStart;
     private final boolean playerInventory;
-    private final ItemStack[] slots;
+    private final @Nullable ItemStack[] slots;
     private final Map<Integer, Integer> properties = new Int2IntOpenHashMap();
-    private @Nullable TradeListPacket trades;
+    private @Nullable ClientboundMerchantOffersPacket trades;
     /**
      * 这个窗口最近收到的状态编号（原版每个 {@code AbstractContainerMenu} 各有一个，新打开的窗口从 0 开始）
      */
@@ -40,16 +39,15 @@ public final class Window {
     /**
      * 这个窗口的光标物品（原版每个 {@code AbstractContainerMenu} 各有一个 {@code carried}，新打开的窗口为空）
      */
-    private ItemStack carried = ItemStack.AIR;
+    private @Nullable ItemStack carried;
 
-    private Window(int id, @Nullable InventoryType type, Component title, int mainStart, boolean playerInventory, int size) {
+    private Window(int id, @Nullable ContainerType type, Component title, int mainStart, boolean playerInventory, int size) {
         this.id = id;
         this.type = type;
         this.title = title;
         this.mainStart = mainStart;
         this.playerInventory = playerInventory;
         this.slots = new ItemStack[size];
-        Arrays.fill(slots, ItemStack.AIR);
     }
 
     public static Window player() {
@@ -57,14 +55,15 @@ public final class Window {
     }
 
     /**
-     * Open Screen 打开的窗口：独有槽位数取 {@link InventoryType#getSize()}
+     * Open Screen 打开的窗口：独有槽位数取 {@link ContainerSlots#unique}
      */
-    public static Window container(int id, InventoryType type, Component title) {
+    public static Window container(int id, ContainerType type, Component title) {
+        var unique = ContainerSlots.unique(type);
         return switch (type) {
-            case LECTERN -> new Window(id, type, title, type.getSize(), false, type.getSize());
+            case LECTERN -> new Window(id, type, title, unique, false, unique);
             // 输入 0 到 8，主物品栏 9 到 35，快捷栏 36 到 44，结果槽位为 45
-            case CRAFTER_3X3 -> new Window(id, type, title, type.getSize(), true, type.getSize() + 36 + 1);
-            default -> new Window(id, type, title, type.getSize(), true, type.getSize() + 36);
+            case CRAFTER_3x3 -> new Window(id, type, title, unique, true, unique + 36 + 1);
+            default -> new Window(id, type, title, unique, true, unique + 36);
         };
     }
 
@@ -80,7 +79,7 @@ public final class Window {
         return id;
     }
 
-    public @Nullable InventoryType type() {
+    public @Nullable ContainerType type() {
         return type;
     }
 
@@ -103,25 +102,25 @@ public final class Window {
         this.stateId = stateId;
     }
 
-    public ItemStack carried() {
+    public @Nullable ItemStack carried() {
         return carried;
     }
 
     /**
      * Set Container Content 的光标物品，或者这是当前窗口时的 Set Cursor Item
      */
-    public void carried(ItemStack carried) {
+    public void carried(@Nullable ItemStack carried) {
         this.carried = carried;
     }
 
-    public ItemStack get(int slot) {
+    public @Nullable ItemStack get(int slot) {
         return slots[slot];
     }
 
     /**
      * @return 旧的物品
      */
-    public ItemStack set(int slot, ItemStack item) {
+    public @Nullable ItemStack set(int slot, @Nullable ItemStack item) {
         var old = slots[slot];
         slots[slot] = item;
         return old;
@@ -134,7 +133,7 @@ public final class Window {
     /**
      * Merchant Offers
      */
-    public void trades(TradeListPacket trades) {
+    public void trades(ClientboundMerchantOffersPacket trades) {
         this.trades = trades;
     }
 
@@ -163,6 +162,6 @@ public final class Window {
     }
 
     public WindowSnapshot snapshot() {
-        return new WindowSnapshot(id, type, title, stateId, List.of(slots), properties, trades);
+        return new WindowSnapshot(id, type, title, stateId, Arrays.asList(slots), properties, trades);
     }
 }

@@ -1,6 +1,5 @@
 package io.ib67.yuanban.bot.chat;
 
-import net.minestom.server.crypto.MessageSignature;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -11,11 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LastSeenTrackerTest {
-    private static MessageSignature signature(int seed) {
+    private static Signature signature(int seed) {
         var bytes = new byte[256];
         Arrays.fill(bytes, (byte) seed);
         bytes[0] = (byte) (seed * 7);
-        return new MessageSignature(bytes);
+        return new Signature(bytes);
     }
 
     @Test
@@ -24,7 +23,7 @@ class LastSeenTrackerTest {
         var signatures = List.of(signature(1), signature(2), signature(3));
         int hash = 1;
         for (var signature : signatures) {
-            hash = 31 * hash + Arrays.hashCode(signature.signature());
+            hash = 31 * hash + Arrays.hashCode(signature.bytes());
         }
         var expected = (byte) hash == 0 ? 1 : (byte) hash;
         assertEquals(expected, LastSeenTracker.checksum(signatures));
@@ -37,7 +36,7 @@ class LastSeenTrackerTest {
             var bytes = new byte[256];
             bytes[0] = (byte) seed;
             bytes[1] = (byte) (seed >> 8);
-            var candidate = new MessageSignature(bytes);
+            var candidate = new Signature(bytes);
             if ((byte) (31 + Arrays.hashCode(bytes)) == 0) {
                 assertEquals(1, LastSeenTracker.checksum(List.of(candidate)));
                 return;

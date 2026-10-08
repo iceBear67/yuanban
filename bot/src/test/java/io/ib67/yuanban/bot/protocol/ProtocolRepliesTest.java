@@ -7,28 +7,30 @@ import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.ResourcePackPolicy;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
+import io.ib67.yuanban.bot.observe.WorldEntryCause;
 import io.ib67.yuanban.bot.transport.Transport;
-import net.kyori.adventure.resource.ResourcePackStatus;
+import net.kyori.adventure.key.Key;
 import net.minestom.server.coordinate.Pos;
-import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.RelativeFlags;
-import net.minestom.server.network.packet.client.common.ClientCookieResponsePacket;
-import net.minestom.server.network.packet.client.common.ClientPongPacket;
-import net.minestom.server.network.packet.client.common.ClientResourcePackStatusPacket;
-import net.minestom.server.network.packet.client.handshake.ClientHandshakePacket;
-import net.minestom.server.network.packet.client.login.ClientLoginStartPacket;
-import net.minestom.server.network.packet.client.play.ClientChunkBatchReceivedPacket;
-import net.minestom.server.network.packet.client.play.ClientInputPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientTeleportConfirmPacket;
-import net.minestom.server.network.packet.server.common.CookieRequestPacket;
-import net.minestom.server.network.packet.server.common.CookieStorePacket;
-import net.minestom.server.network.packet.server.common.PingPacket;
-import net.minestom.server.network.packet.server.common.ResourcePackPushPacket;
-import net.minestom.server.network.packet.server.common.TransferPacket;
-import net.minestom.server.network.packet.server.play.ChunkBatchFinishedPacket;
-import net.minestom.server.network.packet.server.play.ChunkBatchStartPacket;
-import net.minestom.server.network.packet.server.play.PlayerPositionAndLookPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PositionElement;
+import org.geysermc.mcprotocollib.protocol.data.handshake.HandshakeIntent;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundPingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundStoreCookiePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundTransferPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundPongPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket;
+import org.geysermc.mcprotocollib.protocol.packet.cookie.clientbound.ClientboundCookieRequestPacket;
+import org.geysermc.mcprotocollib.protocol.packet.cookie.serverbound.ServerboundCookieResponsePacket;
+import org.geysermc.mcprotocollib.protocol.packet.handshake.serverbound.ClientIntentionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundChunkBatchReceivedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -59,19 +61,19 @@ class ProtocolRepliesTest {
         withConfiguredBot(_ -> {
         }, (_, peer, _) -> {
             var mark = peer.mark();
-            peer.push(new PingPacket(17));
-            assertEquals(17, peer.awaitSent(mark, ClientPongPacket.class, TIMEOUT).id());
+            peer.push(new ClientboundPingPacket(17));
+            assertEquals(17, peer.awaitSent(mark, ServerboundPongPacket.class, TIMEOUT).getId());
 
             mark = peer.mark();
-            peer.push(new CookieRequestPacket("minecraft:missing"));
-            var missing = peer.awaitSent(mark, ClientCookieResponsePacket.class, TIMEOUT);
-            assertEquals("minecraft:missing", missing.key());
-            assertNull(missing.value());
+            peer.push(new ClientboundCookieRequestPacket(Key.key("missing")));
+            var missing = peer.awaitSent(mark, ServerboundCookieResponsePacket.class, TIMEOUT);
+            assertEquals(Key.key("missing"), missing.getKey());
+            assertNull(missing.getPayload());
 
             mark = peer.mark();
-            peer.push(new CookieStorePacket("minecraft:token", new byte[]{1, 2, 3}));
-            peer.push(new CookieRequestPacket("minecraft:token"));
-            assertArrayEquals(new byte[]{1, 2, 3}, peer.awaitSent(mark, ClientCookieResponsePacket.class, TIMEOUT).value());
+            peer.push(new ClientboundStoreCookiePacket(Key.key("token"), new byte[]{1, 2, 3}));
+            peer.push(new ClientboundCookieRequestPacket(Key.key("token")));
+            assertArrayEquals(new byte[]{1, 2, 3}, peer.awaitSent(mark, ServerboundCookieResponsePacket.class, TIMEOUT).getPayload());
         });
     }
 
@@ -81,18 +83,18 @@ class ProtocolRepliesTest {
         }, (_, peer, _) -> {
             var id = UUID.randomUUID();
             var mark = peer.mark();
-            peer.push(new ResourcePackPushPacket(id, "https://example.invalid/pack.zip", "", false, null));
+            peer.push(new ClientboundResourcePackPushPacket(id, "https://example.invalid/pack.zip", "", false, null));
             peer.barrier();
-            var statuses = peer.sentSince(mark, ClientResourcePackStatusPacket.class).stream()
-                    .map(ClientResourcePackStatusPacket::status).toList();
+            var statuses = peer.sentSince(mark, ServerboundResourcePackPacket.class).stream()
+                    .map(ServerboundResourcePackPacket::getStatus).toList();
             assertEquals(List.of(ResourcePackStatus.ACCEPTED, ResourcePackStatus.DOWNLOADED, ResourcePackStatus.SUCCESSFULLY_LOADED), statuses);
         });
         withConfiguredBot(options -> options.resourcePackPolicy(ResourcePackPolicy.DECLINE), (_, peer, _) -> {
             var mark = peer.mark();
-            peer.push(new ResourcePackPushPacket(UUID.randomUUID(), "https://example.invalid/pack.zip", "", false, null));
+            peer.push(new ClientboundResourcePackPushPacket(UUID.randomUUID(), "https://example.invalid/pack.zip", "", false, null));
             peer.barrier();
-            var statuses = peer.sentSince(mark, ClientResourcePackStatusPacket.class).stream()
-                    .map(ClientResourcePackStatusPacket::status).toList();
+            var statuses = peer.sentSince(mark, ServerboundResourcePackPacket.class).stream()
+                    .map(ServerboundResourcePackPacket::getStatus).toList();
             assertEquals(List.of(ResourcePackStatus.DECLINED), statuses);
         });
     }
@@ -103,22 +105,23 @@ class ProtocolRepliesTest {
         }, (_, peer, bot) -> {
             TestServer.join(peer, new Pos(0.5, 0, 0.5));
             var mark = peer.mark();
-            peer.push(new ChunkBatchStartPacket());
-            peer.push(new ChunkBatchFinishedPacket(9));
-            var received = peer.awaitSent(mark, ClientChunkBatchReceivedPacket.class, TIMEOUT);
-            assertTrue(received.targetChunksPerTick() > 0);
+            peer.push(new ClientboundChunkBatchStartPacket());
+            peer.push(new ClientboundChunkBatchFinishedPacket(9));
+            var received = peer.awaitSent(mark, ServerboundChunkBatchReceivedPacket.class, TIMEOUT);
+            assertTrue(received.getDesiredChunksPerTick() > 0);
 
             mark = peer.mark();
-            peer.push(new PlayerPositionAndLookPacket(5, new Vec(1, 0, 0), Vec.ZERO, 0, 0,
-                    RelativeFlags.COORD | RelativeFlags.VIEW));
+            // 坐标与朝向全部为相对值
+            peer.push(new ClientboundPlayerPositionPacket(5, 1, 0, 0, 0, 0, 0, 0, 0,
+                    PositionElement.X, PositionElement.Y, PositionElement.Z, PositionElement.Y_ROT, PositionElement.X_ROT));
             peer.barrier();
             var reply = peer.sentSince(mark);
-            var confirm = assertInstanceOf(ClientTeleportConfirmPacket.class, reply.getFirst());
-            assertEquals(5, confirm.teleportId());
-            var position = assertInstanceOf(ClientPlayerPositionAndRotationPacket.class, reply.get(1));
-            assertEquals(1.5, position.position().x(), 1e-9);
-            assertFalse(position.onGround());
-            assertFalse(position.horizontalCollision());
+            var confirm = assertInstanceOf(ServerboundAcceptTeleportationPacket.class, reply.getFirst());
+            assertEquals(5, confirm.getId());
+            var position = assertInstanceOf(ServerboundMovePlayerPosRotPacket.class, reply.get(1));
+            assertEquals(1.5, position.getX(), 1e-9);
+            assertFalse(position.isOnGround());
+            assertFalse(position.isHorizontalCollision());
             assertEquals(1.5, bot.view().player().position().x(), 1e-9);
         });
     }
@@ -136,22 +139,22 @@ class ProtocolRepliesTest {
             var mark = peer.mark();
             var pending = bot.moveForward(100);
             // 等移动开始执行之后再 Transfer（请求晚于同一轮中的入站数据包入队）
-            peer.awaitSent(mark, ClientInputPacket.class, ClientInputPacket::forward, TIMEOUT);
-            peer.push(new CookieStorePacket("minecraft:session", new byte[]{9}));
-            peer.push(new TransferPacket("other.invalid", 25566));
-            var handshake = second.awaitSent(0, ClientHandshakePacket.class, TIMEOUT);
-            assertEquals(ClientHandshakePacket.Intent.TRANSFER, handshake.intent());
-            second.awaitSent(0, ClientLoginStartPacket.class, TIMEOUT);
+            peer.awaitSent(mark, ServerboundPlayerInputPacket.class, ServerboundPlayerInputPacket::isForward, TIMEOUT);
+            peer.push(new ClientboundStoreCookiePacket(Key.key("session"), new byte[]{9}));
+            peer.push(new ClientboundTransferPacket("other.invalid", 25566));
+            var handshake = second.awaitSent(0, ClientIntentionPacket.class, TIMEOUT);
+            assertEquals(HandshakeIntent.TRANSFER, handshake.getIntent());
+            second.awaitSent(0, ServerboundHelloPacket.class, TIMEOUT);
             assertTrue(peer.closedByBot());
             // 世界重建：移动队列中的动作被取消
             assertFalse(pending.await(TIMEOUT));
             TestServer.configure(second, "replies");
             var secondMark = second.mark();
-            second.push(new CookieRequestPacket("minecraft:session"));
-            assertArrayEquals(new byte[]{9}, second.awaitSent(secondMark, ClientCookieResponsePacket.class, TIMEOUT).value());
+            second.push(new ClientboundCookieRequestPacket(Key.key("session")));
+            assertArrayEquals(new byte[]{9}, second.awaitSent(secondMark, ServerboundCookieResponsePacket.class, TIMEOUT).getPayload());
             TestServer.join(second, new Pos(0.5, 0, 0.5));
             assertEquals(BotStatus.PLAY, bot.status());
-            assertEquals(io.ib67.yuanban.bot.observe.WorldEntryCause.TRANSFER, bot.view().world().cause());
+            assertEquals(WorldEntryCause.TRANSFER, bot.view().world().cause());
         });
     }
 

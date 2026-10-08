@@ -1,6 +1,6 @@
 package io.ib67.yuanban.bot.world;
 
-import net.minestom.server.instance.palette.Palette;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.DataPalette;
 
 /**
  * 一个区段的方块与生物群系。共享的实例在同一个 JVM 的全部 bot 之间按内容复用，永远不被写入；
@@ -11,11 +11,11 @@ import net.minestom.server.instance.palette.Palette;
  * @param blockCount 数据包给出的非空气方块数量
  * @param fluidCount 数据包给出的流体数量
  */
-public record SharedSection(Palette blocks, Palette biomes, short blockCount, short fluidCount) {
+public record SharedSection(DataPalette blocks, DataPalette biomes, int blockCount, int fluidCount) {
     /**
      * 复制出可以写入的副本
      */
     public SharedSection copy() {
-        return new SharedSection(blocks.clone(), biomes.clone(), blockCount, fluidCount);
+        return new SharedSection(new DataPalette(blocks), new DataPalette(biomes), blockCount, fluidCount);
     }
 }

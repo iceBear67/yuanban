@@ -3,18 +3,24 @@ package io.ib67.yuanban.bot.hud;
 import io.ib67.yuanban.bot.view.BossBarSnapshot;
 import io.ib67.yuanban.bot.view.HudSnapshot;
 import net.kyori.adventure.text.Component;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.network.packet.server.play.BossBarPacket;
-import net.minestom.server.network.packet.server.play.PlayerInfoUpdatePacket;
-import net.minestom.server.network.packet.server.play.ScoreboardObjectivePacket;
-import net.minestom.server.network.packet.server.play.TeamsPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.BossBarAction;
+import org.geysermc.mcprotocollib.protocol.data.game.PlayerListEntryAction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreType;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreboardPosition;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundBossEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerInfoUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetPlayerTeamPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,37 +37,44 @@ public final class HudModel {
     private Component header = Component.empty();
     private Component footer = Component.empty();
     private final Map<String, Objective> objectives = new HashMap<>();
-    private final Map<Integer, String> displaySlots = new HashMap<>();
+    private final Map<ScoreboardPosition, String> displaySlots = new EnumMap<>(ScoreboardPosition.class);
     private final Map<String, Team> teams = new HashMap<>();
     private @Nullable Component serverMotd;
 
     /**
+     * Boss Bar：每种动作只读取它带有的字段
+     *
      * @return 状态是否改变：移除没有添加过的 Boss Bar 时什么都不做（原版 {@code BossHealthOverlay} 的 remove），返回 false
      * @throws IllegalStateException 更新没有添加过的 Boss Bar（原版客户端读取不存在的条目时出错并断开连接）
      */
-    public boolean bossBar(UUID id, BossBarPacket.Action action) {
-        if (action instanceof BossBarPacket.RemoveAction && !bossBars.containsKey(id)) {
+    public boolean bossBar(ClientboundBossEventPacket packet) {
+        var id = packet.getUuid();
+        if (packet.getAction() == BossBarAction.REMOVE && !bossBars.containsKey(id)) {
             return false;
         }
-        BossBarSnapshot next = switch (action) {
-            case BossBarPacket.AddAction add ->
-                    new BossBarSnapshot(add.title(), add.health(), add.color(), add.overlay(), add.flags());
-            case BossBarPacket.RemoveAction _ -> null;
-            case BossBarPacket.UpdateHealthAction health -> {
+        BossBarSnapshot next = switch (packet.getAction()) {
+            case ADD -> new BossBarSnapshot(packet.getTitle(), packet.getHealth(), packet.getColor(), packet.getDivision(),
+                    packet.isDarkenSky(), packet.isPlayEndMusic(), packet.isShowFog());
+            case REMOVE -> null;
+            case UPDATE_HEALTH -> {
                 var current = existingBossBar(id);
-                yield new BossBarSnapshot(current.title(), health.health(), current.color(), current.overlay(), current.flags());
+                yield new BossBarSnapshot(current.title(), packet.getHealth(), current.color(), current.division(),
+                        current.darkenSky(), current.playEndMusic(), current.showFog());
             }
-            case BossBarPacket.UpdateTitleAction updateTitle -> {
+            case UPDATE_TITLE -> {
                 var current = existingBossBar(id);
-                yield new BossBarSnapshot(updateTitle.title(), current.health(), current.color(), current.overlay(), current.flags());
+                yield new BossBarSnapshot(packet.getTitle(), current.health(), current.color(), current.division(),
+                        current.darkenSky(), current.playEndMusic(), current.showFog());
             }
-            case BossBarPacket.UpdateStyleAction style -> {
+            case UPDATE_STYLE -> {
                 var current = existingBossBar(id);
-                yield new BossBarSnapshot(current.title(), current.health(), style.color(), style.overlay(), current.flags());
+                yield new BossBarSnapshot(current.title(), current.health(), packet.getColor(), packet.getDivision(),
+                        current.darkenSky(), current.playEndMusic(), current.showFog());
             }
-            case BossBarPacket.UpdateFlagsAction flags -> {
+            case UPDATE_FLAGS -> {
                 var current = existingBossBar(id);
-                yield new BossBarSnapshot(current.title(), current.health(), current.color(), current.overlay(), flags.flags());
+                yield new BossBarSnapshot(current.title(), current.health(), current.color(), current.division(),
+                        packet.isDarkenSky(), packet.isPlayEndMusic(), packet.isShowFog());
             }
         };
         if (next == null) {
@@ -129,22 +142,25 @@ public final class HudModel {
      * 再把各项更新应用到已知的玩家；不在列表中的玩家的更新被忽略（原版客户端行为）。
      * 新条目的初始值与原版 {@code PlayerInfo} 相同：生存模式，延迟 0，不显示在列表中，没有显示名称，排序 0
      */
-    public void playerInfo(PlayerInfoUpdatePacket packet) {
-        for (var entry : packet.entries()) {
-            var current = playerList.get(entry.uuid());
-            if (current == null && packet.actions().contains(PlayerInfoUpdatePacket.Action.ADD_PLAYER)) {
-                current = new HudSnapshot.PlayerListEntry(entry.uuid(), entry.username(), GameMode.SURVIVAL, 0, false, null, 0);
+    public void playerInfo(ClientboundPlayerInfoUpdatePacket packet) {
+        var actions = packet.getActions();
+        for (var entry : packet.getEntries()) {
+            var uuid = entry.getProfileId();
+            var current = playerList.get(uuid);
+            if (current == null && actions.contains(PlayerListEntryAction.ADD_PLAYER)) {
+                // 带 ADD_PLAYER 时 MCProtocolLib 一定设置了 profile
+                var username = Objects.requireNonNull(entry.getProfile()).getName();
+                current = new HudSnapshot.PlayerListEntry(uuid, username, GameMode.SURVIVAL, 0, false, null, 0);
             } else if (current == null) {
                 continue;
             }
-            var actions = packet.actions();
             current = new HudSnapshot.PlayerListEntry(current.uuid(), current.username(),
-                    actions.contains(PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE) ? entry.gameMode() : current.gameMode(),
-                    actions.contains(PlayerInfoUpdatePacket.Action.UPDATE_LATENCY) ? entry.latency() : current.latency(),
-                    actions.contains(PlayerInfoUpdatePacket.Action.UPDATE_LISTED) ? entry.listed() : current.listed(),
-                    actions.contains(PlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME) ? entry.displayName() : current.displayName(),
-                    actions.contains(PlayerInfoUpdatePacket.Action.UPDATE_LIST_ORDER) ? entry.listOrder() : current.listOrder());
-            playerList.put(entry.uuid(), current);
+                    actions.contains(PlayerListEntryAction.UPDATE_GAME_MODE) ? entry.getGameMode() : current.gameMode(),
+                    actions.contains(PlayerListEntryAction.UPDATE_LATENCY) ? entry.getLatency() : current.latency(),
+                    actions.contains(PlayerListEntryAction.UPDATE_LISTED) ? entry.isListed() : current.listed(),
+                    actions.contains(PlayerListEntryAction.UPDATE_DISPLAY_NAME) ? entry.getDisplayName() : current.displayName(),
+                    actions.contains(PlayerListEntryAction.UPDATE_LIST_ORDER) ? entry.getListOrder() : current.listOrder());
+            playerList.put(uuid, current);
         }
     }
 
@@ -172,41 +188,41 @@ public final class HudModel {
     }
 
     /**
-     * Update Objectives（原版 {@code handleAddObjective}）：模式 0 创建，1 删除，2 更新显示文本；删除与更新不存在的目标时什么都不做。
-     * 删除目标时清空指向它的显示位置（原版 {@code Scoreboard.removeObjective}）
+     * Update Objectives（原版 {@code handleAddObjective}）：ADD 创建，REMOVE 删除，UPDATE 更新显示文本与类型；
+     * 删除与更新不存在的目标时什么都不做。删除目标时清空指向它的显示位置（原版 {@code Scoreboard.removeObjective}）
      *
      * @throws IllegalStateException 创建已经存在的目标（原版 {@code Scoreboard.addObjective} 抛出异常，客户端断开连接）
      */
-    public void objective(ScoreboardObjectivePacket packet) {
-        switch (packet.mode()) {
-            case 0 -> {
-                if (objectives.containsKey(packet.objectiveName())) {
-                    throw new IllegalStateException("objective " + packet.objectiveName() + " already exists");
+    public void objective(ClientboundSetObjectivePacket packet) {
+        var name = packet.getName();
+        switch (packet.getAction()) {
+            case ADD -> {
+                if (objectives.containsKey(name)) {
+                    throw new IllegalStateException("objective " + name + " already exists");
                 }
-                objectives.put(packet.objectiveName(), new Objective(
-                        packet.objectiveValue() == null ? Component.empty() : packet.objectiveValue(), packet.type(), new HashMap<>()));
+                // ADD 与 UPDATE 一定带有显示文本与类型
+                objectives.put(name, new Objective(Objects.requireNonNull(packet.getDisplayName()),
+                        Objects.requireNonNull(packet.getType()), new HashMap<>()));
             }
-            case 1 -> {
-                if (objectives.remove(packet.objectiveName()) != null) {
-                    displaySlots.values().removeIf(packet.objectiveName()::equals);
+            case REMOVE -> {
+                if (objectives.remove(name) != null) {
+                    displaySlots.values().removeIf(name::equals);
                 }
             }
-            case 2 -> {
-                var current = objectives.get(packet.objectiveName());
+            case UPDATE -> {
+                var current = objectives.get(name);
                 if (current != null) {
-                    objectives.put(packet.objectiveName(), new Objective(
-                            packet.objectiveValue() == null ? current.displayName() : packet.objectiveValue(),
-                            packet.type(), current.scores()));
+                    objectives.put(name, new Objective(Objects.requireNonNull(packet.getDisplayName()),
+                            Objects.requireNonNull(packet.getType()), current.scores()));
                 }
             }
-            default -> throw new IllegalArgumentException("unknown objective mode " + packet.mode());
         }
     }
 
     /**
      * Display Objective（原版 {@code handleSetDisplayObjective}）：名称为空或者没有这个目标时清空这个显示位置
      */
-    public void display(int position, String objective) {
+    public void display(ScoreboardPosition position, String objective) {
         if (!objective.isEmpty() && objectives.containsKey(objective)) {
             displaySlots.put(position, objective);
         } else {
@@ -251,34 +267,38 @@ public final class HudModel {
      *
      * @throws IllegalStateException 移除不在这个队伍中的成员（原版 {@code Scoreboard.removePlayerFromTeam} 抛出异常，客户端断开连接）
      */
-    public void team(TeamsPacket packet) {
-        var name = packet.teamName();
-        switch (packet.action()) {
-            case TeamsPacket.CreateTeamAction create -> {
+    public void team(ClientboundSetPlayerTeamPacket packet) {
+        var name = packet.getTeamName();
+        switch (packet.getAction()) {
+            case CREATE -> {
                 var existing = teams.get(name);
-                var team = new Team(create.settings().displayName(), create.settings().teamPrefix(),
-                        create.settings().teamSuffix(), existing != null ? existing.members() : new HashSet<>());
+                var team = new Team(packet.getDisplayName(), packet.getPlayerPrefix(), packet.getPlayerSuffix(),
+                        existing != null ? existing.members() : new HashSet<>());
                 teams.put(name, team);
-                create.entities().forEach(member -> addMember(team, member));
-            }
-            case TeamsPacket.RemoveTeamAction _ -> teams.remove(name);
-            case TeamsPacket.UpdateTeamAction update -> {
-                var current = teams.get(name);
-                if (current != null) {
-                    teams.put(name, new Team(update.settings().displayName(), update.settings().teamPrefix(),
-                            update.settings().teamSuffix(), current.members()));
+                for (var member : packet.getPlayers()) {
+                    addMember(team, member);
                 }
             }
-            case TeamsPacket.AddEntitiesToTeamAction add -> {
+            case REMOVE -> teams.remove(name);
+            case UPDATE -> {
                 var current = teams.get(name);
                 if (current != null) {
-                    add.entities().forEach(member -> addMember(current, member));
+                    teams.put(name, new Team(packet.getDisplayName(), packet.getPlayerPrefix(), packet.getPlayerSuffix(),
+                            current.members()));
                 }
             }
-            case TeamsPacket.RemoveEntitiesToTeamAction remove -> {
+            case ADD_PLAYER -> {
                 var current = teams.get(name);
                 if (current != null) {
-                    for (var member : remove.entities()) {
+                    for (var member : packet.getPlayers()) {
+                        addMember(current, member);
+                    }
+                }
+            }
+            case REMOVE_PLAYER -> {
+                var current = teams.get(name);
+                if (current != null) {
+                    for (var member : packet.getPlayers()) {
                         if (!current.members().remove(member)) {
                             throw new IllegalStateException(member + " is not a member of team " + name);
                         }
@@ -308,7 +328,7 @@ public final class HudModel {
                 objectiveSnapshots, displaySlots, teamSnapshots, serverMotd);
     }
 
-    private record Objective(Component displayName, ScoreboardObjectivePacket.@Nullable Type type, Map<String, Integer> scores) {
+    private record Objective(Component displayName, ScoreType type, Map<String, Integer> scores) {
     }
 
     private record Team(Component displayName, Component prefix, Component suffix, Set<String> members) {

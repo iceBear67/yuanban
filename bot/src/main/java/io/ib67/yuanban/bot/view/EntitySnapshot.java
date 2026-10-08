@@ -3,14 +3,13 @@ package io.ib67.yuanban.bot.view;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.EquipmentSlot;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.potion.Potion;
-import net.minestom.server.potion.PotionEffect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.ObjectData;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -23,19 +22,20 @@ import java.util.UUID;
  * @param data        Spawn Entity 的附加数据
  * @param position    位置与朝向（身体）
  * @param velocity    Spawn Entity、Set Entity Velocity、Synchronize Vehicle Position 最后给出的速度（原版不使用 Teleport Entity 中的速度）
- * @param metadata    元数据，按索引；通过 {@link #meta(MetadataDef.Entry)} 读取命名条目
- * @param effects     药水效果，{@link Potion#duration()} 为收到时的持续时间
+ * @param metadata    元数据，按索引；通过 {@link #meta(EntityMeta)} 读取命名条目
+ * @param equipment   装备，没有装备的槽位不在其中
+ * @param effects     药水效果，{@link ActiveEffect#duration()} 为收到时的持续时间
  * @param vehicle     乘坐的实体；没有乘坐时为 null
  * @param leashHolder 拴住它的实体（Link Entities）；没有时为 null
  * @param boundingBox 包围盒：活体按原版的姿势、幼年与固定尺寸计算，非固定尺寸乘以 {@code minecraft:scale} 属性；
- *                    其余实体为 {@link EntityType} 的宽高
+ *                    其余实体为实体类型的宽高
  */
-public record EntitySnapshot(int entityId, UUID uuid, EntityType type, int data,
+public record EntitySnapshot(int entityId, UUID uuid, EntityType type, ObjectData data,
                              Pos position, float headYaw, Vec velocity, boolean onGround,
-                             Map<Integer, Metadata.Entry<?>> metadata,
+                             Map<Integer, EntityMetadata<?, ?>> metadata,
                              Map<EquipmentSlot, ItemStack> equipment,
-                             Map<Attribute, Double> attributes,
-                             Map<PotionEffect, Potion> effects,
+                             Map<AttributeType, Double> attributes,
+                             Map<Effect, ActiveEffect> effects,
                              @Nullable Integer vehicle, List<Integer> passengers,
                              @Nullable Integer leashHolder,
                              BoundingBox boundingBox) {
@@ -50,23 +50,8 @@ public record EntitySnapshot(int entityId, UUID uuid, EntityType type, int data,
     /**
      * 读取命名的元数据条目，没有收到时返回默认值
      */
-    @SuppressWarnings("unchecked")
-    public <T> T meta(MetadataDef.Entry<T> entry) {
-        var value = metadata.get(entry.index());
-        if (value == null) {
-            return entry.defaultValue();
-        }
-        return switch (entry) {
-            case MetadataDef.Entry.Index<T> _ -> (T) value.value();
-            case MetadataDef.Entry.BitMask bitMask -> {
-                var mask = (byte) value.value();
-                yield (T) (Boolean) ((mask & bitMask.bitMask()) == bitMask.bitMask());
-            }
-            case MetadataDef.Entry.ByteMask byteMask -> {
-                var mask = (byte) value.value();
-                yield (T) (Byte) (byte) ((mask & byteMask.byteMask()) >> byteMask.offset());
-            }
-        };
+    public <T> T meta(EntityMeta<T> entry) {
+        return EntityMetaIndex.get(metadata, entry);
     }
 
     /**

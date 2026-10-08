@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.world;
 
-import net.minestom.server.network.packet.server.play.SetTimePacket;
-import net.minestom.server.registry.RegistryKey;
-import net.minestom.server.world.clock.WorldClock;
+import io.ib67.yuanban.bot.registry.SyncedRegistries;
+import net.kyori.adventure.key.Key;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -14,15 +14,19 @@ import java.util.Map;
  * 再替换其中列出的时钟。只在调度线程上使用。
  */
 public final class WorldClocks {
-    private final Map<RegistryKey<WorldClock>, Clock> clocks = new HashMap<>();
+    private final Map<Key, Clock> clocks = new HashMap<>();
     private long lastTickWorldAge;
 
     /**
      * 原版 {@code ClientClockManager.handleUpdates}：先按数据包的 World Age 推进全部时钟，再用数据包中的值替换列出的时钟
+     *
+     * @param registries 把数据包中时钟的注册表编号换成名称
+     * @throws IllegalStateException 时钟的编号不在世界时钟注册表中
      */
-    public void apply(SetTimePacket packet) {
-        tick(packet.gameTime());
-        packet.clocks().forEach((key, state) -> {
+    public void apply(ClientboundSetTimePacket packet, SyncedRegistries registries) {
+        tick(packet.getGameTime());
+        packet.getClockUpdates().forEach((id, state) -> {
+            var key = registries.requireEntry(SyncedRegistries.WORLD_CLOCK, id);
             var clock = clocks.computeIfAbsent(key, _ -> new Clock());
             clock.totalTicks = state.totalTicks();
             clock.partialTick = state.partialTick();
@@ -49,8 +53,8 @@ public final class WorldClocks {
     /**
      * 各时钟当前的 tick 数（含小数部分）
      */
-    public Map<RegistryKey<WorldClock>, Double> clocks() {
-        var result = new HashMap<RegistryKey<WorldClock>, Double>();
+    public Map<Key, Double> clocks() {
+        var result = new HashMap<Key, Double>();
         clocks.forEach((key, clock) -> result.put(key, clock.totalTicks + (double) clock.partialTick));
         return result;
     }

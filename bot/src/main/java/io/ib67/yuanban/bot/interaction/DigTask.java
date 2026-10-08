@@ -1,21 +1,27 @@
 package io.ib67.yuanban.bot.interaction;
 
+import io.ib67.yuanban.bot.data.Items;
 import io.ib67.yuanban.bot.inventory.Window;
 import io.ib67.yuanban.bot.movement.Rotation;
+import io.ib67.yuanban.bot.protocol.Vectors;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
 import io.ib67.yuanban.bot.scheduler.BotState;
-import net.minestom.server.component.DataComponents;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.PlayerHand;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.block.BlockFace;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.network.packet.client.play.ClientAnimationPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.client.play.ClientSpectatorActionPacket;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSpectatorActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.OptionalInt;
 
 /**
  * {@code attemptBreakBlock}：一次点击，按原版 {@code Minecraft.startAttack}、{@code continueAttack} 与
@@ -37,8 +43,9 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class DigTask extends HandAction {
     private final Point position;
-    private final @Nullable BlockFace requestedFace;
-    private BlockFace face = BlockFace.TOP;
+    private final Vector3i blockPosition;
+    private final @Nullable Direction requestedFace;
+    private Direction face = Direction.UP;
     private Stage stage = Stage.STARTING;
     /**
      * 与原版客户端相同，进度以 float 累加
@@ -46,13 +53,14 @@ public final class DigTask extends HandAction {
     private float progress;
     private int pendingSequence;
     /**
-     * 开始挖掘时的主手物品（原版 {@code MultiPlayerGameMode.destroyingItem}）
+     * 开始挖掘时的主手物品（原版 {@code MultiPlayerGameMode.destroyingItem}）；空手时为 null
      */
-    private ItemStack destroyingItem = ItemStack.AIR;
+    private @Nullable ItemStack destroyingItem;
 
-    public DigTask(ActionImpl handle, Point position, @Nullable BlockFace face) {
+    public DigTask(ActionImpl handle, Point position, @Nullable Direction face) {
         super(handle);
         this.position = new Vec(position.blockX(), position.blockY(), position.blockZ());
+        this.blockPosition = Vectors.blockPos(position);
         this.requestedFace = face;
     }
 
@@ -61,25 +69,25 @@ public final class DigTask extends HandAction {
         var state = controller.state();
         var player = state.player();
         var world = state.world();
-        var block = world.getBlock(position, Block.Getter.Condition.NONE);
+        var block = world.getBlock(position, Block.Getter.Condition.TYPE);
         if (block.air()) {
             handle.succeed();
             return;
         }
         // 原版 startAttack：旁观模式不挖掘、不挥手，目标不是实体时发送不带实体编号的 Spectator Action（spectatorNoAction）
         if (player.gameMode() == GameMode.SPECTATOR) {
-            state.outbox().send(new ClientSpectatorActionPacket(null));
+            state.outbox().send(new ServerboundSpectatorActionPacket(OptionalInt.empty()));
             state.outbox().completeWhenWritten(handle);
             return;
         }
         // 原版 startAttack：主手拿着穿刺武器时不挖掘，调用 MultiPlayerGameMode.piercingAttack 发送 Stab，然后挥手
-        if (mainHand(state).has(DataComponents.PIERCING_WEAPON)) {
-            state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.STAB, Vec.ZERO, BlockFace.BOTTOM, 0));
+        if (Items.has(mainHand(state), DataComponentTypes.PIERCING_WEAPON)) {
+            state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.STAB, Vector3i.ZERO, Direction.DOWN, 0));
             swing(state);
             state.outbox().completeWhenWritten(handle);
             return;
         }
-        if (restrictedInAdventure(state, block) || !world.border().withinBounds(position.blockX(), position.blockZ())) {
+        if (restrictedInAdventure(state, block, position) || !world.border().withinBounds(position.blockX(), position.blockZ())) {
             swing(state);
             if (controller.destroyDelay() > 0) {
                 controller.destroyDelay(controller.destroyDelay() - 1);
@@ -90,7 +98,7 @@ public final class DigTask extends HandAction {
         }
         face = requestedFace != null ? requestedFace : faceTowards(player.eyePosition());
         var sequence = controller.sequence().next();
-        state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.STARTED_DIGGING, position, face, sequence));
+        state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, blockPosition, face, sequence));
         if (player.abilities().instantBreak()) {
             swing(state);
             controller.destroyDelay(HandController.DESTROY_DELAY_TICKS);
@@ -121,7 +129,7 @@ public final class DigTask extends HandAction {
     private void continueDigging(HandController controller) {
         var state = controller.state();
         // 原版 continueAttack：主手拿着穿刺武器时不调用 continueDestroyBlock，也不挥手
-        if (mainHand(state).has(DataComponents.PIERCING_WEAPON)) {
+        if (Items.has(mainHand(state), DataComponentTypes.PIERCING_WEAPON)) {
             return;
         }
         if (state.world().getBlock(position, Block.Getter.Condition.TYPE).air()) {
@@ -138,20 +146,20 @@ public final class DigTask extends HandAction {
         if (state.player().abilities().instantBreak() && state.world().border().withinBounds(position.blockX(), position.blockZ())) {
             controller.destroyDelay(HandController.DESTROY_DELAY_TICKS);
             var sequence = controller.sequence().next();
-            state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.STARTED_DIGGING, position, face, sequence));
+            state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, blockPosition, face, sequence));
             swing(state);
             awaitAcknowledgement(controller, sequence);
             return;
         }
         // 原版 sameDestroyTarget：主手物品（物品与组件）与开始挖掘时不同就不是同一个挖掘目标
-        if (!mainHand(state).isSimilar(destroyingItem)) {
+        if (!Items.sameItemSameComponents(mainHand(state), destroyingItem)) {
             restart(controller);
             return;
         }
         progress += (float) progressThisTick(controller);
         if (progress >= 1) {
             var sequence = controller.sequence().next();
-            state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.FINISHED_DIGGING, position, face, sequence));
+            state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.FINISH_DIGGING, blockPosition, face, sequence));
             controller.destroyDelay(HandController.DESTROY_DELAY_TICKS);
             swing(state);
             awaitAcknowledgement(controller, sequence);
@@ -171,13 +179,13 @@ public final class DigTask extends HandAction {
      */
     private void restart(HandController controller) {
         var state = controller.state();
-        var block = state.world().getBlock(position, Block.Getter.Condition.NONE);
-        if (restrictedInAdventure(state, block) || !state.world().border().withinBounds(position.blockX(), position.blockZ())) {
+        var block = state.world().getBlock(position, Block.Getter.Condition.TYPE);
+        if (restrictedInAdventure(state, block, position) || !state.world().border().withinBounds(position.blockX(), position.blockZ())) {
             return;
         }
-        state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.CANCELLED_DIGGING, position, face, 0));
+        state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.CANCEL_DIGGING, blockPosition, face, 0));
         var sequence = controller.sequence().next();
-        state.outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.STARTED_DIGGING, position, face, sequence));
+        state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, blockPosition, face, sequence));
         if (progressThisTick(controller) >= 1) {
             swing(state);
             awaitAcknowledgement(controller, sequence);
@@ -197,8 +205,8 @@ public final class DigTask extends HandAction {
             controller.sequence().forget(pendingSequence);
         }
         if (stage == Stage.DIGGING) {
-            controller.state().outbox().send(new ClientPlayerActionPacket(ClientPlayerActionPacket.Status.CANCELLED_DIGGING,
-                    position, BlockFace.BOTTOM, 0));
+            controller.state().outbox().send(new ServerboundPlayerActionPacket(PlayerAction.CANCEL_DIGGING, blockPosition,
+                    Direction.DOWN, 0));
         }
     }
 
@@ -219,22 +227,24 @@ public final class DigTask extends HandAction {
     /**
      * 原版 {@code Player.blockActionRestricted} 中冒险模式的部分：不能建造时，主手物品的 {@code can_break} 必须匹配目标方块
      */
-    private static boolean restrictedInAdventure(BotState state, Block block) {
+    private static boolean restrictedInAdventure(BotState state, Block block, Point position) {
         var player = state.player();
         if (player.gameMode() != GameMode.ADVENTURE || player.abilities().mayBuild()) {
             return false;
         }
         var held = mainHand(state);
-        var canBreak = held.get(DataComponents.CAN_BREAK);
-        return held.isAir() || canBreak == null || !canBreak.test(block);
+        var canBreak = Items.component(held, DataComponentTypes.CAN_BREAK);
+        return held == null || canBreak == null
+                || !BlockPredicates.test(canBreak, block, state.world().blockEntity(position.blockX(), position.blockY(),
+                position.blockZ()), position, state.tags());
     }
 
-    private static ItemStack mainHand(BotState state) {
+    private static @Nullable ItemStack mainHand(BotState state) {
         return state.inventory().player().get(Window.PLAYER_HOTBAR_START + state.player().heldSlot());
     }
 
     private static void swing(BotState state) {
-        state.outbox().send(new ClientAnimationPacket(PlayerHand.MAIN));
+        state.outbox().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
     }
 
     private double progressThisTick(HandController controller) {
@@ -252,7 +262,7 @@ public final class DigTask extends HandAction {
     /**
      * 朝向玩家眼睛的那一面：方块中心指向眼睛的向量中绝对值最大的分量
      */
-    private BlockFace faceTowards(Vec eye) {
+    private Direction faceTowards(Vec eye) {
         var dx = eye.x() - (position.x() + 0.5);
         var dy = eye.y() - (position.y() + 0.5);
         var dz = eye.z() - (position.z() + 0.5);
@@ -260,12 +270,12 @@ public final class DigTask extends HandAction {
         var ay = Math.abs(dy);
         var az = Math.abs(dz);
         if (ay >= ax && ay >= az) {
-            return dy > 0 ? BlockFace.TOP : BlockFace.BOTTOM;
+            return dy > 0 ? Direction.UP : Direction.DOWN;
         }
         if (ax >= az) {
-            return dx > 0 ? BlockFace.EAST : BlockFace.WEST;
+            return dx > 0 ? Direction.EAST : Direction.WEST;
         }
-        return dz > 0 ? BlockFace.SOUTH : BlockFace.NORTH;
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     private enum Stage {

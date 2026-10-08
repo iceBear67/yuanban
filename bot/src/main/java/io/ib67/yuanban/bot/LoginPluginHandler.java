@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot;
 
+import net.kyori.adventure.key.Key;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -15,5 +16,5 @@ public interface LoginPluginHandler {
     /**
      * @return 回应的数据；null 表示未理解，回应包中的数据缺省
      */
-    byte @Nullable [] respond(String channel, byte[] data);
+    byte @Nullable [] respond(Key channel, byte[] data);
 }

@@ -9,7 +9,8 @@ import java.util.function.Supplier;
 
 /**
  * 同一个 JVM 中全部 bot 共用的区段池：以区段的原始字节为键，值以弱引用保存，没有 bot 引用时由垃圾回收释放。
- * Minestom 的 {@code PaletteImpl} 没有定义 {@code equals}/{@code hashCode}，所以按原始字节去重。
+ * 按原始字节去重：MCProtocolLib 的 {@code DataPalette} 虽然定义了 {@code equals}，但它与调色板中条目的顺序有关，
+ * 而且查找之前要先解码。
  */
 public final class SectionPool {
     public static final SectionPool SHARED = new SectionPool();
@@ -18,7 +19,7 @@ public final class SectionPool {
 
     /**
      * @param bytes      区段的原始字节，调用之后不能再修改
-     * @param biomeCount 生物群系数量，决定生物群系调色板的直接编码位数
+     * @param biomeCount 生物群系数量，决定写入生物群系时扩展出的全局调色板的位数
      * @param decode     未命中时解码
      */
     public SharedSection get(byte[] bytes, int biomeCount, Supplier<SharedSection> decode) {

@@ -9,26 +9,32 @@ import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.observe.builtin.Observers;
+import io.netty.buffer.Unpooled;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.GameMode;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.network.packet.client.play.ClientPlayerActionPacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.common.DisconnectPacket;
-import net.minestom.server.network.packet.server.common.KeepAlivePacket;
-import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
-import net.minestom.server.network.packet.server.play.BlockChangePacket;
-import net.minestom.server.network.packet.server.play.BundlePacket;
-import net.minestom.server.network.packet.server.play.RespawnPacket;
-import net.minestom.server.network.packet.server.play.SystemChatPacket;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockChangeEntry;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundDisconnectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDelimiterPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -87,6 +93,21 @@ class ObserveTest {
         }
     }
 
+    private static ClientboundSystemChatPacket chat(String text) {
+        return new ClientboundSystemChatPacket(Component.text(text), false);
+    }
+
+    private static ClientboundBlockUpdatePacket blockUpdate(int x, int y, int z, Block block) {
+        return new ClientboundBlockUpdatePacket(new BlockChangeEntry(Vector3i.from(x, y, z), block.stateId()));
+    }
+
+    /**
+     * Bundle Delimiter 没有内容，用空缓冲区解码得到
+     */
+    private static ClientboundDelimiterPacket delimiter() {
+        return new ClientboundDelimiterPacket(Unpooled.EMPTY_BUFFER);
+    }
+
     private static String describe(Observation observation) {
         return switch (observation) {
             case PacketReceived(var packet) -> "received " + packet.getClass().getSimpleName();
@@ -100,9 +121,9 @@ class ObserveTest {
     @Test
     void onlyObservationsAfterRegistrationAreDelivered() {
         withBot((peer, bot) -> {
-            peer.push(new SystemChatPacket(Component.text("before"), false));
+            peer.push(chat("before"));
             var handle = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
-            peer.push(new SystemChatPacket(Component.text("after"), false));
+            peer.push(chat("after"));
             peer.barrier();
             handle.close();
             assertEquals(List.of("start", "chat after", "close BY_HANDLE"), handle.observer().events);
@@ -113,7 +134,7 @@ class ObserveTest {
     void modelRecordsComeBeforeTheirPacketAndBundlesAreAppliedFirst() {
         withBot((peer, bot) -> {
             var seenInCallback = new ArrayList<Block>();
-            var handle = bot.observe(new Recorder(Subscription.of(BlockChanged.class).received(BlockChangePacket.class)) {
+            var handle = bot.observe(new Recorder(Subscription.of(BlockChanged.class).received(ClientboundBlockUpdatePacket.class)) {
                 @Override
                 public void onObservation(Observation observation, ObserverContext context) {
                     super.onObservation(observation, context);
@@ -123,15 +144,15 @@ class ObserveTest {
                     }
                 }
             });
-            peer.push(new BundlePacket(),
-                    new BlockChangePacket(new Vec(1, -1, 0), Block.GOLD_BLOCK.stateId()),
-                    new BlockChangePacket(new Vec(2, -1, 0), Block.DIAMOND_BLOCK.stateId()),
-                    new BundlePacket());
+            peer.push(delimiter(),
+                    blockUpdate(1, -1, 0, Block.GOLD_BLOCK),
+                    blockUpdate(2, -1, 0, Block.DIAMOND_BLOCK),
+                    delimiter());
             peer.barrier();
             handle.close();
             assertEquals(List.of("start",
-                    "block 1 minecraft:gold_block", "received BlockChangePacket",
-                    "block 2 minecraft:diamond_block", "received BlockChangePacket",
+                    "block 1 minecraft:gold_block", "received ClientboundBlockUpdatePacket",
+                    "block 2 minecraft:diamond_block", "received ClientboundBlockUpdatePacket",
                     "close BY_HANDLE"), handle.observer().events);
             assertEquals(List.of(Block.DIAMOND_BLOCK, Block.DIAMOND_BLOCK), seenInCallback);
         });
@@ -165,12 +186,12 @@ class ObserveTest {
     @Test
     void onlySubscribedTypesAreDelivered() {
         withBot((peer, bot) -> {
-            var handle = bot.observe(new Recorder(Subscription.NONE.received(SystemChatPacket.class)));
-            peer.push(new BlockChangePacket(new Vec(1, -1, 0), Block.GOLD_BLOCK.stateId()));
-            peer.push(new SystemChatPacket(Component.text("x"), false));
+            var handle = bot.observe(new Recorder(Subscription.NONE.received(ClientboundSystemChatPacket.class)));
+            peer.push(blockUpdate(1, -1, 0, Block.GOLD_BLOCK));
+            peer.push(chat("x"));
             peer.barrier();
             handle.close();
-            assertEquals(List.of("start", "received SystemChatPacket", "close BY_HANDLE"), handle.observer().events);
+            assertEquals(List.of("start", "received ClientboundSystemChatPacket", "close BY_HANDLE"), handle.observer().events);
         });
     }
 
@@ -178,6 +199,21 @@ class ObserveTest {
     void subscriptionRejectsPacketObservationTypes() {
         assertThrows(IllegalArgumentException.class, () -> Subscription.of(PacketReceived.class));
         assertThrows(IllegalArgumentException.class, () -> Subscription.of(PacketSent.class));
+    }
+
+    @Test
+    void subscriptionRejectsPacketClassesOfTheWrongDirection() {
+        // 入站只接受服务端发往客户端的数据包类，出站只接受客户端发往服务端的数据包类
+        assertThrows(IllegalArgumentException.class, () -> Subscription.NONE.received(ServerboundKeepAlivePacket.class));
+        assertThrows(IllegalArgumentException.class, () -> Subscription.NONE.sent(ClientboundKeepAlivePacket.class));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Subscription(Set.of(), Set.of(ServerboundChatPacket.class), Set.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Subscription(Set.of(), Set.of(), Set.of(ClientboundSystemChatPacket.class)));
+        // MinecraftPacket.class 表示这一方向的全部数据包，两个方向都接受
+        var all = Subscription.NONE.received(MinecraftPacket.class).sent(MinecraftPacket.class);
+        assertEquals(Set.of(MinecraftPacket.class), all.received());
+        assertEquals(Set.of(MinecraftPacket.class), all.sent());
     }
 
     @Test
@@ -192,7 +228,7 @@ class ObserveTest {
                     events.add("after close request");
                 }
             });
-            peer.push(new SystemChatPacket(Component.text("a"), false), new SystemChatPacket(Component.text("b"), false));
+            peer.push(chat("a"), chat("b"));
             assertEquals(CloseReason.BY_OBSERVER, self.awaitClose(TIMEOUT));
             assertEquals(List.of("start", "chat a", "after close request", "close BY_OBSERVER"), self.observer().events);
 
@@ -222,7 +258,7 @@ class ObserveTest {
                     throw new IllegalStateException("broken observer");
                 }
             });
-            peer.push(new SystemChatPacket(Component.text("boom"), false));
+            peer.push(chat("boom"));
             assertEquals(CloseReason.FAILED, failing.awaitClose(TIMEOUT));
             assertNull(failing.observer().closed);
             assertEquals(CloseReason.DISCONNECTED, other.awaitClose(TIMEOUT));
@@ -258,7 +294,7 @@ class ObserveTest {
             var moving = bot.moveForward(1000);
             bot.observe(brokenOnClose());
             var other = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
-            peer.push(new DisconnectPacket(Component.text("bye")));
+            peer.push(new ClientboundDisconnectPacket(Component.text("bye")));
             // 其余 observer 照常关闭；onClose 的异常记录为失败原因，未结束的动作与之后的调用都得到 BotFailureException
             assertEquals(CloseReason.DISCONNECTED, other.awaitClose(TIMEOUT));
             var failure = assertThrows(BotFailureException.class, () -> moving.await(TIMEOUT));
@@ -418,7 +454,7 @@ class ObserveTest {
     void builtinStateCannotBeReadFromOtherThreadsWhileObserving() {
         withBot((peer, bot) -> {
             var handle = bot.observe(Observers.chatMessages());
-            peer.push(new SystemChatPacket(Component.text("one"), false));
+            peer.push(chat("one"));
             peer.barrier();
             assertThrows(IllegalStateException.class, () -> handle.observer().lines());
             int count = handle.read(observer -> observer.lines().size());
@@ -436,16 +472,17 @@ class ObserveTest {
             });
             TestServer.join(peer, new Pos(0.5, 0, 0.5), GameMode.CREATIVE, (_, _, _) -> {
             });
-            var recorder = new Recorder(Subscription.of(BlockChanged.class, ActionCompleted.class).received(AcknowledgeBlockChangePacket.class));
+            var recorder = new Recorder(Subscription.of(BlockChanged.class, ActionCompleted.class)
+                    .received(ClientboundBlockChangedAckPacket.class));
             var mark = peer.mark();
             var observed = bot.observeDuring(recorder, b -> b.attemptBreakBlock(new Vec(1, -1, 0)));
-            peer.awaitSent(mark, ClientPlayerActionPacket.class, TIMEOUT);
+            peer.awaitSent(mark, ServerboundPlayerActionPacket.class, TIMEOUT);
             // 确认与方块更新在同一个 bundle 中、排在确认之前：观察范围包含方块更新，不包含确认之后的数据包
-            peer.push(new BundlePacket(),
-                    new BlockChangePacket(new Vec(1, -1, 0), Block.AIR.stateId()),
-                    new AcknowledgeBlockChangePacket(1),
-                    new BlockChangePacket(new Vec(5, -1, 0), Block.AIR.stateId()),
-                    new BundlePacket());
+            peer.push(delimiter(),
+                    blockUpdate(1, -1, 0, Block.AIR),
+                    new ClientboundBlockChangedAckPacket(1),
+                    blockUpdate(5, -1, 0, Block.AIR),
+                    delimiter());
             var result = observed.await(TIMEOUT);
             assertEquals(CloseReason.ACTION_COMPLETED, observed.handle().closeReason());
             assertEquals(List.of("start", "block 1 minecraft:air", "completed true", "close ACTION_COMPLETED"), result.events);
@@ -485,9 +522,9 @@ class ObserveTest {
                 }
             };
             var handle = bot.observe(observer);
-            peer.push(new SystemChatPacket(Component.text("first"), false));
-            peer.push(new RespawnPacket(TestServer.joinPacket(GameMode.SURVIVAL).playerSpawnInfo(), (byte) 0));
-            peer.push(new SystemChatPacket(Component.text("second"), false));
+            peer.push(chat("first"));
+            peer.push(new ClientboundRespawnPacket(TestServer.joinPacket(GameMode.SURVIVAL).getCommonPlayerSpawnInfo(), false, false));
+            peer.push(chat("second"));
             peer.barrier();
             handle.close();
             var worlds = observer.worlds();
@@ -507,19 +544,19 @@ class ObserveTest {
             var peer = new TestPeer();
             var bot = TestServer.configuredBot(runtime, peer, "early", _ -> {
             });
-            var observer = new WorldBoundObserver<List<ServerPacket>>() {
+            var observer = new WorldBoundObserver<List<MinecraftPacket>>() {
                 @Override
                 protected Subscription worldSubscription() {
-                    return Subscription.NONE.received(KeepAlivePacket.class);
+                    return Subscription.NONE.received(ClientboundKeepAlivePacket.class);
                 }
 
                 @Override
-                protected List<ServerPacket> openWorld(WorldInfo world, ObserverContext context) {
+                protected List<MinecraftPacket> openWorld(WorldInfo world, ObserverContext context) {
                     return new ArrayList<>();
                 }
 
                 @Override
-                protected void observe(List<ServerPacket> world, Observation observation, ObserverContext context) {
+                protected void observe(List<MinecraftPacket> world, Observation observation, ObserverContext context) {
                     world.add(((PacketReceived) observation).packet());
                 }
             };

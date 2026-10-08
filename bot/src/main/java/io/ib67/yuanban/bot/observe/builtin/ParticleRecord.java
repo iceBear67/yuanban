@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.particle.Particle;
+import org.geysermc.mcprotocollib.protocol.data.game.level.particle.Particle;
 
 /**
  * 一个 Particle 数据包。实际的粒子由客户端在中心附近按偏移随机生成（原版客户端行为）。

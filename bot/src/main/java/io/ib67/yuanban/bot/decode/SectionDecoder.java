@@ -1,21 +1,24 @@
 package io.ib67.yuanban.bot.decode;
 
+import io.ib67.yuanban.bot.data.BlockStates;
 import io.ib67.yuanban.bot.world.SectionRef;
 import io.ib67.yuanban.bot.world.SharedSection;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
-import net.minestom.server.instance.palette.Palette;
-import net.minestom.server.instance.palette.Palettes;
-import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.NetworkBufferTemplate;
-import net.minestom.server.network.packet.server.play.ChunkDataPacket;
-import net.minestom.server.network.packet.server.play.data.ChunkData;
-import net.minestom.server.utils.block.BlockUtils;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
+import net.minestom.server.coordinate.CoordConversion;
+import net.minestom.server.instance.block.Block;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.palette.PaletteType;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
 
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
- * 把 Chunk Data and Update Light 中的区段解码为共享的 {@link SharedSection}，方块实体取发给客户端的 NBT。
+ * 把 Chunk Data and Update Light 中的区段解码为共享的 {@link SharedSection}，并确定方块实体的 NBT。
  * 光照数据与高度图在这一步丢弃。
  */
 public final class SectionDecoder {
@@ -26,99 +29,76 @@ public final class SectionDecoder {
     }
 
     /**
-     * @param sectionCount 区段数量 = 维度高度 / 16
-     * @param biomeCount   生物群系注册表的条目数
+     * @param minY       当前维度的最低 y
+     * @param height     当前维度的高度，区段数量 = 高度 / 16
+     * @param biomeCount 生物群系注册表的条目数
      */
-    public DecodedChunk decode(ChunkDataPacket packet, int sectionCount, int biomeCount) {
-        var data = packet.chunkData().data();
-        var buffer = NetworkBuffer.wrap(data, 0, data.length);
-        var sections = new SectionRef[sectionCount];
-        for (int i = 0; i < sectionCount; i++) {
-            var start = buffer.readIndex();
-            buffer.advanceRead(4); // 非空气方块数量与流体数量
-            skipPalette(buffer, Palette.BLOCK_DIMENSION, Palette.BLOCK_PALETTE_MAX_BITS);
-            skipPalette(buffer, Palette.BIOME_DIMENSION, Palette.BIOME_PALETTE_MAX_BITS);
-            var length = (int) (buffer.readIndex() - start);
-            var bytes = new byte[length];
-            buffer.copyTo(start, bytes, 0, length);
+    public DecodedChunk decode(ClientboundLevelChunkWithLightPacket packet, int minY, int height, int biomeCount) {
+        var data = packet.getChunkData();
+        var buffer = Unpooled.wrappedBuffer(data);
+        var sections = new SectionRef[height / 16];
+        for (int i = 0; i < sections.length; i++) {
+            var start = buffer.readerIndex();
+            buffer.skipBytes(4); // 非空气方块数量与流体数量
+            skipPalette(buffer, PaletteType.BLOCK_STATE);
+            skipPalette(buffer, PaletteType.BIOME);
+            var bytes = ByteBufUtil.getBytes(buffer, start, buffer.readerIndex() - start);
             var shared = pool.get(bytes, biomeCount, () -> {
-                var section = NetworkBuffer.wrap(bytes, 0, bytes.length).read(sectionType(biomeCount));
-                return new SharedSection(section.blockStates(), section.biomes(), section.blockCount(), section.liquidCount());
+                var section = MinecraftTypes.readChunkSection(Unpooled.wrappedBuffer(bytes), BlockStates.REGISTRY_SIZE, biomeCount);
+                return new SharedSection(section.getBlockData(), section.getBiomeData(), section.getBlockCount(),
+                        section.getFluidCount());
             });
             sections[i] = new SectionRef(shared, true);
         }
-        if (buffer.readableBytes() != 0) {
-            throw new IllegalStateException("chunk " + packet.chunkX() + ", " + packet.chunkZ() + " has "
-                    + buffer.readableBytes() + " trailing bytes after " + sectionCount + " sections");
+        if (buffer.isReadable()) {
+            throw new IllegalStateException("chunk " + packet.getX() + ", " + packet.getZ() + " has "
+                    + buffer.readableBytes() + " trailing bytes after " + sections.length + " sections");
         }
-        // 对象级连接直接拿到服务端区块中的方块（带服务端的全部 NBT 与 BlockHandler）：与 TCP 连接相同，
-        // 只取序列化时 BlockUtils.extractClientNbt 发给客户端的标签
-        var blockEntities = new HashMap<Integer, CompoundBinaryTag>();
-        packet.chunkData().blockEntities().forEach((index, block) ->
-                blockEntities.put(index, Objects.requireNonNull(BlockUtils.extractClientNbt(block))));
-        return new DecodedChunk(packet.chunkX(), packet.chunkZ(), sections, blockEntities);
+        return new DecodedChunk(packet.getX(), packet.getZ(), sections, blockEntities(packet, sections, minY, height));
     }
 
     /**
-     * 一个区段：格式与 {@code ChunkData.Section.networkType} 相同，生物群系调色板使用 {@link #biomeSerializer}
+     * 方块实体的方块由区段中该位置的方块决定；该位置的方块没有同一类型的方块实体时（包括超出维度高度），
+     * 这条数据被忽略（原版客户端 {@code LevelChunk.replaceWithPacketData} 的行为）
      */
-    private static NetworkBuffer.Type<ChunkData.Section> sectionType(int biomeCount) {
-        return NetworkBufferTemplate.template(
-                NetworkBuffer.SHORT, ChunkData.Section::blockCount,
-                NetworkBuffer.SHORT, ChunkData.Section::liquidCount,
-                Palette.BLOCK_SERIALIZER, ChunkData.Section::blockStates,
-                biomeSerializer(biomeCount), ChunkData.Section::biomes,
-                ChunkData.Section::new);
-    }
-
-    /**
-     * 生物群系调色板（区块数据与 Chunk Biomes）：直接调色板的位数为 {@code ceillog2(生物群系数量)}，与原版
-     * {@code Strategy.createForBiomes} 相同。直接调色板声明了其它位数时抛出异常；原版不看声明的位数，按这个位数读取存储，
-     * 这样的数据它同样读错
-     */
-    // FIXME(Minestom M20): Palette.biomeSerializer 用 bitsToRepresent(生物群系数量) 计算直接调色板的位数，数量是 2 的幂时
-    //  比原版多一位，原版服务端发来的直接调色板被拒绝。这里用 Palette.serializer 按原版的位数读取，见 MINESTOM-BUG-REPORT.md
-    public static NetworkBuffer.Type<Palette> biomeSerializer(int biomeCount) {
-        return Palette.serializer(Palette.BIOME_DIMENSION, Palette.BIOME_PALETTE_MIN_BITS, Palette.BIOME_PALETTE_MAX_BITS,
-                ceilLog2(biomeCount));
-    }
-
-    /**
-     * 原版 {@code Mth.ceillog2}：表示 0 到 {@code value - 1} 需要的位数，{@code value} 为 0 或 1 时为 0
-     */
-    private static int ceilLog2(int value) {
-        return value <= 1 ? 0 : Integer.SIZE - Integer.numberOfLeadingZeros(value - 1);
-    }
-
-    /**
-     * 读出前 {@code count} 个区段的方块调色板，不解码生物群系
-     */
-    public static Palette[] blockPalettes(byte[] data, int count) {
-        var buffer = NetworkBuffer.wrap(data, 0, data.length);
-        var palettes = new Palette[count];
-        for (int i = 0; i < count; i++) {
-            buffer.advanceRead(4); // 非空气方块数量与流体数量
-            palettes[i] = buffer.read(Palette.BLOCK_SERIALIZER);
-            skipPalette(buffer, Palette.BIOME_DIMENSION, Palette.BIOME_PALETTE_MAX_BITS);
+    private static Map<Integer, NbtMap> blockEntities(ClientboundLevelChunkWithLightPacket packet, SectionRef[] sections,
+                                                      int minY, int height) {
+        var result = new HashMap<Integer, NbtMap>();
+        for (var entry : packet.getBlockEntities()) {
+            var type = Objects.requireNonNull(entry.getType(), "unknown block entity type");
+            var y = entry.getY();
+            if (y < minY || y >= minY + height) {
+                continue;
+            }
+            var stateId = sections[(y - minY) >> 4].block(entry.getX(), y & 15, entry.getZ());
+            var blockType = Objects.requireNonNull(Block.fromStateId(stateId)).blockEntityType();
+            if (blockType == null || blockType.id() != type.ordinal()) {
+                continue;
+            }
+            // 方块实体没有发给客户端的 NBT 时，服务端写入 TAG_END
+            result.put(CoordConversion.chunkBlockIndex(entry.getX(), y, entry.getZ()),
+                    Objects.requireNonNullElse(entry.getNbt(), NbtMap.EMPTY));
         }
-        return palettes;
+        return result;
     }
 
     /**
-     * 按 {@code Palette.serializer} 的格式跳过一个调色板容器
+     * 按区段的格式跳过一个调色板容器：位数，然后位数为 0 时是一个 VarInt；位数不超过间接调色板的上限时是调色板长度与各个编号；
+     * 然后（位数不为 0 时）是按这个位数存放全部条目所需的 long，与 MCProtocolLib 的 {@code BitStorage} 相同
      */
-    private static void skipPalette(NetworkBuffer buffer, int dimension, int maxIndirectBits) {
-        var bitsPerEntry = buffer.read(NetworkBuffer.BYTE);
+    private static void skipPalette(ByteBuf buffer, PaletteType type) {
+        var bitsPerEntry = buffer.readUnsignedByte();
         if (bitsPerEntry == 0) {
-            buffer.read(NetworkBuffer.VAR_INT);
+            MinecraftTypes.readVarInt(buffer);
             return;
         }
-        if (bitsPerEntry <= maxIndirectBits) {
-            var paletteLength = buffer.read(NetworkBuffer.VAR_INT);
+        if (bitsPerEntry <= type.getMaxBitsPerEntry()) {
+            var paletteLength = MinecraftTypes.readVarInt(buffer);
             for (int i = 0; i < paletteLength; i++) {
-                buffer.read(NetworkBuffer.VAR_INT);
+                MinecraftTypes.readVarInt(buffer);
             }
         }
-        buffer.advanceRead((long) Palettes.arrayLength(dimension, bitsPerEntry) * Long.BYTES);
+        var valuesPerLong = 64 / bitsPerEntry;
+        buffer.skipBytes((type.getStorageSize() + valuesPerLong - 1) / valuesPerLong * Long.BYTES);
     }
 }

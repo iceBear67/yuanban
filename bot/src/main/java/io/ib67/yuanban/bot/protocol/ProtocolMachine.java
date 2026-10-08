@@ -4,9 +4,9 @@ import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.ResourcePackPolicy;
 import io.ib67.yuanban.bot.chat.LastSeenTracker;
+import io.ib67.yuanban.bot.chat.Signature;
 import io.ib67.yuanban.bot.decode.DecodeContext;
 import io.ib67.yuanban.bot.decode.DecodedChunk;
-import io.ib67.yuanban.bot.decode.SectionDecoder;
 import io.ib67.yuanban.bot.entity.ClientEntity;
 import io.ib67.yuanban.bot.inventory.InventoryModel;
 import io.ib67.yuanban.bot.movement.Kinematics;
@@ -46,174 +46,182 @@ import io.ib67.yuanban.bot.observe.WorldInfo;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationDispatcher;
 import io.ib67.yuanban.bot.player.Interpolation;
 import io.ib67.yuanban.bot.player.LocalPlayer;
+import io.ib67.yuanban.bot.registry.SyncedRegistries;
 import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
 import io.ib67.yuanban.bot.scheduler.BotState;
+import io.ib67.yuanban.bot.view.ActiveEffect;
 import io.ib67.yuanban.bot.view.ChatKind;
 import io.ib67.yuanban.bot.view.ChatLine;
 import io.ib67.yuanban.bot.world.ClientWorld;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.longs.LongList;
 import net.kyori.adventure.key.Key;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
-import net.kyori.adventure.resource.ResourcePackStatus;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import net.minestom.server.MinecraftServer;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.crypto.MessageSignature;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.EquipmentSlot;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.RelativeFlags;
-import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.inventory.InventoryType;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.message.ChatType;
-import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.client.common.ClientCookieResponsePacket;
-import net.minestom.server.network.packet.client.common.ClientKeepAlivePacket;
-import net.minestom.server.network.packet.client.common.ClientPluginMessagePacket;
-import net.minestom.server.network.packet.client.common.ClientPongPacket;
-import net.minestom.server.network.packet.client.common.ClientResourcePackStatusPacket;
-import net.minestom.server.network.packet.client.common.ClientSettingsPacket;
-import net.minestom.server.network.packet.client.configuration.ClientAcceptCodeOfConductPacket;
-import net.minestom.server.network.packet.client.configuration.ClientFinishConfigurationPacket;
-import net.minestom.server.network.packet.client.configuration.ClientSelectKnownPacksPacket;
-import net.minestom.server.network.packet.client.handshake.ClientHandshakePacket;
-import net.minestom.server.network.packet.client.login.ClientLoginAcknowledgedPacket;
-import net.minestom.server.network.packet.client.login.ClientLoginPluginResponsePacket;
-import net.minestom.server.network.packet.client.login.ClientLoginStartPacket;
-import net.minestom.server.network.packet.client.play.ClientChatAckPacket;
-import net.minestom.server.network.packet.client.play.ClientChunkBatchReceivedPacket;
-import net.minestom.server.network.packet.client.play.ClientCloseWindowPacket;
-import net.minestom.server.network.packet.client.play.ClientConfigurationAckPacket;
-import net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket;
-import net.minestom.server.network.packet.client.play.ClientTeleportConfirmPacket;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.common.CookieRequestPacket;
-import net.minestom.server.network.packet.server.common.CookieStorePacket;
-import net.minestom.server.network.packet.server.common.DisconnectPacket;
-import net.minestom.server.network.packet.server.common.KeepAlivePacket;
-import net.minestom.server.network.packet.server.common.PingPacket;
-import net.minestom.server.network.packet.server.common.PluginMessagePacket;
-import net.minestom.server.network.packet.server.common.ResourcePackPushPacket;
-import net.minestom.server.network.packet.server.common.ServerLinksPacket;
-import net.minestom.server.network.packet.server.common.TagsPacket;
-import net.minestom.server.network.packet.server.common.TransferPacket;
-import net.minestom.server.network.packet.server.configuration.CodeOfConductPacket;
-import net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket;
-import net.minestom.server.network.packet.server.configuration.ResetChatPacket;
-import net.minestom.server.network.packet.server.configuration.SelectKnownPacksPacket;
-import net.minestom.server.network.packet.server.configuration.UpdateEnabledFeaturesPacket;
-import net.minestom.server.network.packet.server.login.LoginDisconnectPacket;
-import net.minestom.server.network.packet.server.login.LoginPluginRequestPacket;
-import net.minestom.server.network.packet.server.login.LoginSuccessPacket;
-import net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket;
-import net.minestom.server.network.packet.server.play.ActionBarPacket;
-import net.minestom.server.network.packet.server.play.AttachEntityPacket;
-import net.minestom.server.network.packet.server.play.BlockChangePacket;
-import net.minestom.server.network.packet.server.play.BlockEntityDataPacket;
-import net.minestom.server.network.packet.server.play.BossBarPacket;
-import net.minestom.server.network.packet.server.play.ChangeGameStatePacket;
-import net.minestom.server.network.packet.server.play.ChunkBatchFinishedPacket;
-import net.minestom.server.network.packet.server.play.ChunkBatchStartPacket;
-import net.minestom.server.network.packet.server.play.ChunkBiomesPacket;
-import net.minestom.server.network.packet.server.play.ChunkDataPacket;
-import net.minestom.server.network.packet.server.play.ClearTitlesPacket;
-import net.minestom.server.network.packet.server.play.CloseWindowPacket;
-import net.minestom.server.network.packet.server.play.CollectItemPacket;
-import net.minestom.server.network.packet.server.play.DamageEventPacket;
-import net.minestom.server.network.packet.server.play.DeathCombatEventPacket;
-import net.minestom.server.network.packet.server.play.DeleteChatPacket;
-import net.minestom.server.network.packet.server.play.DestroyEntitiesPacket;
-import net.minestom.server.network.packet.server.play.DisguisedChatPacket;
-import net.minestom.server.network.packet.server.play.DisplayScoreboardPacket;
-import net.minestom.server.network.packet.server.play.EntityAttributesPacket;
-import net.minestom.server.network.packet.server.play.EntityEffectPacket;
-import net.minestom.server.network.packet.server.play.EntityEquipmentPacket;
-import net.minestom.server.network.packet.server.play.EntityHeadLookPacket;
-import net.minestom.server.network.packet.server.play.EntityMetaDataPacket;
-import net.minestom.server.network.packet.server.play.EntityPositionAndRotationPacket;
-import net.minestom.server.network.packet.server.play.EntityPositionPacket;
-import net.minestom.server.network.packet.server.play.EntityPositionSyncPacket;
-import net.minestom.server.network.packet.server.play.EntityRotationPacket;
-import net.minestom.server.network.packet.server.play.EntityStatusPacket;
-import net.minestom.server.network.packet.server.play.EntityTeleportPacket;
-import net.minestom.server.network.packet.server.play.EntityVelocityPacket;
-import net.minestom.server.network.packet.server.play.ExplosionPacket;
-import net.minestom.server.network.packet.server.play.HeldItemChangePacket;
-import net.minestom.server.network.packet.server.play.InitializeWorldBorderPacket;
-import net.minestom.server.network.packet.server.play.JoinGamePacket;
-import net.minestom.server.network.packet.server.play.MultiBlockChangePacket;
-import net.minestom.server.network.packet.server.play.OpenHorseWindowPacket;
-import net.minestom.server.network.packet.server.play.OpenWindowPacket;
-import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
-import net.minestom.server.network.packet.server.play.PlayerChatMessagePacket;
-import net.minestom.server.network.packet.server.play.PlayerInfoRemovePacket;
-import net.minestom.server.network.packet.server.play.PlayerInfoUpdatePacket;
-import net.minestom.server.network.packet.server.play.PlayerListHeaderAndFooterPacket;
-import net.minestom.server.network.packet.server.play.PlayerPositionAndLookPacket;
-import net.minestom.server.network.packet.server.play.PlayerRotationPacket;
-import net.minestom.server.network.packet.server.play.RemoveEntityEffectPacket;
-import net.minestom.server.network.packet.server.play.ResetScorePacket;
-import net.minestom.server.network.packet.server.play.RespawnPacket;
-import net.minestom.server.network.packet.server.play.ScoreboardObjectivePacket;
-import net.minestom.server.network.packet.server.play.ServerDataPacket;
-import net.minestom.server.network.packet.server.play.ServerDifficultyPacket;
-import net.minestom.server.network.packet.server.play.SetCooldownPacket;
-import net.minestom.server.network.packet.server.play.SetCursorItemPacket;
-import net.minestom.server.network.packet.server.play.SetExperiencePacket;
-import net.minestom.server.network.packet.server.play.SetPassengersPacket;
-import net.minestom.server.network.packet.server.play.SetPlayerInventorySlotPacket;
-import net.minestom.server.network.packet.server.play.SetSlotPacket;
-import net.minestom.server.network.packet.server.play.SetTickStatePacket;
-import net.minestom.server.network.packet.server.play.SetTimePacket;
-import net.minestom.server.network.packet.server.play.SetTitleSubTitlePacket;
-import net.minestom.server.network.packet.server.play.SetTitleTextPacket;
-import net.minestom.server.network.packet.server.play.SetTitleTimePacket;
-import net.minestom.server.network.packet.server.play.SpawnEntityPacket;
-import net.minestom.server.network.packet.server.play.SpawnPositionPacket;
-import net.minestom.server.network.packet.server.play.StartConfigurationPacket;
-import net.minestom.server.network.packet.server.play.SystemChatPacket;
-import net.minestom.server.network.packet.server.play.TeamsPacket;
-import net.minestom.server.network.packet.server.play.TickStepPacket;
-import net.minestom.server.network.packet.server.play.TradeListPacket;
-import net.minestom.server.network.packet.server.play.UnloadChunkPacket;
-import net.minestom.server.network.packet.server.play.UpdateHealthPacket;
-import net.minestom.server.network.packet.server.play.UpdateScorePacket;
-import net.minestom.server.network.packet.server.play.UpdateSimulationDistancePacket;
-import net.minestom.server.network.packet.server.play.UpdateViewDistancePacket;
-import net.minestom.server.network.packet.server.play.UpdateViewPositionPacket;
-import net.minestom.server.network.packet.server.play.WindowItemsPacket;
-import net.minestom.server.network.packet.server.play.WindowPropertyPacket;
-import net.minestom.server.network.packet.server.play.WorldBorderCenterPacket;
-import net.minestom.server.network.packet.server.play.WorldBorderLerpSizePacket;
-import net.minestom.server.network.packet.server.play.WorldBorderSizePacket;
-import net.minestom.server.network.packet.server.play.WorldBorderWarningDelayPacket;
-import net.minestom.server.network.packet.server.play.WorldBorderWarningReachPacket;
-import net.minestom.server.network.packet.server.play.data.PlayerSpawnInfo;
-import net.minestom.server.potion.TimedPotion;
-import net.minestom.server.registry.RegistryKey;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodec;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.Holder;
+import org.geysermc.mcprotocollib.protocol.data.game.PlayerListEntryAction;
+import org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatFilterType;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.ChatType;
+import org.geysermc.mcprotocollib.protocol.data.game.chat.MessageSignature;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerSpawnInfo;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PositionElement;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.RainStrengthValue;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.ThunderStrengthValue;
+import org.geysermc.mcprotocollib.protocol.data.handshake.HandshakeIntent;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundCustomPayloadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundDisconnectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundPingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundResourcePackPushPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundServerLinksPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundStoreCookiePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundTransferPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundUpdateTagsPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundCustomPayloadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundKeepAlivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundPongPacket;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundResourcePackPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundCodeOfConductPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundResetChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundSelectKnownPacks;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundUpdateEnabledFeaturesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundAcceptCodeOfConductPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundSelectKnownPacks;
+import org.geysermc.mcprotocollib.protocol.packet.cookie.clientbound.ClientboundCookieRequestPacket;
+import org.geysermc.mcprotocollib.protocol.packet.cookie.serverbound.ServerboundCookieResponsePacket;
+import org.geysermc.mcprotocollib.protocol.packet.handshake.serverbound.ClientIntentionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundBossEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundChangeDifficultyPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundCooldownPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDeleteChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundDisguisedChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerInfoRemovePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerInfoUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundServerDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTabListPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTickingStatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundTickingStepPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundDamageEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityPositionSyncPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundMoveEntityPosPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundMoveEntityPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundMoveEntityRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRemoveEntitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRemoveMobEffectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRotateHeadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityLinkPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityMotionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEquipmentPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetPassengersPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTakeItemEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTeleportEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateMobEffectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerCombatKillPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerRotationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetExperiencePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHeldSlotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundMerchantOffersPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundMountScreenOpenPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundSetCursorItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundSetPlayerInventoryPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchFinishedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunkBatchStartPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundChunksBiomesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundExplodePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundForgetLevelChunkPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundGameEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSectionBlocksUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetChunkCacheCenterPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetChunkCacheRadiusPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetDefaultSpawnPositionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetSimulationDistancePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundInitializeBorderPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderCenterPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderLerpSizePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderSizePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderWarningDelayPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderWarningDistancePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundResetScorePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetDisplayObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetPlayerTeamPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetScorePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetActionBarTextPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitleTextPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundSetTitlesAnimationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatAckPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundConfigurationAcknowledgedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundChunkBatchReceivedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundCustomQueryPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginDisconnectPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundCustomQueryAnswerPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundLoginAcknowledgedPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.BitSet;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * 协议状态机：在调度线程上应用收到的数据包、产生观察记录、写入自动应答。两种连接共用。
+ * 协议状态机：在调度线程上应用收到的数据包、产生观察记录、写入自动应答。各种连接共用。
  * 每个数据包产生的模型层观察记录按变化发生的顺序产生，最后产生它的 {@code PacketReceived}。
  */
 public final class ProtocolMachine {
@@ -223,11 +231,7 @@ public final class ProtocolMachine {
      */
     private static final Component CHAT_VALIDATION_ERROR = Component.translatable("chat.validation_error",
             NamedTextColor.RED, TextDecoration.ITALIC);
-    /**
-     * 原版 {@code FilterMask.FILTERED_STYLE}：部分过滤的玩家聊天中被过滤的字符的样式
-     */
-    private static final Style FILTERED_STYLE = Style.style(NamedTextColor.DARK_GRAY,
-            HoverEvent.showText(Component.translatable("chat.filtered")));
+    private static final Key BRAND = Key.key(Key.MINECRAFT_NAMESPACE, "brand");
 
     private final BotInstance bot;
     private final BotState state;
@@ -257,9 +261,9 @@ public final class ProtocolMachine {
         state.checkThread();
         nextJoinCause = transfer ? WorldEntryCause.TRANSFER : WorldEntryCause.JOIN;
         bot.status(BotStatus.LOGIN);
-        outbox.send(new ClientHandshakePacket(MinecraftServer.PROTOCOL_VERSION, serverAddress, serverPort,
-                transfer ? ClientHandshakePacket.Intent.TRANSFER : ClientHandshakePacket.Intent.LOGIN));
-        outbox.send(new ClientLoginStartPacket(bot.username(), offlineUuid(bot.username())));
+        outbox.send(new ClientIntentionPacket(MinecraftCodec.CODEC.getProtocolVersion(), serverAddress, serverPort,
+                transfer ? HandshakeIntent.TRANSFER : HandshakeIntent.LOGIN));
+        outbox.send(new ServerboundHelloPacket(bot.username(), offlineUuid(bot.username())));
     }
 
     /**
@@ -276,204 +280,226 @@ public final class ProtocolMachine {
         observations.emitReceived(packet);
     }
 
-    private void apply(ServerPacket packet, @Nullable Object attachment) {
+    private void apply(MinecraftPacket packet, @Nullable Object attachment) {
         switch (packet) {
             // 登录
-            case LoginDisconnectPacket disconnect -> bot.disconnected(disconnect.kickMessage());
-            case LoginPluginRequestPacket request -> outbox.send(new ClientLoginPluginResponsePacket(request.messageId(),
-                    state.options().loginPluginHandler().respond(request.channel(), request.data())));
-            case LoginSuccessPacket _ -> {
-                outbox.send(new ClientLoginAcknowledgedPacket());
+            case ClientboundLoginDisconnectPacket disconnect -> bot.disconnected(disconnect.getReason());
+            // 回应的数据为 null 表示未理解，必须使用两个参数的构造方法（一个参数的构造方法写出空数组，表示理解）
+            case ClientboundCustomQueryPacket request -> outbox.send(new ServerboundCustomQueryAnswerPacket(request.getMessageId(),
+                    state.options().loginPluginHandler().respond(request.getChannel(), request.getData())));
+            case ClientboundLoginFinishedPacket _ -> {
+                outbox.send(new ServerboundLoginAcknowledgedPacket());
                 bot.status(BotStatus.CONFIGURATION);
-                outbox.send(new ClientPluginMessagePacket("minecraft:brand",
-                        NetworkBuffer.makeArray(NetworkBuffer.STRING, state.options().brand())));
-                outbox.send(new ClientSettingsPacket(state.options().clientSettings()));
+                outbox.send(new ServerboundCustomPayloadPacket(BRAND, writeString(state.options().brand())));
+                outbox.send(state.options().clientInformation());
             }
             // 配置
-            case SelectKnownPacksPacket knownPacks -> outbox.send(new ClientSelectKnownPacksPacket(knownPacks.entries().stream()
-                    .filter(entry -> entry.namespace().equals(Key.MINECRAFT_NAMESPACE) && entry.id().equals("core")
-                            && entry.version().equals(MinecraftServer.VERSION_NAME))
+            case ClientboundSelectKnownPacks knownPacks -> outbox.send(new ServerboundSelectKnownPacks(knownPacks.getKnownPacks()
+                    .stream()
+                    .filter(pack -> pack.getNamespace().equals(Key.MINECRAFT_NAMESPACE) && pack.getId().equals("core")
+                            && pack.getVersion().equals(MinecraftCodec.CODEC.getMinecraftVersion()))
                     .toList()));
-            case TagsPacket _ -> state.tags((TagTable) Objects.requireNonNull(attachment));
-            case UpdateEnabledFeaturesPacket features -> state.featureFlags(features.features());
-            case CodeOfConductPacket _ -> {
+            case ClientboundUpdateTagsPacket _ -> state.tags((TagTable) Objects.requireNonNull(attachment));
+            case ClientboundUpdateEnabledFeaturesPacket features -> state.featureFlags(List.of(features.getFeatures()));
+            case ClientboundCodeOfConductPacket _ -> {
                 if (state.options().acceptCodeOfConduct()) {
-                    outbox.send(new ClientAcceptCodeOfConductPacket());
+                    outbox.send(ServerboundAcceptCodeOfConductPacket.INSTANCE);
                 }
             }
-            case FinishConfigurationPacket _ -> {
+            case ClientboundFinishConfigurationPacket _ -> {
                 var finished = (DecodeContext.ConfigurationFinished) Objects.requireNonNull(attachment);
                 state.registries(finished.registries());
                 state.tags(finished.tags());
                 // 原版进入游戏阶段时新建 ClientPacketListener，它的 ClientClockManager 随之重新开始
                 state.newClocks();
-                outbox.send(new ClientFinishConfigurationPacket());
+                outbox.send(ServerboundFinishConfigurationPacket.INSTANCE);
                 bot.status(BotStatus.PLAY);
             }
-            case ResetChatPacket _ -> state.chat().clear();
-            case StartConfigurationPacket _ -> {
+            case ClientboundResetChatPacket _ -> state.chat().clear();
+            case ClientboundStartConfigurationPacket _ -> {
                 // 原版 handleConfigurationStart：未确认的消息数大于 0 时先发送 Acknowledge Message，然后清除客户端世界（clearClientLevel）
                 var unacknowledged = state.chat().lastSeen().takeOffset();
                 if (unacknowledged > 0) {
-                    outbox.send(new ClientChatAckPacket(unacknowledged));
+                    outbox.send(new ServerboundChatAckPacket(unacknowledged));
                 }
                 leaveWorld();
-                outbox.send(new ClientConfigurationAckPacket());
+                outbox.send(new ServerboundConfigurationAcknowledgedPacket());
                 bot.status(BotStatus.CONFIGURATION);
             }
             // 任意阶段的自动应答
-            case KeepAlivePacket keepAlive -> outbox.send(new ClientKeepAlivePacket(keepAlive.id()));
-            case PingPacket ping -> outbox.send(new ClientPongPacket(ping.id()));
-            case CookieRequestPacket request -> outbox.send(new ClientCookieResponsePacket(request.key(),
-                    state.cookies().get(request.key())));
-            case CookieStorePacket store -> state.cookies().store(store.key(), store.value());
-            case ResourcePackPushPacket push -> resourcePack(push);
-            case PluginMessagePacket message -> {
-                if (message.channel().equals("minecraft:brand")) {
-                    state.serverBrand(NetworkBuffer.wrap(message.data(), 0, message.data().length).read(NetworkBuffer.STRING));
+            case ClientboundKeepAlivePacket keepAlive -> outbox.send(new ServerboundKeepAlivePacket(keepAlive.getPingId()));
+            case ClientboundPingPacket ping -> outbox.send(new ServerboundPongPacket(ping.getId()));
+            case ClientboundCookieRequestPacket request -> outbox.send(new ServerboundCookieResponsePacket(request.getKey(),
+                    state.cookies().get(request.getKey())));
+            case ClientboundStoreCookiePacket store -> state.cookies().store(store.getKey(), store.getPayload());
+            case ClientboundResourcePackPushPacket push -> resourcePack(push);
+            case ClientboundCustomPayloadPacket message -> {
+                if (message.getChannel().equals(BRAND)) {
+                    state.serverBrand(MinecraftTypes.readString(Unpooled.wrappedBuffer(message.getData())));
                 }
             }
-            case ServerLinksPacket links -> state.serverLinks(links.entries());
-            case TransferPacket transfer -> bot.transfer(transfer.host(), transfer.port());
-            case DisconnectPacket disconnect -> bot.disconnected(disconnect.message());
-            case ChunkBatchStartPacket _ -> chunkBatches.start(System.nanoTime());
-            case ChunkBatchFinishedPacket finished -> outbox.send(new ClientChunkBatchReceivedPacket(
-                    chunkBatches.finish(System.nanoTime(), finished.batchSize())));
-            case PlayerPositionAndLookPacket teleport -> teleport(teleport);
+            case ClientboundServerLinksPacket links -> state.serverLinks(links.getLinks());
+            case ClientboundTransferPacket transfer -> bot.transfer(transfer.getHost(), transfer.getPort());
+            case ClientboundDisconnectPacket disconnect -> bot.disconnected(disconnect.getReason());
+            case ClientboundChunkBatchStartPacket _ -> chunkBatches.start(System.nanoTime());
+            case ClientboundChunkBatchFinishedPacket finished -> outbox.send(new ServerboundChunkBatchReceivedPacket(
+                    chunkBatches.finish(System.nanoTime(), finished.getBatchSize())));
+            case ClientboundPlayerPositionPacket teleport -> teleport(teleport);
             // 世界
-            case JoinGamePacket join -> join(join);
-            case RespawnPacket respawn -> respawn(respawn);
-            case ChunkDataPacket _ -> installChunk((DecodedChunk) Objects.requireNonNull(attachment));
-            case UnloadChunkPacket unload -> {
-                if (world().unloadChunk(unload.chunkX(), unload.chunkZ()) && observations.wants(ChunkUnloaded.class)) {
-                    observations.emit(new ChunkUnloaded(unload.chunkX(), unload.chunkZ()));
+            case ClientboundLoginPacket join -> join(join);
+            case ClientboundRespawnPacket respawn -> respawn(respawn);
+            case ClientboundLevelChunkWithLightPacket _ -> installChunk((DecodedChunk) Objects.requireNonNull(attachment));
+            case ClientboundForgetLevelChunkPacket unload -> {
+                if (world().unloadChunk(unload.getX(), unload.getZ()) && observations.wants(ChunkUnloaded.class)) {
+                    observations.emit(new ChunkUnloaded(unload.getX(), unload.getZ()));
                 }
             }
-            case UpdateViewPositionPacket center -> unloaded(world().center(center.chunkX(), center.chunkZ()));
-            case UpdateViewDistancePacket distance -> unloaded(world().viewDistance(distance.viewDistance()));
-            case UpdateSimulationDistancePacket distance -> world().simulationDistance(distance.simulationDistance());
-            case BlockChangePacket change -> setBlock(change.blockPosition().blockX(), change.blockPosition().blockY(),
-                    change.blockPosition().blockZ(), change.blockStateId());
-            case MultiBlockChangePacket change -> multiBlockChange(change);
-            case ChunkBiomesPacket biomes -> {
-                var serializer = SectionDecoder.biomeSerializer(state.registries().biome().size());
-                for (var chunk : biomes.chunks()) {
-                    world().setBiomes(chunk.chunkX(), chunk.chunkZ(), chunk.data(), serializer);
+            case ClientboundSetChunkCacheCenterPacket center -> unloaded(world().center(center.getChunkX(), center.getChunkZ()));
+            case ClientboundSetChunkCacheRadiusPacket distance -> unloaded(world().viewDistance(distance.getViewDistance()));
+            case ClientboundSetSimulationDistancePacket distance -> world().simulationDistance(distance.getSimulationDistance());
+            case ClientboundBlockUpdatePacket change -> {
+                var position = change.getEntry().getPosition();
+                setBlock(position.getX(), position.getY(), position.getZ(), change.getEntry().getBlock());
+            }
+            // MCProtocolLib 已经把每一项解码成绝对坐标
+            case ClientboundSectionBlocksUpdatePacket change -> {
+                for (var entry : change.getEntries()) {
+                    var position = entry.getPosition();
+                    setBlock(position.getX(), position.getY(), position.getZ(), entry.getBlock());
                 }
             }
-            case BlockEntityDataPacket data -> blockEntity(data);
-            case SetTimePacket time -> {
+            case ClientboundChunksBiomesPacket biomes -> {
+                var biomeCount = state.registries().biomeCount();
+                for (var chunk : biomes.getChunkBiomeData()) {
+                    world().setBiomes(chunk.getX(), chunk.getZ(), chunk.getBuffer(), biomeCount);
+                }
+            }
+            case ClientboundBlockEntityDataPacket data -> blockEntity(data);
+            case ClientboundSetTimePacket time -> {
                 // 原版 handleSetTime：世界的 World Age 设为数据包的值，然后时钟按它推进并替换列出的时钟
-                world().worldAge(time.gameTime());
-                state.clocks().apply(time);
+                world().worldAge(time.getGameTime());
+                state.clocks().apply(time, state.registries());
             }
-            case SetTickStatePacket tickState -> world().tickState().apply(tickState.tickRate(), tickState.isFrozen());
-            case TickStepPacket step -> world().tickState().step(step.steps());
-            case InitializeWorldBorderPacket border -> world().border().initialize(border);
-            case WorldBorderCenterPacket center -> world().border().center(center.x(), center.z());
-            case WorldBorderLerpSizePacket lerp -> world().border().lerp(lerp.oldDiameter(), lerp.newDiameter(), lerp.speed());
-            case WorldBorderSizePacket size -> world().border().size(size.diameter());
-            case WorldBorderWarningDelayPacket delay -> world().border().warningTime(delay.warningTime());
-            case WorldBorderWarningReachPacket reach -> world().border().warningBlocks(reach.warningBlocks());
-            case ServerDifficultyPacket difficulty -> world().difficulty(difficulty.difficulty());
-            case SpawnPositionPacket spawn -> world().defaultSpawn(spawn.worldPos().blockPosition());
-            case ChangeGameStatePacket change -> gameState(change);
+            case ClientboundTickingStatePacket tickState -> world().tickState().apply(tickState.getTickRate(), tickState.isFrozen());
+            case ClientboundTickingStepPacket step -> world().tickState().step(step.getTickSteps());
+            case ClientboundInitializeBorderPacket border -> world().border().initialize(border);
+            case ClientboundSetBorderCenterPacket center -> world().border().center(center.getNewCenterX(), center.getNewCenterZ());
+            case ClientboundSetBorderLerpSizePacket lerp ->
+                    world().border().lerp(lerp.getOldSize(), lerp.getNewSize(), lerp.getLerpTime());
+            case ClientboundSetBorderSizePacket size -> world().border().size(size.getSize());
+            case ClientboundSetBorderWarningDelayPacket delay -> world().border().warningTime(delay.getWarningDelay());
+            case ClientboundSetBorderWarningDistancePacket reach -> world().border().warningBlocks(reach.getWarningBlocks());
+            case ClientboundChangeDifficultyPacket difficulty -> world().difficulty(difficulty.getDifficulty());
+            case ClientboundSetDefaultSpawnPositionPacket spawn ->
+                    world().defaultSpawn(Vectors.vec(spawn.getGlobalPos().getPosition()));
+            case ClientboundGameEventPacket change -> gameState(change);
             // 实体
-            case SpawnEntityPacket spawn -> spawnEntity(spawn);
-            case EntityPositionPacket move -> moveEntity(move.entityId(), move.deltaX(), move.deltaY(), move.deltaZ(), null, null, move.onGround());
-            case EntityPositionAndRotationPacket move ->
-                    moveEntity(move.entityId(), move.deltaX(), move.deltaY(), move.deltaZ(), move.yaw(), move.pitch(), move.onGround());
-            case EntityRotationPacket rotation -> {
-                var entity = otherEntity(rotation.entityId());
+            case ClientboundAddEntityPacket spawn -> spawnEntity(spawn);
+            case ClientboundMoveEntityPosPacket move ->
+                    moveEntity(move.getEntityId(), move.getMoveX(), move.getMoveY(), move.getMoveZ(), null, null, move.isOnGround());
+            case ClientboundMoveEntityPosRotPacket move -> moveEntity(move.getEntityId(), move.getMoveX(), move.getMoveY(),
+                    move.getMoveZ(), move.getYaw(), move.getPitch(), move.isOnGround());
+            case ClientboundMoveEntityRotPacket rotation -> {
+                var entity = otherEntity(rotation.getEntityId());
                 if (entity != null) {
-                    entity.position(entity.position().withView(rotation.yaw(), rotation.pitch()), rotation.onGround());
+                    entity.position(entity.position().withView(rotation.getYaw(), rotation.getPitch()), rotation.isOnGround());
                 }
             }
-            case EntityHeadLookPacket headLook -> {
-                var entity = otherEntity(headLook.entityId());
+            case ClientboundRotateHeadPacket headLook -> {
+                var entity = otherEntity(headLook.getEntityId());
                 if (entity != null) {
-                    entity.headYaw(headLook.yaw());
+                    entity.headYaw(headLook.getHeadYaw());
                 }
             }
-            case EntityPositionSyncPacket sync -> positionSync(sync);
-            case EntityTeleportPacket teleport -> teleportEntity(teleport);
-            case EntityVelocityPacket velocity -> {
-                if (velocity.entityId() == state.player().entityId()) {
-                    state.player().velocity(velocity.velocity());
+            case ClientboundEntityPositionSyncPacket sync -> positionSync(sync);
+            case ClientboundTeleportEntityPacket teleport -> teleportEntity(teleport);
+            case ClientboundSetEntityMotionPacket velocity -> {
+                if (velocity.getEntityId() == state.player().entityId()) {
+                    state.player().velocity(Vectors.vec(velocity.getMovement()));
                 } else {
-                    var entity = world().entities().get(velocity.entityId());
+                    var entity = world().entities().get(velocity.getEntityId());
                     if (entity != null) {
-                        entity.velocity(velocity.velocity());
+                        entity.velocity(Vectors.vec(velocity.getMovement()));
                     }
                 }
             }
-            case EntityMetaDataPacket metadata -> {
-                var target = metadata.entityId() == state.player().entityId() ? state.player().metadata()
-                        : entityMetadata(metadata.entityId());
+            case ClientboundSetEntityDataPacket metadata -> {
+                var target = metadata.getEntityId() == state.player().entityId() ? state.player().metadata()
+                        : entityMetadata(metadata.getEntityId());
                 if (target != null) {
-                    target.putAll(metadata.entries());
+                    var changed = new LinkedHashMap<Integer, EntityMetadata<?, ?>>();
+                    for (var entry : metadata.getMetadata()) {
+                        changed.put(entry.getId(), entry);
+                    }
+                    target.putAll(changed);
                     if (observations.wants(EntityMetadataChanged.class)) {
-                        observations.emit(new EntityMetadataChanged(metadata.entityId(), metadata.entries()));
+                        observations.emit(new EntityMetadataChanged(metadata.getEntityId(), changed));
                     }
                 }
             }
-            case EntityEquipmentPacket equipment -> {
-                var entity = world().entities().get(equipment.entityId());
+            case ClientboundSetEquipmentPacket equipment -> {
+                var entity = world().entities().get(equipment.getEntityId());
                 if (entity != null) {
-                    equipment.equipments().forEach((slot, item) -> {
-                        var old = Objects.requireNonNullElse(entity.equipment().put(slot, item), ItemStack.AIR);
+                    for (var change : equipment.getEquipment()) {
+                        // 空物品从装备表中移除，装备表中没有空物品
+                        var item = change.getItem();
+                        var old = item == null ? entity.equipment().remove(change.getSlot())
+                                : entity.equipment().put(change.getSlot(), item);
                         if (observations.wants(EntityEquipmentChanged.class)) {
-                            observations.emit(new EntityEquipmentChanged(equipment.entityId(), slot, old, item));
+                            observations.emit(new EntityEquipmentChanged(equipment.getEntityId(), change.getSlot(), old, item));
                         }
-                    });
-                }
-            }
-            case EntityAttributesPacket attributes -> {
-                if (attributes.entityId() == state.player().entityId()) {
-                    state.player().attributes().apply(attributes.properties());
-                } else {
-                    var entity = world().entities().get(attributes.entityId());
-                    if (entity != null) {
-                        entity.attributes().apply(attributes.properties());
                     }
                 }
             }
-            case EntityEffectPacket effect -> {
-                if (effect.entityId() == state.player().entityId()) {
-                    state.player().effects().put(effect.potion());
+            case ClientboundUpdateAttributesPacket attributes -> {
+                if (attributes.getEntityId() == state.player().entityId()) {
+                    state.player().attributes().apply(attributes.getAttributes());
+                } else {
+                    var entity = world().entities().get(attributes.getEntityId());
+                    if (entity != null) {
+                        entity.attributes().apply(attributes.getAttributes());
+                    }
+                }
+            }
+            case ClientboundUpdateMobEffectPacket effect -> {
+                var active = new ActiveEffect(effect.getEffect(), effect.getAmplifier(), effect.getDuration(), effect.isAmbient(),
+                        effect.isShowParticles(), effect.isShowIcon(), effect.isBlend());
+                if (effect.getEntityId() == state.player().entityId()) {
+                    state.player().effects().put(active);
                     if (observations.wants(EffectChanged.class)) {
-                        observations.emit(new EffectChanged(effect.potion().effect(), new TimedPotion(effect.potion(), state.ticks())));
+                        observations.emit(new EffectChanged(effect.getEffect(), active, state.ticks()));
                     }
                 } else {
-                    var entity = world().entities().get(effect.entityId());
+                    var entity = world().entities().get(effect.getEntityId());
                     if (entity != null) {
-                        entity.effects().put(effect.potion().effect(), effect.potion());
+                        entity.effects().put(effect.getEffect(), active);
                     }
                 }
             }
-            case RemoveEntityEffectPacket remove -> {
-                if (remove.entityId() == state.player().entityId()) {
-                    state.player().effects().remove(remove.potionEffect());
+            case ClientboundRemoveMobEffectPacket remove -> {
+                if (remove.getEntityId() == state.player().entityId()) {
+                    state.player().effects().remove(remove.getEffect());
                     if (observations.wants(EffectChanged.class)) {
-                        observations.emit(new EffectChanged(remove.potionEffect(), null));
+                        observations.emit(new EffectChanged(remove.getEffect(), null, state.ticks()));
                     }
                 } else {
-                    var entity = world().entities().get(remove.entityId());
+                    var entity = world().entities().get(remove.getEntityId());
                     if (entity != null) {
-                        entity.effects().remove(remove.potionEffect());
+                        entity.effects().remove(remove.getEffect());
                     }
                 }
             }
-            case SetPassengersPacket passengers -> passengers(passengers);
-            case AttachEntityPacket attach -> {
-                var entity = world().entities().get(attach.attachedEntityId());
+            case ClientboundSetPassengersPacket passengers -> passengers(passengers);
+            case ClientboundSetEntityLinkPacket attach -> {
+                // 被拴住的实体为 entityId，拴住它的实体为 attachedToId
+                var entity = world().entities().get(attach.getEntityId());
                 if (entity != null) {
                     // 拴绳另一端的实体编号为 -1 时表示解开（wiki Link Entities）
-                    entity.leashHolder(attach.holdingEntityId() == -1 ? null : attach.holdingEntityId());
+                    entity.leashHolder(attach.getAttachedToId() == -1 ? null : attach.getAttachedToId());
                 }
             }
-            case DestroyEntitiesPacket destroy -> {
-                for (var id : destroy.entityIds()) {
+            case ClientboundRemoveEntitiesPacket destroy -> {
+                for (var id : destroy.getEntityIds()) {
                     var removed = world().entities().get(id);
                     if (removed == null) {
                         continue;
@@ -489,159 +515,168 @@ public final class ProtocolMachine {
                     }
                 }
             }
-            case CollectItemPacket collect -> {
+            case ClientboundTakeItemEntityPacket collect -> {
                 if (observations.wants(ItemPickedUp.class)) {
-                    observations.emit(new ItemPickedUp(collect.collectedEntityId(), collect.collectorEntityId(), collect.pickupItemCount()));
+                    observations.emit(new ItemPickedUp(collect.getCollectedEntityId(), collect.getCollectorEntityId(),
+                            collect.getItemCount()));
                 }
             }
-            case EntityStatusPacket status -> {
+            case ClientboundEntityEventPacket status -> {
                 if (observations.wants(EntityStatusReceived.class)) {
-                    observations.emit(new EntityStatusReceived(status.entityId(), status.status()));
+                    observations.emit(new EntityStatusReceived(status.getEntityId(), status.getEvent()));
                 }
             }
-            case DamageEventPacket damage -> {
+            case ClientboundDamageEventPacket damage -> {
+                // 原版解码时就要求伤害类型的编号在注册表中，与是否有 observer 无关
+                var type = state.registries().requireEntry(SyncedRegistries.DAMAGE_TYPE, damage.getSourceTypeId());
                 if (observations.wants(EntityDamaged.class)) {
-                    observations.emit(new EntityDamaged(damage.targetEntityId(), damage.damageType(), damage.sourceEntityId(),
-                            damage.sourceDirectId(), damage.sourcePos()));
+                    // MCProtocolLib 以 -1 表示没有来源实体
+                    var cause = damage.getSourceCauseId();
+                    var direct = damage.getSourceDirectId();
+                    var position = damage.getSourcePosition();
+                    observations.emit(new EntityDamaged(damage.getEntityId(), type, cause == -1 ? null : cause,
+                            direct == -1 ? null : direct, position == null ? null : Vectors.vec(position)));
                 }
             }
             // 本地玩家
-            case PlayerRotationPacket rotation -> {
+            case ClientboundPlayerRotationPacket rotation -> {
+                // relativeY 对应偏航角（y 轴旋转），relativeX 对应俯仰角（x 轴旋转）
                 var position = state.player().position();
-                var yaw = rotation.relativeYaw() ? position.yaw() + rotation.yaw() : rotation.yaw();
-                var pitch = rotation.relativePitch() ? position.pitch() + rotation.pitch() : rotation.pitch();
+                var yaw = rotation.isRelativeY() ? position.yaw() + rotation.getYRot() : rotation.getYRot();
+                var pitch = rotation.isRelativeX() ? position.pitch() + rotation.getXRot() : rotation.getXRot();
                 state.player().position(position.withView(yaw, Math.clamp(pitch, -90f, 90f)));
                 bot.movement().onServerRotation();
             }
-            case UpdateHealthPacket health -> health(health);
-            case DeathCombatEventPacket death -> {
-                if (death.playerId() == state.player().entityId()) {
+            case ClientboundSetHealthPacket health -> health(health);
+            case ClientboundPlayerCombatKillPacket death -> {
+                if (death.getPlayerId() == state.player().entityId()) {
                     if (observations.wants(PlayerDied.class)) {
-                        observations.emit(new PlayerDied(death.message()));
+                        observations.emit(new PlayerDied(death.getMessage()));
                     }
                     playerDied();
                 }
             }
-            case PlayerAbilitiesPacket abilities -> state.player().abilities().apply(abilities);
-            case SetExperiencePacket experience -> {
-                state.player().experience(experience.percentage(), experience.level(), experience.totalExperience());
+            case ClientboundPlayerAbilitiesPacket abilities -> state.player().abilities().apply(abilities);
+            case ClientboundSetExperiencePacket experience -> {
+                state.player().experience(experience.getExperience(), experience.getLevel(), experience.getTotalExperience());
                 if (observations.wants(ExperienceChanged.class)) {
-                    observations.emit(new ExperienceChanged(experience.percentage(), experience.level(), experience.totalExperience()));
+                    observations.emit(new ExperienceChanged(experience.getExperience(), experience.getLevel(),
+                            experience.getTotalExperience()));
                 }
             }
-            case SetCooldownPacket cooldown -> {
-                if (cooldown.cooldownTicks() <= 0) {
-                    state.player().cooldowns().remove(cooldown.cooldownGroup());
+            case ClientboundCooldownPacket cooldown -> {
+                if (cooldown.getCooldownTicks() <= 0) {
+                    state.player().cooldowns().remove(cooldown.getCooldownGroup());
                 } else {
-                    state.player().cooldowns().put(cooldown.cooldownGroup(), cooldown.cooldownTicks());
+                    state.player().cooldowns().put(cooldown.getCooldownGroup(), cooldown.getCooldownTicks());
                 }
             }
-            case PlayerInfoUpdatePacket info -> {
+            case ClientboundPlayerInfoUpdatePacket info -> {
                 var self = state.player().uuid();
                 var listedBefore = state.hud().player(self);
                 state.hud().playerInfo(info);
-                if (info.actions().contains(PlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE)) {
-                    for (var entry : info.entries()) {
+                if (info.getActions().contains(PlayerListEntryAction.UPDATE_GAME_MODE)) {
+                    for (var entry : info.getEntries()) {
                         // 不在玩家列表中的玩家的更新被忽略，包括自己（原版客户端行为）
-                        if (entry.uuid().equals(self) && state.hud().hasPlayer(self)) {
+                        if (entry.getProfileId().equals(self) && state.hud().hasPlayer(self)) {
                             // 原版 applyPlayerInfoUpdate：玩家列表中自己原来的游戏模式（新条目为原版 PlayerInfo 的初始值 SURVIVAL）
                             // 与新的不同时调用 LocalPlayer.onGameModeChanged，改成旁观模式时竖直速度清零
                             var previous = listedBefore == null ? GameMode.SURVIVAL : listedBefore.gameMode();
-                            if (previous != entry.gameMode() && entry.gameMode() == GameMode.SPECTATOR) {
+                            if (previous != entry.getGameMode() && entry.getGameMode() == GameMode.SPECTATOR) {
                                 state.player().velocity(state.player().velocity().withY(0));
                             }
-                            gameMode(entry.gameMode());
+                            gameMode(entry.getGameMode());
                         }
                     }
                 }
             }
-            case PlayerInfoRemovePacket remove -> state.hud().removePlayers(remove.uuids());
-            case ExplosionPacket explosion -> {
-                if (explosion.playerKnockback() != null) {
-                    state.player().velocity(state.player().velocity().add(explosion.playerKnockback()));
+            case ClientboundPlayerInfoRemovePacket remove -> state.hud().removePlayers(remove.getProfileIds());
+            case ClientboundExplodePacket explosion -> {
+                if (explosion.getPlayerKnockback() != null) {
+                    state.player().velocity(state.player().velocity().add(Vectors.vec(explosion.getPlayerKnockback())));
                 }
             }
-            case AcknowledgeBlockChangePacket acknowledge -> bot.hand().acknowledge(acknowledge.sequence());
+            case ClientboundBlockChangedAckPacket acknowledge -> bot.hand().acknowledge(acknowledge.getSequence());
             // 物品栏
-            case OpenWindowPacket open -> {
-                var type = InventoryType.values()[open.windowType()];
-                state.inventory().open(open.windowId(), type, open.title(), slotSink());
+            case ClientboundOpenScreenPacket open -> {
+                state.inventory().open(open.getContainerId(), open.getType(), open.getTitle(), slotSink());
                 if (observations.wants(WindowOpened.class)) {
-                    observations.emit(new WindowOpened(open.windowId(), type, open.title()));
+                    observations.emit(new WindowOpened(open.getContainerId(), open.getType(), open.getTitle()));
                 }
             }
-            case OpenHorseWindowPacket open -> openMount(open);
+            case ClientboundMountScreenOpenPacket open -> openMount(open);
             // 原版 handleContainerClose 不看窗口编号，关闭当前打开的窗口
-            case CloseWindowPacket _ -> {
+            case ClientboundContainerClosePacket _ -> {
                 var closed = state.inventory().closeOpen(slotSink());
                 if (closed != null && observations.wants(WindowClosed.class)) {
                     observations.emit(new WindowClosed(closed));
                 }
             }
-            case WindowItemsPacket items ->
-                    state.inventory().windowItems(items.windowId(), items.stateId(), items.items(), items.carriedItem(), slotSink());
-            case SetSlotPacket slot ->
-                    state.inventory().setSlot(slot.windowId(), slot.stateId(), slot.slot(), slot.itemStack(), slotSink());
-            case SetPlayerInventorySlotPacket slot ->
-                    state.inventory().setPlayerInventorySlot(slot.slot(), slot.itemStack(), slotSink());
-            case SetCursorItemPacket cursor -> state.inventory().cursor(cursor.itemStack(), slotSink());
-            case WindowPropertyPacket property ->
-                    state.inventory().property(property.windowId(), property.property(), property.value());
-            case TradeListPacket trades -> state.inventory().trades(trades);
-            case HeldItemChangePacket held -> heldSlot(held.slot());
+            case ClientboundContainerSetContentPacket items -> state.inventory().windowItems(items.getContainerId(),
+                    items.getStateId(), Arrays.asList(items.getItems()), items.getCarriedItem(), slotSink());
+            case ClientboundContainerSetSlotPacket slot ->
+                    state.inventory().setSlot(slot.getContainerId(), slot.getStateId(), slot.getSlot(), slot.getItem(), slotSink());
+            case ClientboundSetPlayerInventoryPacket slot ->
+                    state.inventory().setPlayerInventorySlot(slot.getSlot(), slot.getContents(), slotSink());
+            case ClientboundSetCursorItemPacket cursor -> state.inventory().cursor(cursor.getContents(), slotSink());
+            case ClientboundContainerSetDataPacket property ->
+                    state.inventory().property(property.getContainerId(), property.getRawProperty(), property.getValue());
+            case ClientboundMerchantOffersPacket trades -> state.inventory().trades(trades);
+            case ClientboundSetHeldSlotPacket held -> heldSlot(held.getSlot());
             // 聊天与界面
-            case PlayerChatMessagePacket chat -> playerChat(chat);
-            case DisguisedChatPacket chat -> chatLine(new ChatLine(ChatKind.DISGUISED, null, chatType(chat.type()),
-                    chat.senderName(), chat.targetName(), chat.message(), PLAIN.serialize(chat.message())), null);
-            case SystemChatPacket chat -> {
-                if (chat.overlay()) {
-                    actionBar(chat.message());
+            case ClientboundPlayerChatPacket chat -> playerChat(chat);
+            case ClientboundDisguisedChatPacket chat -> chatLine(new ChatLine(ChatKind.DISGUISED, null,
+                    chatTypeName(chat.getChatType()), inlineChatType(chat.getChatType()), chat.getName(), chat.getTargetName(),
+                    chat.getMessage(), PLAIN.serialize(chat.getMessage())), null);
+            case ClientboundSystemChatPacket chat -> {
+                if (chat.isOverlay()) {
+                    actionBar(chat.getContent());
                 } else {
-                    chatLine(new ChatLine(ChatKind.SYSTEM, null, null, null, null, chat.message(),
-                            PLAIN.serialize(chat.message())), null);
+                    chatLine(new ChatLine(ChatKind.SYSTEM, null, null, null, null, null, chat.getContent(),
+                            PLAIN.serialize(chat.getContent())), null);
                 }
             }
-            case DeleteChatPacket delete -> {
-                var signature = delete.signature().fullSignature() != null ? delete.signature().fullSignature()
-                        : state.chat().signatures().get(delete.signature().id());
+            case ClientboundDeleteChatPacket delete -> {
+                var signature = signature(delete.getMessageSignature());
                 // 原版 handleDeleteChat：还没有随 Chat Message 告知服务端的这条消息不再计入已读
                 state.chat().lastSeen().ignorePending(signature);
                 state.chat().delete(signature);
             }
-            case ActionBarPacket actionBar -> actionBar(actionBar.text());
-            case SetTitleTextPacket title -> {
-                state.hud().title(title.title());
+            case ClientboundSetActionBarTextPacket actionBar -> actionBar(actionBar.getText());
+            case ClientboundSetTitleTextPacket title -> {
+                state.hud().title(title.getText());
                 titleShown();
             }
-            case SetTitleSubTitlePacket subtitle -> {
-                state.hud().subtitle(subtitle.subtitle());
+            case ClientboundSetSubtitleTextPacket subtitle -> {
+                state.hud().subtitle(subtitle.getText());
                 titleShown();
             }
-            case SetTitleTimePacket times -> state.hud().titleTimes(times.fadeIn(), times.stay(), times.fadeOut());
-            case ClearTitlesPacket clear -> state.hud().clearTitles(clear.reset());
-            case BossBarPacket bossBar -> {
-                if (state.hud().bossBar(bossBar.uuid(), bossBar.action()) && observations.wants(BossBarChanged.class)) {
-                    observations.emit(new BossBarChanged(bossBar.uuid(), state.hud().currentBossBar(bossBar.uuid())));
+            case ClientboundSetTitlesAnimationPacket times ->
+                    state.hud().titleTimes(times.getFadeIn(), times.getStay(), times.getFadeOut());
+            case ClientboundClearTitlesPacket clear -> state.hud().clearTitles(clear.isResetTimes());
+            case ClientboundBossEventPacket bossBar -> {
+                if (state.hud().bossBar(bossBar) && observations.wants(BossBarChanged.class)) {
+                    observations.emit(new BossBarChanged(bossBar.getUuid(), state.hud().currentBossBar(bossBar.getUuid())));
                 }
             }
-            case PlayerListHeaderAndFooterPacket list -> state.hud().headerFooter(list.header(), list.footer());
-            case ScoreboardObjectivePacket objective -> state.hud().objective(objective);
-            case DisplayScoreboardPacket display -> state.hud().display(display.position(), display.scoreName());
-            case UpdateScorePacket score -> {
-                if (state.hud().score(score.entityName(), score.objectiveName(), score.score())
+            case ClientboundTabListPacket list -> state.hud().headerFooter(list.getHeader(), list.getFooter());
+            case ClientboundSetObjectivePacket objective -> state.hud().objective(objective);
+            case ClientboundSetDisplayObjectivePacket display -> state.hud().display(display.getPosition(), display.getName());
+            case ClientboundSetScorePacket score -> {
+                if (state.hud().score(score.getOwner(), score.getObjective(), score.getValue())
                         && observations.wants(ScoreChanged.class)) {
-                    observations.emit(new ScoreChanged(score.objectiveName(), score.entityName(), score.score()));
+                    observations.emit(new ScoreChanged(score.getObjective(), score.getOwner(), score.getValue()));
                 }
             }
-            case ResetScorePacket reset -> {
-                for (var objective : state.hud().resetScore(reset.owner(), reset.objective())) {
+            case ClientboundResetScorePacket reset -> {
+                for (var objective : state.hud().resetScore(reset.getOwner(), reset.getObjective())) {
                     if (observations.wants(ScoreChanged.class)) {
-                        observations.emit(new ScoreChanged(objective, reset.owner(), null));
+                        observations.emit(new ScoreChanged(objective, reset.getOwner(), null));
                     }
                 }
             }
-            case TeamsPacket team -> state.hud().team(team);
-            case ServerDataPacket data -> state.hud().serverMotd(data.motd());
+            case ClientboundSetPlayerTeamPacket team -> state.hud().team(team);
+            case ClientboundServerDataPacket data -> state.hud().serverMotd(data.getMotd());
             default -> {
                 // 其余数据包没有对应的模型状态，只产生 PacketReceived
             }
@@ -652,14 +687,27 @@ public final class ProtocolMachine {
         return state.world();
     }
 
-    private void resourcePack(ResourcePackPushPacket push) {
+    private void resourcePack(ClientboundResourcePackPushPacket push) {
         if (state.options().resourcePackPolicy() == ResourcePackPolicy.DECLINE) {
-            outbox.send(new ClientResourcePackStatusPacket(push.id(), ResourcePackStatus.DECLINED));
+            outbox.send(new ServerboundResourcePackPacket(push.getId(), ResourcePackStatus.DECLINED));
             return;
         }
-        outbox.send(new ClientResourcePackStatusPacket(push.id(), ResourcePackStatus.ACCEPTED));
-        outbox.send(new ClientResourcePackStatusPacket(push.id(), ResourcePackStatus.DOWNLOADED));
-        outbox.send(new ClientResourcePackStatusPacket(push.id(), ResourcePackStatus.SUCCESSFULLY_LOADED));
+        outbox.send(new ServerboundResourcePackPacket(push.getId(), ResourcePackStatus.ACCEPTED));
+        outbox.send(new ServerboundResourcePackPacket(push.getId(), ResourcePackStatus.DOWNLOADED));
+        outbox.send(new ServerboundResourcePackPacket(push.getId(), ResourcePackStatus.SUCCESSFULLY_LOADED));
+    }
+
+    /**
+     * 按协议的 String 格式（VarInt 长度加 UTF-8 字节）编码，用于 {@code minecraft:brand}
+     */
+    private static byte[] writeString(String value) {
+        var buffer = Unpooled.buffer();
+        try {
+            MinecraftTypes.writeString(buffer, value);
+            return ByteBufUtil.getBytes(buffer);
+        } finally {
+            buffer.release();
+        }
     }
 
     // 世界
@@ -690,11 +738,11 @@ public final class ProtocolMachine {
      * 已经在世界中时（服务端不经过重新配置再次发送 Login (play)）沿用当前玩家，只做原版 {@code resetPos}，
      * 移动与手部两条队列中的动作以世界重建取消，不发送清理数据包
      */
-    private void join(JoinGamePacket join) {
+    private void join(ClientboundLoginPacket join) {
         var cause = nextJoinCause;
         nextJoinCause = WorldEntryCause.RECONFIGURATION;
-        var spawnInfo = join.playerSpawnInfo();
-        var world = newWorld(spawnInfo, join.viewDistance(), join.simulationDistance());
+        var spawnInfo = join.getCommonPlayerSpawnInfo();
+        var world = newWorld(spawnInfo, join.getViewDistance(), join.getSimulationDistance());
         var player = state.player();
         if (state.worldOrNull() == null) {
             var created = new LocalPlayer(player.uuid(), player.username());
@@ -711,7 +759,7 @@ public final class ProtocolMachine {
         bot.hand().newGameMode();
         bot.hand().newWorld();
         state.chat().newSession();
-        player.entityId(join.entityId());
+        player.entityId(join.getEntityId());
         player.dead(false);
         enterWorld(world, spawnInfo, cause);
         bot.markJoined();
@@ -728,14 +776,14 @@ public final class ProtocolMachine {
      *     物品栏为空，快捷栏槽位 0，没有物品冷却与药水效果，饥饿值 20，饱和度 5，经验为 0。</li>
      * </ul>
      */
-    private void respawn(RespawnPacket respawn) {
+    private void respawn(ClientboundRespawnPacket respawn) {
         var current = world();
         var old = state.player();
-        var spawnInfo = respawn.playerSpawnInfo();
-        var keepData = (respawn.copyData() & 0x02) != 0;
+        var spawnInfo = respawn.getCommonPlayerSpawnInfo();
+        var keepData = respawn.isKeepMetadata();
         var open = state.inventory().open();
         if (open != null) {
-            outbox.send(new ClientCloseWindowPacket(open.id()));
+            outbox.send(new ServerboundContainerClosePacket(open.id()));
             state.inventory().closeOpen(slotSink());
             if (observations.wants(WindowClosed.class)) {
                 observations.emit(new WindowClosed(open.id()));
@@ -743,7 +791,7 @@ public final class ProtocolMachine {
         }
         bot.movement().cancelAll(ActionCancelledException.WORLD_REBUILT);
         bot.hand().cancelAll(ActionCancelledException.WORLD_REBUILT);
-        var world = Key.key(spawnInfo.world()).equals(current.dimension()) ? current
+        var world = spawnInfo.getWorldName().equals(current.dimension()) ? current
                 : newWorld(spawnInfo, current.viewDistance(), current.simulationDistance());
         if (world != current) {
             bot.hand().newWorld();
@@ -759,7 +807,7 @@ public final class ProtocolMachine {
         } else {
             resetPos(player, world);
         }
-        if ((respawn.copyData() & 0x01) != 0) {
+        if (respawn.isKeepAttributeModifiers()) {
             player.attributes().copyAll(old.attributes());
         } else {
             player.attributes().copyBaseValues(old.attributes());
@@ -769,20 +817,22 @@ public final class ProtocolMachine {
         enterWorld(world, spawnInfo, WorldEntryCause.RESPAWN);
     }
 
+    /**
+     * @throws IllegalStateException 维度类型的编号不在注册表中
+     */
     private ClientWorld newWorld(PlayerSpawnInfo spawnInfo, int viewDistance, int simulationDistance) {
-        var type = Objects.requireNonNull(state.registries().dimensionType().get(spawnInfo.dimensionType()),
-                () -> "unknown dimension type id " + spawnInfo.dimensionType());
-        return new ClientWorld(Key.key(spawnInfo.world()), spawnInfo.dimensionType(), type.minY(), type.height(),
+        var type = state.registries().dimensionType(spawnInfo.getDimension());
+        return new ClientWorld(spawnInfo.getWorldName(), spawnInfo.getDimension(), type.minY(), type.height(),
                 viewDistance, simulationDistance);
     }
 
     private void enterWorld(ClientWorld world, PlayerSpawnInfo spawnInfo, WorldEntryCause cause) {
-        var info = new WorldInfo(++worldEpoch, world.dimension(), spawnInfo.dimensionType(), cause);
+        var info = new WorldInfo(++worldEpoch, world.dimension(), spawnInfo.getDimension(), cause);
         state.enterWorld(world, info);
         // 原版 startWaitingForNewLevel：开始等待加载，30 秒的超时从这里开始计算
         state.loadTracker().start(System.nanoTime());
         bot.enteredWorld();
-        localGameMode(spawnInfo.gameMode());
+        localGameMode(spawnInfo.getGameMode());
         if (observations.wants(WorldEntered.class)) {
             observations.emit(new WorldEntered(info));
         }
@@ -804,7 +854,7 @@ public final class ProtocolMachine {
         }
         player.position(position.withPitch(0));
         player.velocity(Vec.ZERO);
-        player.health((float) player.attributes().value(Attribute.MAX_HEALTH), player.food(), player.saturation());
+        player.health((float) player.attributes().value(AttributeType.Builtin.MAX_HEALTH), player.food(), player.saturation());
     }
 
     private void installChunk(DecodedChunk chunk) {
@@ -842,46 +892,39 @@ public final class ProtocolMachine {
     }
 
     /**
-     * Update Section Blocks：区段坐标 x 为高 22 位，z 为中间 22 位，y 为低 20 位；每项为状态编号左移 12 位加上区段内坐标
+     * Block Entity Data：原版 {@code handleBlockEntityData} 只应用到 {@code level.getBlockEntity(pos, type)} 存在的方块实体，
+     * 即所在区块已加载、位置在维度高度范围之内，并且该位置的方块有同一类型的方块实体；其余情况忽略（原版客户端行为）。
+     * 方块实体的类型按注册表编号比较
      */
-    private void multiBlockChange(MultiBlockChangePacket change) {
-        var section = change.chunkSectionPosition();
-        var sectionX = (int) (section >> 42);
-        var sectionY = (int) (section << 44 >> 44);
-        var sectionZ = (int) (section << 22 >> 42);
-        for (var entry : change.blocks()) {
-            var stateId = (int) (entry >>> 12);
-            var x = sectionX * 16 + (int) ((entry >> 8) & 0xF);
-            var z = sectionZ * 16 + (int) ((entry >> 4) & 0xF);
-            var y = sectionY * 16 + (int) (entry & 0xF);
-            setBlock(x, y, z, stateId);
+    private void blockEntity(ClientboundBlockEntityDataPacket data) {
+        var position = data.getPosition();
+        var x = position.getX();
+        var y = position.getY();
+        var z = position.getZ();
+        var world = world();
+        if (y < world.minY() || y >= world.minY() + world.height() || !world.chunkLoaded(x >> 4, z >> 4)) {
+            return;
+        }
+        var blockType = world.getBlock(x, y, z, Block.Getter.Condition.TYPE).blockEntityType();
+        if (blockType == null || blockType.id() != data.getType().ordinal()) {
+            return;
+        }
+        var nbt = Objects.requireNonNullElse(data.getNbt(), NbtMap.EMPTY);
+        world.blockEntities().put(x, y, z, nbt);
+        if (observations.wants(BlockEntityChanged.class)) {
+            observations.emit(new BlockEntityChanged(new Vec(x, y, z), nbt));
         }
     }
 
     /**
-     * Block Entity Data：原版 {@code handleBlockEntityData} 只应用到 {@code level.getBlockEntity(pos, type)} 存在的方块实体，
-     * 即所在区块已加载、位置在维度高度范围之内，并且该位置的方块有同一类型的方块实体；其余情况忽略（原版客户端行为）
+     * Game Event：MCProtocolLib 按事件解码数值，游戏模式为 {@link GameMode}（不认识的编号为生存模式，与原版相同），
+     * 雨与雷暴强度限制到 [0, 1]
      */
-    private void blockEntity(BlockEntityDataPacket data) {
-        var position = data.blockPosition();
-        var world = world();
-        if (position.blockY() < world.minY() || position.blockY() >= world.minY() + world.height()
-                || !world.chunkLoaded(position.chunkX(), position.chunkZ())
-                || !data.type().equals(world.getBlock(position, Block.Getter.Condition.TYPE).blockEntityType())) {
-            return;
-        }
-        var nbt = Objects.requireNonNullElse(data.data(), CompoundBinaryTag.empty());
-        world().blockEntities().put(position.blockX(), position.blockY(), position.blockZ(), nbt);
-        if (observations.wants(BlockEntityChanged.class)) {
-            observations.emit(new BlockEntityChanged(new Vec(position.blockX(), position.blockY(), position.blockZ()), nbt));
-        }
-    }
-
-    private void gameState(ChangeGameStatePacket change) {
-        switch (change.reason()) {
-            case CHANGE_GAMEMODE -> localGameMode(GameMode.values()[(int) change.value()]);
-            case RAIN_LEVEL_CHANGE -> world().weather().rainLevel(change.value());
-            case THUNDER_LEVEL_CHANGE -> world().weather().thunderLevel(change.value());
+    private void gameState(ClientboundGameEventPacket change) {
+        switch (change.getNotification()) {
+            case CHANGE_GAME_MODE -> localGameMode((GameMode) change.getValue());
+            case RAIN_LEVEL_CHANGE -> world().weather().rainLevel(((RainStrengthValue) change.getValue()).getStrength());
+            case THUNDER_LEVEL_CHANGE -> world().weather().thunderLevel(((ThunderStrengthValue) change.getValue()).getStrength());
             case LEVEL_CHUNKS_LOAD_START -> state.loadTracker().chunksLoadStarted();
             default -> {
                 // 事件 1、2 的效果与名称相反，原版服务端紧接着会发送事件 7；其余事件没有模型状态
@@ -913,20 +956,21 @@ public final class ProtocolMachine {
      * （{@code setRemoved}，乘坐关系的处理与 Remove Entities 相同，产生 {@code EntityRemoved}），但不记下被移除的载具编号
      * （只有 {@code handleRemoveEntities} 记下），然后加入新的实体
      */
-    private void spawnEntity(SpawnEntityPacket spawn) {
+    private void spawnEntity(ClientboundAddEntityPacket spawn) {
         // 原版 handleAddEntity：这个编号的实体重新出现，之后的数据包不再应用到本地玩家
-        if (Objects.equals(removedPlayerVehicle, spawn.entityId())) {
+        if (Objects.equals(removedPlayerVehicle, spawn.getEntityId())) {
             removedPlayerVehicle = null;
         }
-        var old = world().entities().remove(spawn.entityId());
+        var old = world().entities().remove(spawn.getEntityId());
         if (old != null) {
             stopRiding(old);
             if (observations.wants(EntityRemoved.class)) {
                 observations.emit(new EntityRemoved(old.snapshot()));
             }
         }
-        var entity = new ClientEntity(spawn.entityId(), spawn.uuid(), spawn.type(), spawn.data(), spawn.position(),
-                spawn.headRot(), spawn.velocity());
+        var entity = new ClientEntity(spawn.getEntityId(), spawn.getUuid(), spawn.getType(), spawn.getData(),
+                new Pos(spawn.getX(), spawn.getY(), spawn.getZ(), spawn.getYaw(), spawn.getPitch()), spawn.getHeadYaw(),
+                Vectors.vec(spawn.getMovement()));
         world().entities().add(entity);
         if (observations.wants(EntitySpawned.class)) {
             observations.emit(new EntitySpawned(entity.snapshot()));
@@ -943,21 +987,22 @@ public final class ProtocolMachine {
         return world().entities().get(entityId);
     }
 
-    private @Nullable Map<Integer, Metadata.Entry<?>> entityMetadata(int entityId) {
+    private @Nullable Map<Integer, EntityMetadata<?, ?>> entityMetadata(int entityId) {
         var entity = world().entities().get(entityId);
         return entity == null ? null : entity.metadata();
     }
 
     /**
-     * Update Entity Position (and Rotation)：位移为 {@code delta / 4096}
+     * Update Entity Position (and Rotation)：MCProtocolLib 已经把位移除以 4096
      */
-    private void moveEntity(int entityId, short dx, short dy, short dz, @Nullable Float yaw, @Nullable Float pitch, boolean onGround) {
+    private void moveEntity(int entityId, double dx, double dy, double dz, @Nullable Float yaw, @Nullable Float pitch,
+                            boolean onGround) {
         var entity = otherEntity(entityId);
         if (entity == null) {
             return;
         }
         var from = entity.position();
-        var to = from.add(dx / 4096.0, dy / 4096.0, dz / 4096.0);
+        var to = from.add(dx, dy, dz);
         if (yaw != null && pitch != null) {
             to = to.withView(yaw, pitch);
         }
@@ -968,13 +1013,14 @@ public final class ProtocolMachine {
      * Teleport Entity（原版 {@code handleEntityPositionSync}）：设置绝对位置、朝向与是否着地，不使用数据包中的速度。
      * 由本地玩家控制的实体（原版 {@code isLocalInstanceAuthoritative}）不改变：原版只更新相对移动的基准位置，本库不记录它
      */
-    private void positionSync(EntityPositionSyncPacket sync) {
-        var entity = otherEntity(sync.entityId());
+    private void positionSync(ClientboundEntityPositionSyncPacket sync) {
+        var entity = otherEntity(sync.getId());
         if (entity == null || bot.movement().controlledLocally(entity)) {
             return;
         }
-        var position = sync.position();
-        entityMoved(entity, new Pos(position.x(), position.y(), position.z(), sync.yaw(), sync.pitch()), sync.onGround());
+        var position = sync.getPosition();
+        entityMoved(entity, new Pos(position.getX(), position.getY(), position.getZ(), sync.getYRot(), sync.getXRot()),
+                sync.isOnGround());
     }
 
     /**
@@ -982,23 +1028,22 @@ public final class ProtocolMachine {
      * （{@link #calculateAbsolute}：相对字段、俯仰角限制到 [-90, 90]、带 ROTATE_DELTA 时旋转当前速度）。
      * 实体不在模型中、并且是被移除的本地玩家乘坐过的实体时，应用到本地玩家；编号是本地玩家自己的时见 {@link #teleportLocalPlayer}
      */
-    private void teleportEntity(EntityTeleportPacket teleport) {
-        if (teleport.entityId() == state.player().entityId()) {
+    private void teleportEntity(ClientboundTeleportEntityPacket teleport) {
+        if (teleport.getId() == state.player().entityId()) {
             teleportLocalPlayer(teleport);
             return;
         }
-        var entity = otherEntity(teleport.entityId());
+        var entity = otherEntity(teleport.getId());
         if (entity == null) {
-            if (Objects.equals(removedPlayerVehicle, teleport.entityId())) {
+            if (Objects.equals(removedPlayerVehicle, teleport.getId())) {
                 teleportToRemovedVehicle(teleport);
             }
             return;
         }
-        var target = teleport.position();
-        var absolute = calculateAbsolute(entity.position(), entity.velocity(), target, teleport.delta(),
-                target.yaw(), target.pitch(), teleport.flags());
+        var absolute = calculateAbsolute(entity.position(), entity.velocity(), Vectors.vec(teleport.getPosition()),
+                Vectors.vec(teleport.getDeltaMovement()), teleport.getYRot(), teleport.getXRot(), relatives(teleport.getRelatives()));
         entity.velocity(absolute.velocity());
-        entityMoved(entity, absolute.position(), teleport.onGround());
+        entityMoved(entity, absolute.position(), teleport.isOnGround());
     }
 
     /**
@@ -1008,12 +1053,14 @@ public final class ProtocolMachine {
      * 否则立即设置位置与朝向，产生 {@code PlayerTeleported}。然后设置着地标记（原版 {@code setOnGround}）。不发送任何数据包。
      * 与服务端的其它传送相同，之前 rotate、lookAt 设置的朝向不再生效，清空上一次的模拟结果并触发 moveTo 重新寻路
      */
-    private void teleportLocalPlayer(EntityTeleportPacket teleport) {
+    private void teleportLocalPlayer(ClientboundTeleportEntityPacket teleport) {
         var player = state.player();
         var old = player.position();
-        var target = teleport.position();
-        var absolute = calculateAbsolute(old, player.velocity(), target, teleport.delta(), target.yaw(), target.pitch(), teleport.flags());
-        var relative = (teleport.flags() & (RelativeFlags.X | RelativeFlags.Y | RelativeFlags.Z)) != 0;
+        var relatives = relatives(teleport.getRelatives());
+        var absolute = calculateAbsolute(old, player.velocity(), Vectors.vec(teleport.getPosition()),
+                Vectors.vec(teleport.getDeltaMovement()), teleport.getYRot(), teleport.getXRot(), relatives);
+        var relative = relatives.contains(PositionElement.X) || relatives.contains(PositionElement.Y)
+                || relatives.contains(PositionElement.Z);
         var ticking = world().chunkLoaded(old.chunkX(), old.chunkZ());
         var interpolate = (ticking || relative) && old.distanceSquared(absolute.position()) <= 4096.0;
         player.velocity(absolute.velocity());
@@ -1022,7 +1069,7 @@ public final class ProtocolMachine {
         } else {
             player.position(absolute.position());
         }
-        Kinematics.setOnGround(player, world(), teleport.onGround());
+        Kinematics.setOnGround(player, world(), teleport.isOnGround());
         bot.movement().onServerRotation();
         bot.movement().onTeleport();
         if (!interpolate && observations.wants(PlayerTeleported.class)) {
@@ -1044,9 +1091,9 @@ public final class ProtocolMachine {
      * 模型中没有的乘客编号被跳过。本地玩家在列出的乘客中时清除记下的被移除载具编号；新登上船或竹筏时（之前没有直接或间接乘坐它），
      * 偏航角设为船的偏航角。这两项与乘坐是否成功无关
      */
-    private void passengers(SetPassengersPacket packet) {
+    private void passengers(ClientboundSetPassengersPacket packet) {
         var world = world();
-        var vehicleId = packet.vehicleEntityId();
+        var vehicleId = packet.getEntityId();
         var vehicle = world.entities().get(vehicleId);
         if (vehicle == null) {
             return;
@@ -1061,7 +1108,7 @@ public final class ProtocolMachine {
             }
         }
         vehicle.passengers().clear();
-        for (var passenger : packet.passengersId()) {
+        for (var passenger : packet.getPassengerIds()) {
             if (passenger == player.entityId()) {
                 startRiding(passenger, vehicle);
                 removedPlayerVehicle = null;
@@ -1174,16 +1221,17 @@ public final class ProtocolMachine {
      * 然后带 DELTA 标志的分量为旋转后的速度加数据包的值，其余取数据包的值。
      * 之后发送 Confirm Teleportation，再发送当前位置与朝向的 Set Player Position and Rotation（on ground 与 pushing against wall 为 false）
      */
-    private void teleport(PlayerPositionAndLookPacket teleport) {
+    private void teleport(ClientboundPlayerPositionPacket teleport) {
         var player = state.player();
         var old = player.position();
         var position = old;
         if (player.vehicle() == null) {
-            position = applyPosition(player, teleport.position(), teleport.delta(), teleport.yaw(), teleport.pitch(), teleport.flags());
+            position = applyPosition(player, Vectors.vec(teleport.getPosition()), Vectors.vec(teleport.getDeltaMovement()),
+                    teleport.getYRot(), teleport.getXRot(), relatives(teleport.getRelatives()));
             bot.movement().onServerRotation();
         }
-        outbox.send(new ClientTeleportConfirmPacket(teleport.teleportId()));
-        outbox.send(new ClientPlayerPositionAndRotationPacket(position, false, false));
+        outbox.send(new ServerboundAcceptTeleportationPacket(teleport.getId()));
+        outbox.send(positionAndRotation(position));
         bot.movement().onTeleport();
         if (observations.wants(PlayerTeleported.class)) {
             observations.emit(new PlayerTeleported(old, position));
@@ -1195,13 +1243,13 @@ public final class ProtocolMachine {
      * Synchronize Vehicle Position 按 Synchronize Player Position 的计算应用到本地玩家，然后发送当前位置与朝向的
      * Set Player Position and Rotation（on ground 与 pushing against wall 为 false），不发送 Confirm Teleportation
      */
-    private void teleportToRemovedVehicle(EntityTeleportPacket teleport) {
+    private void teleportToRemovedVehicle(ClientboundTeleportEntityPacket teleport) {
         var player = state.player();
         var old = player.position();
-        var target = teleport.position();
-        var position = applyPosition(player, target, teleport.delta(), target.yaw(), target.pitch(), teleport.flags());
+        var position = applyPosition(player, Vectors.vec(teleport.getPosition()), Vectors.vec(teleport.getDeltaMovement()),
+                teleport.getYRot(), teleport.getXRot(), relatives(teleport.getRelatives()));
         bot.movement().onServerRotation();
-        outbox.send(new ClientPlayerPositionAndRotationPacket(position, false, false));
+        outbox.send(positionAndRotation(position));
         bot.movement().onTeleport();
         if (observations.wants(PlayerTeleported.class)) {
             observations.emit(new PlayerTeleported(old, position));
@@ -1209,41 +1257,58 @@ public final class ProtocolMachine {
     }
 
     /**
+     * 当前位置与朝向的 Set Player Position and Rotation，on ground 与 pushing against wall 为 false
+     */
+    private static ServerboundMovePlayerPosRotPacket positionAndRotation(Pos position) {
+        return new ServerboundMovePlayerPosRotPacket(false, false, position.x(), position.y(), position.z(),
+                position.yaw(), position.pitch());
+    }
+
+    private static Set<PositionElement> relatives(List<PositionElement> relatives) {
+        var result = EnumSet.noneOf(PositionElement.class);
+        result.addAll(relatives);
+        return result;
+    }
+
+    /**
      * 原版 {@code setValuesFromPositionPacket}（不插值）：按 {@link #calculateAbsolute} 设置本地玩家的位置、朝向与速度
      *
      * @return 新的位置与朝向
      */
-    private static Pos applyPosition(LocalPlayer player, Point change, Point delta, float changeYaw, float changePitch, int flags) {
-        var absolute = calculateAbsolute(player.position(), player.velocity(), change, delta, changeYaw, changePitch, flags);
+    private static Pos applyPosition(LocalPlayer player, Point change, Point delta, float changeYaw, float changePitch,
+                                     Set<PositionElement> relatives) {
+        var absolute = calculateAbsolute(player.position(), player.velocity(), change, delta, changeYaw, changePitch, relatives);
         player.velocity(absolute.velocity());
         player.position(absolute.position());
         return absolute.position();
     }
 
     /**
-     * 原版 {@code PositionMoveRotation.calculateAbsolute}：带 X、Y、Z、YAW、PITCH 标志的字段为当前值加数据包的值，其余取数据包的值，
-     * 俯仰角再限制到 [-90, 90]；带 ROTATE_DELTA 时，先把当前速度绕 x 轴旋转「原俯仰角 − 新俯仰角」、再绕 y 轴旋转「原偏航角 − 新偏航角」
-     * （原版 {@code Vec3.xRot}、{@code yRot}，见 {@link SineTable}），然后带 DELTA 标志的分量为旋转后的速度加数据包的值，其余取数据包的值
+     * 原版 {@code PositionMoveRotation.calculateAbsolute}：带 X、Y、Z、Y_ROT（偏航角）、X_ROT（俯仰角）标志的字段为当前值加数据包的值，
+     * 其余取数据包的值，俯仰角再限制到 [-90, 90]；带 ROTATE_DELTA 时，先把当前速度绕 x 轴旋转「原俯仰角 − 新俯仰角」、
+     * 再绕 y 轴旋转「原偏航角 − 新偏航角」（原版 {@code Vec3.xRot}、{@code yRot}，见 {@link SineTable}），
+     * 然后带 DELTA 标志的分量为旋转后的速度加数据包的值，其余取数据包的值
      *
      * @param old      当前的位置与朝向
      * @param velocity 当前的速度
      */
-    private static Absolute calculateAbsolute(Pos old, Vec velocity, Point change, Point delta, float changeYaw, float changePitch, int flags) {
-        var yaw = (flags & RelativeFlags.YAW) != 0 ? old.yaw() + changeYaw : changeYaw;
-        var pitch = Math.clamp((flags & RelativeFlags.PITCH) != 0 ? old.pitch() + changePitch : changePitch, -90f, 90f);
-        if ((flags & RelativeFlags.ROTATE_DELTA) != 0) {
+    private static Absolute calculateAbsolute(Pos old, Vec velocity, Point change, Point delta, float changeYaw, float changePitch,
+                                              Set<PositionElement> relatives) {
+        var yaw = relatives.contains(PositionElement.Y_ROT) ? old.yaw() + changeYaw : changeYaw;
+        var pitch = Math.clamp(relatives.contains(PositionElement.X_ROT) ? old.pitch() + changePitch : changePitch, -90f, 90f);
+        if (relatives.contains(PositionElement.ROTATE_DELTA)) {
             velocity = SineTable.xRot(velocity, (float) Math.toRadians(old.pitch() - pitch));
             velocity = SineTable.yRot(velocity, (float) Math.toRadians(old.yaw() - yaw));
         }
         var position = new Pos(
-                (flags & RelativeFlags.X) != 0 ? old.x() + change.x() : change.x(),
-                (flags & RelativeFlags.Y) != 0 ? old.y() + change.y() : change.y(),
-                (flags & RelativeFlags.Z) != 0 ? old.z() + change.z() : change.z(),
+                relatives.contains(PositionElement.X) ? old.x() + change.x() : change.x(),
+                relatives.contains(PositionElement.Y) ? old.y() + change.y() : change.y(),
+                relatives.contains(PositionElement.Z) ? old.z() + change.z() : change.z(),
                 yaw, pitch);
         return new Absolute(position, new Vec(
-                (flags & RelativeFlags.DELTA_X) != 0 ? velocity.x() + delta.x() : delta.x(),
-                (flags & RelativeFlags.DELTA_Y) != 0 ? velocity.y() + delta.y() : delta.y(),
-                (flags & RelativeFlags.DELTA_Z) != 0 ? velocity.z() + delta.z() : delta.z()));
+                relatives.contains(PositionElement.DELTA_X) ? velocity.x() + delta.x() : delta.x(),
+                relatives.contains(PositionElement.DELTA_Y) ? velocity.y() + delta.y() : delta.y(),
+                relatives.contains(PositionElement.DELTA_Z) ? velocity.z() + delta.z() : delta.z()));
     }
 
     /**
@@ -1252,14 +1317,14 @@ public final class ProtocolMachine {
     private record Absolute(Pos position, Vec velocity) {
     }
 
-    private void health(UpdateHealthPacket health) {
+    private void health(ClientboundSetHealthPacket health) {
         var player = state.player();
         var old = player.health();
-        player.health(health.health(), health.food(), health.foodSaturation());
+        player.health(health.getHealth(), health.getFood(), health.getSaturation());
         if (observations.wants(HealthChanged.class)) {
-            observations.emit(new HealthChanged(old, health.health(), health.food(), health.foodSaturation()));
+            observations.emit(new HealthChanged(old, health.getHealth(), health.getFood(), health.getSaturation()));
         }
-        if (health.health() <= 0) {
+        if (health.getHealth() <= 0) {
             playerDied();
         }
     }
@@ -1291,43 +1356,43 @@ public final class ProtocolMachine {
      * 是鹦鹉螺（原版 {@code AbstractNautilus}）时打开鹦鹉螺的窗口，只有鞍与身体护甲 2 格，不看列数（原版 {@code NautilusInventoryMenu}）。
      * 实体不在模型中或者是其它类型时什么都不做，打开着的窗口保持打开（原版客户端行为）
      */
-    private void openMount(OpenHorseWindowPacket open) {
-        var entity = world().entities().get(open.entityId());
+    private void openMount(ClientboundMountScreenOpenPacket open) {
+        var entity = world().entities().get(open.getEntityId());
         if (entity == null) {
             return;
         }
         int columns;
         if (ClientEntity.HORSES.contains(entity.type())) {
-            columns = open.slotCount();
+            columns = open.getInventoryColumns();
         } else if (ClientEntity.NAUTILUSES.contains(entity.type())) {
             columns = 0;
         } else {
             return;
         }
-        state.inventory().openHorse(open.windowId(), columns, slotSink());
+        state.inventory().openHorse(open.getContainerId(), columns, slotSink());
         if (observations.wants(WindowOpened.class)) {
-            observations.emit(new WindowOpened(open.windowId(), null, Component.empty()));
+            observations.emit(new WindowOpened(open.getContainerId(), null, Component.empty()));
         }
     }
 
     private InventoryModel.SlotChangeSink slotSink() {
         return new InventoryModel.SlotChangeSink() {
             @Override
-            public void slotChanged(int windowId, int slot, ItemStack old, ItemStack now) {
+            public void slotChanged(int windowId, int slot, @Nullable ItemStack old, @Nullable ItemStack now) {
                 if (observations.wants(SlotChanged.class)) {
                     observations.emit(new SlotChanged(windowId, slot, old, now));
                 }
             }
 
             @Override
-            public void cursorChanged(ItemStack old, ItemStack now) {
+            public void cursorChanged(@Nullable ItemStack old, @Nullable ItemStack now) {
                 if (observations.wants(CursorChanged.class)) {
                     observations.emit(new CursorChanged(old, now));
                 }
             }
 
             @Override
-            public void equipmentChanged(EquipmentSlot slot, ItemStack old, ItemStack now) {
+            public void equipmentChanged(EquipmentSlot slot, @Nullable ItemStack old, @Nullable ItemStack now) {
                 if (observations.wants(EntityEquipmentChanged.class)) {
                     observations.emit(new EntityEquipmentChanged(state.player().entityId(), slot, old, now));
                 }
@@ -1343,94 +1408,75 @@ public final class ProtocolMachine {
      * <ul>
      *     <li>发送者不在玩家列表中时不显示这条消息，日志中记下原版代替它显示的 {@code chat.validation_error}（原版 {@code handleChatMessageError}）；</li>
      *     <li>完全过滤（FULLY_FILTERED）的消息不显示，不写入日志；</li>
-     *     <li>部分过滤（PARTIALLY_FILTERED）的消息显示为过滤之后的消息正文（{@link #partiallyFiltered}），不使用未签名内容；</li>
      *     <li>其余显示为未签名内容，没有时为消息正文。</li>
      * </ul>
      * 带签名时交给已读跟踪：显示的消息计入已读，没有显示的只计入未确认的消息数（原版 {@code markMessageAsProcessed}）
+     *
+     * @throws UnsupportedOperationException 部分过滤（PARTIALLY_FILTERED）的消息
      */
-    private void playerChat(PlayerChatMessagePacket chat) {
-        var chatType = chatType(chat.msgTypeId());
-        state.chat().checkGlobalIndex(chat.globalIndex());
-        var body = chat.messageBody();
-        var lastSeen = new ArrayList<MessageSignature>();
-        var signatures = state.chat().signatures();
-        for (var packed : body.lastSeen().entries()) {
-            lastSeen.add(packed.fullSignature() != null ? packed.fullSignature() : signatures.get(packed.id()));
+    private void playerChat(ClientboundPlayerChatPacket chat) {
+        // TODO(T2): MCProtocolLib 的 ClientboundPlayerChatPacket 在 PARTIALLY_FILTERED 时不读取过滤标记的 BitSet，
+        //  之后的聊天类型、发送者名称与目标名称都从错误的位置读出。本库不支持部分过滤的消息，见 bot/README.md 的待办
+        if (chat.getFilterMask() == ChatFilterType.PARTIALLY_FILTERED) {
+            throw new UnsupportedOperationException("partially filtered player chat is not supported");
         }
-        signatures.push(lastSeen, chat.signature());
+        var chatType = chat.getChatType();
+        var chatTypeName = chatTypeName(chatType);
+        state.chat().checkGlobalIndex(chat.getGlobalIndex());
+        var lastSeen = new ArrayList<Signature>();
+        for (var packed : chat.getLastSeenMessages()) {
+            lastSeen.add(signature(packed));
+        }
+        var signature = chat.getMessageSignature() == null ? null : new Signature(chat.getMessageSignature());
+        state.chat().signatures().push(lastSeen, signature);
         boolean shown;
-        if (!state.hud().hasPlayer(chat.sender())) {
+        if (!state.hud().hasPlayer(chat.getSender())) {
             shown = false;
-            chatLine(new ChatLine(ChatKind.PLAYER, chat.sender(), chatType, chat.msgTypeName(), chat.msgTypeTarget(),
-                    CHAT_VALIDATION_ERROR, PLAIN.serialize(CHAT_VALIDATION_ERROR)), null);
+            chatLine(new ChatLine(ChatKind.PLAYER, chat.getSender(), chatTypeName, inlineChatType(chatType), chat.getName(),
+                    chat.getTargetName(), CHAT_VALIDATION_ERROR, PLAIN.serialize(CHAT_VALIDATION_ERROR)), null);
+        } else if (chat.getFilterMask() == ChatFilterType.FULLY_FILTERED) {
+            shown = false;
         } else {
-            var message = switch (chat.filterMask().type()) {
-                case PASS_THROUGH -> chat.unsignedContent() != null ? chat.unsignedContent() : Component.text(body.content());
-                case FULLY_FILTERED -> null;
-                case PARTIALLY_FILTERED -> partiallyFiltered(chat.filterMask().mask(), body.content());
-            };
-            shown = message != null;
-            if (shown) {
-                chatLine(new ChatLine(ChatKind.PLAYER, chat.sender(), chatType, chat.msgTypeName(), chat.msgTypeTarget(),
-                        message, PLAIN.serialize(message)), chat.signature());
-            }
+            shown = true;
+            var message = chat.getUnsignedContent() != null ? chat.getUnsignedContent() : Component.text(chat.getContent());
+            chatLine(new ChatLine(ChatKind.PLAYER, chat.getSender(), chatTypeName, inlineChatType(chatType), chat.getName(),
+                    chat.getTargetName(), message, PLAIN.serialize(message)), signature);
         }
-        var signature = chat.signature();
         if (signature != null) {
             var tracker = state.chat().lastSeen();
             tracker.add(signature, shown);
             if (tracker.offset() > LastSeenTracker.ACKNOWLEDGE_THRESHOLD) {
-                outbox.send(new ClientChatAckPacket(tracker.takeOffset()));
+                outbox.send(new ServerboundChatAckPacket(tracker.takeOffset()));
             }
         }
     }
 
     /**
-     * 原版 {@code FilterMask.applyWithFormatting} 中部分过滤的分支：从第 0 个字符开始，按过滤标记交替取出被过滤与没有被过滤的连续字符，
-     * 被过滤的字符换成同样数量的 {@code #}，以深灰色显示并带有 {@code chat.filtered} 的悬停文本，依次作为空文本的子组件。
-     * 过滤标记超出消息长度时，原版在之后取子字符串时抛出异常，这里相同
+     * 按编号引用的签名从签名缓存中取出（MCProtocolLib 已经把编号减去 1），否则为数据包中的完整签名
      */
-    private static Component partiallyFiltered(BitSet mask, String text) {
-        var result = Component.text();
-        int previous = 0;
-        var filtered = mask.get(0);
-        while (true) {
-            int next = filtered ? mask.nextClearBit(previous) : mask.nextSetBit(previous);
-            next = next < 0 ? text.length() : next;
-            if (next == previous) {
-                return result.build();
-            }
-            if (filtered) {
-                result.append(Component.text("#".repeat(next - previous), FILTERED_STYLE));
-            } else {
-                result.append(Component.text(text.substring(previous, next)));
-            }
-            filtered = !filtered;
-            previous = next;
-        }
+    private Signature signature(MessageSignature packed) {
+        var bytes = packed.getMessageSignature();
+        return bytes != null ? new Signature(bytes) : state.chat().signatures().get(packed.getId());
     }
 
     /**
-     * Player Chat Message 与 Disguised Chat Message 的聊天类型。wiki 中这个字段为「ID or Chat Type」：
-     * 0 表示数据包随后给出聊天类型的定义，其余为 {@code minecraft:chat_type} 注册表中的编号加一
+     * Player Chat Message 与 Disguised Chat Message 的聊天类型为注册表中的编号时（MCProtocolLib 已经减去 1），
+     * 换成 {@code minecraft:chat_type} 注册表中的名称；随数据包给出定义时为 null
      *
-     * @throws IllegalStateException 编号不在注册表中（原版解码时出错，客户端断开连接），或者为 0（Minestom 的限制）
+     * @throws IllegalStateException 编号不在注册表中（原版解码时出错，客户端断开连接）
      */
-    private RegistryKey<ChatType> chatType(int id) {
-        // FIXME(Minestom M18): PlayerChatMessagePacket 与 DisguisedChatPacket 把聊天类型当作普通的 VarInt，
-        //  不能表示 0 之后随数据包给出的定义（TCP 连接中这个定义被当作之后的字段读取），本库无法得到这种聊天类型，
-        //  见 MINESTOM-BUG-REPORT.md
-        if (id == 0) {
-            throw new IllegalStateException("chat types defined inline in the packet are not supported");
-        }
-        var key = state.registries().chatType().getKey(id - 1);
-        if (key == null) {
-            throw new IllegalStateException("unknown chat type id " + (id - 1));
-        }
-        return key;
+    private @Nullable Key chatTypeName(Holder<ChatType> chatType) {
+        return chatType.isId() ? state.registries().requireEntry(SyncedRegistries.CHAT_TYPE, chatType.id()) : null;
     }
 
-    private void chatLine(ChatLine line, @Nullable MessageSignature signature) {
+    /**
+     * 随数据包给出的聊天类型定义；聊天类型为注册表中的编号时为 null
+     */
+    private static @Nullable ChatType inlineChatType(Holder<ChatType> chatType) {
+        return chatType.isCustom() ? chatType.custom() : null;
+    }
+
+    private void chatLine(ChatLine line, @Nullable Signature signature) {
         state.chat().add(line, signature);
         if (observations.wants(ChatReceived.class)) {
             observations.emit(new ChatReceived(line));

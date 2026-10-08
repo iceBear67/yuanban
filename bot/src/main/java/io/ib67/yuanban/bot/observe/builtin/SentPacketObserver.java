@@ -4,20 +4,22 @@ import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.PacketSent;
 import io.ib67.yuanban.bot.observe.Subscription;
-import net.minestom.server.network.packet.client.ClientPacket;
+import io.ib67.yuanban.bot.protocol.PacketDirection;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.List;
 import java.util.function.Predicate;
 
 /**
- * 记录发出的、满足条件的某类数据包。
+ * 记录发出的、满足条件的某类数据包（客户端发往服务端的数据包）。
  */
-public final class SentPacketObserver<P extends ClientPacket> extends BuiltinObserver {
+public final class SentPacketObserver<P extends MinecraftPacket> extends BuiltinObserver {
     private final Class<P> type;
     private final Predicate<P> filter;
     private Records<P> packets = new Records<>(Integer.MAX_VALUE);
 
     SentPacketObserver(Class<P> type, Predicate<P> filter) {
+        PacketDirection.requireServerbound(type);
         this.type = type;
         this.filter = filter;
     }

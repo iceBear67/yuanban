@@ -5,16 +5,24 @@ import io.ib67.yuanban.bot.InventoryActions;
 import io.ib67.yuanban.bot.observe.CursorChanged;
 import io.ib67.yuanban.bot.observe.WindowClosed;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.network.packet.client.play.ClientClickWindowButtonPacket;
-import net.minestom.server.network.packet.client.play.ClientClickWindowPacket;
-import net.minestom.server.network.packet.client.play.ClientCloseWindowPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.CreativeGrabAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.DropItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.FillStackAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.MoveToHotbarAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ShiftClickItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.SpreadItemAction;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerButtonClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
 
 import java.util.Map;
 
 /**
  * 物品栏操作：全部为一次性请求，作用于执行时打开的窗口（没有打开窗口时为窗口 0）。
- * 点击包的变化槽位为空，光标声明为 {@link ItemStack.Hash#AIR}：服务端把点击改变的每个槽位都发回（wiki Click Container）。
+ * 点击包的变化槽位为空，光标声明为空：服务端把点击改变的每个槽位都发回（wiki Click Container）。
  */
 public final class InventoryActionsImpl implements InventoryActions {
     private final BotInstance bot;
@@ -24,27 +32,28 @@ public final class InventoryActionsImpl implements InventoryActions {
     }
 
     @Override
-    public Action click(int slot, int button, ClientClickWindowPacket.ClickType mode) {
-        return bot.oneShot("click " + slot + " " + button + " " + mode, _ -> {
+    public Action click(int slot, ContainerActionType type, ContainerAction action) {
+        check(slot, type, action);
+        return bot.oneShot("click " + slot + " " + type + " " + action, _ -> {
             var inventory = bot.state().inventory();
-            bot.state().outbox().send(new ClientClickWindowPacket(inventory.currentWindowId(), inventory.stateId(),
-                    (short) slot, (byte) button, mode, Map.of(), ItemStack.Hash.AIR));
+            bot.state().outbox().send(new ServerboundContainerClickPacket(inventory.currentWindowId(), inventory.stateId(),
+                    slot, type, action, null, Map.of()));
         });
     }
 
     @Override
     public Action leftClick(int slot) {
-        return click(slot, 0, ClientClickWindowPacket.ClickType.PICKUP);
+        return click(slot, ContainerActionType.CLICK_ITEM, ClickItemAction.LEFT_CLICK);
     }
 
     @Override
     public Action rightClick(int slot) {
-        return click(slot, 1, ClientClickWindowPacket.ClickType.PICKUP);
+        return click(slot, ContainerActionType.CLICK_ITEM, ClickItemAction.RIGHT_CLICK);
     }
 
     @Override
     public Action shiftClick(int slot) {
-        return click(slot, 0, ClientClickWindowPacket.ClickType.QUICK_MOVE);
+        return click(slot, ContainerActionType.SHIFT_CLICK_ITEM, ShiftClickItemAction.LEFT_CLICK);
     }
 
     @Override
@@ -52,18 +61,19 @@ public final class InventoryActionsImpl implements InventoryActions {
         if (hotbarSlot < 0 || hotbarSlot > 8) {
             throw new IllegalArgumentException("hotbar slot must be within [0, 8], got " + hotbarSlot);
         }
-        return click(slot, hotbarSlot, ClientClickWindowPacket.ClickType.SWAP);
+        return click(slot, ContainerActionType.MOVE_TO_HOTBAR_SLOT, MoveToHotbarAction.from(hotbarSlot));
     }
 
     @Override
     public Action dropSlot(int slot, boolean wholeStack) {
-        return click(slot, wholeStack ? 1 : 0, ClientClickWindowPacket.ClickType.THROW);
+        return click(slot, ContainerActionType.DROP_ITEM,
+                wholeStack ? DropItemAction.DROP_SELECTED_STACK : DropItemAction.DROP_FROM_SELECTED);
     }
 
     @Override
     public Action clickButton(int buttonId) {
         return bot.oneShot("clickButton " + buttonId, _ -> bot.state().outbox().send(
-                new ClientClickWindowButtonPacket(bot.state().inventory().currentWindowId(), buttonId)));
+                new ServerboundContainerButtonClickPacket(bot.state().inventory().currentWindowId(), buttonId)));
     }
 
     /**
@@ -74,7 +84,7 @@ public final class InventoryActionsImpl implements InventoryActions {
         return bot.oneShot("closeWindow", _ -> {
             var state = bot.state();
             var windowId = state.inventory().currentWindowId();
-            state.outbox().send(new ClientCloseWindowPacket(windowId));
+            state.outbox().send(new ServerboundContainerClosePacket(windowId));
             var closed = state.inventory().closeOpen((old, now) -> {
                 if (state.observations().wants(CursorChanged.class)) {
                     state.observations().emit(new CursorChanged(old, now));
@@ -84,5 +94,27 @@ public final class InventoryActionsImpl implements InventoryActions {
                 state.observations().emit(new WindowClosed(closed));
             }
         });
+    }
+
+    /**
+     * 在提交请求的线程上检查按键与模式是否对应
+     */
+    private static void check(int slot, ContainerActionType type, ContainerAction action) {
+        var expected = switch (type) {
+            case CLICK_ITEM -> ClickItemAction.class;
+            case SHIFT_CLICK_ITEM -> ShiftClickItemAction.class;
+            case MOVE_TO_HOTBAR_SLOT -> MoveToHotbarAction.class;
+            case CREATIVE_GRAB_MAX_STACK -> CreativeGrabAction.class;
+            case DROP_ITEM -> DropItemAction.class;
+            case SPREAD_ITEM -> SpreadItemAction.class;
+            case FILL_STACK -> FillStackAction.class;
+        };
+        if (!expected.isInstance(action)) {
+            throw new IllegalArgumentException(action + " is not a button of mode " + type);
+        }
+        if ((action == DropItemAction.LEFT_CLICK_OUTSIDE_NOT_HOLDING || action == DropItemAction.RIGHT_CLICK_OUTSIDE_NOT_HOLDING)
+                && slot != ServerboundContainerClickPacket.CLICK_OUTSIDE_NOT_HOLDING_SLOT) {
+            throw new IllegalArgumentException(action + " requires slot " + ServerboundContainerClickPacket.CLICK_OUTSIDE_NOT_HOLDING_SLOT);
+        }
     }
 }

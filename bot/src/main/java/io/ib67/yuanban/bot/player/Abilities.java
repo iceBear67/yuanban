@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.player;
 
 import io.ib67.yuanban.bot.view.AbilitiesSnapshot;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
 
 /**
  * 本地玩家的能力：初始值与原版 {@code Abilities} 相同，游戏模式改变时按 {@link #gameMode} 设置，
@@ -17,14 +17,16 @@ public final class Abilities {
     private float flyingSpeed = 0.05f;
     private float walkingSpeed = 0.1f;
 
-    public void apply(PlayerAbilitiesPacket packet) {
-        var flags = packet.flags();
-        invulnerable = (flags & 0x01) != 0;
-        flying = (flags & 0x02) != 0;
-        allowFlying = (flags & 0x04) != 0;
-        instantBreak = (flags & 0x08) != 0;
-        flyingSpeed = packet.flyingSpeed();
-        walkingSpeed = packet.walkingSpeed();
+    /**
+     * Player Abilities 的四个标记依次为无敌（0x01）、正在飞行（0x02）、允许飞行（0x04）、瞬间破坏（0x08）
+     */
+    public void apply(ClientboundPlayerAbilitiesPacket packet) {
+        invulnerable = packet.isInvincible();
+        flying = packet.isFlying();
+        allowFlying = packet.isCanFly();
+        instantBreak = packet.isCreative();
+        flyingSpeed = packet.getFlySpeed();
+        walkingSpeed = packet.getWalkSpeed();
     }
 
     /**

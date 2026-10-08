@@ -1,7 +1,6 @@
 package io.ib67.yuanban.bot.chat;
 
 import io.ib67.yuanban.bot.view.ChatLine;
-import net.minestom.server.crypto.MessageSignature;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayDeque;
@@ -54,7 +53,7 @@ public final class ChatModel {
         }
     }
 
-    public void add(ChatLine line, @Nullable MessageSignature signature) {
+    public void add(ChatLine line, @Nullable Signature signature) {
         log.addLast(new Entry(line, signature));
         while (log.size() > capacity) {
             log.removeFirst();
@@ -66,8 +65,8 @@ public final class ChatModel {
      *
      * @return 是否删除了消息
      */
-    public boolean delete(MessageSignature signature) {
-        return log.removeIf(entry -> entry.signature() != null && SignatureCache.sameSignature(entry.signature(), signature));
+    public boolean delete(Signature signature) {
+        return log.removeIf(entry -> signature.equals(entry.signature()));
     }
 
     /**
@@ -81,6 +80,6 @@ public final class ChatModel {
         return log.stream().map(Entry::line).toList();
     }
 
-    private record Entry(ChatLine line, @Nullable MessageSignature signature) {
+    private record Entry(ChatLine line, @Nullable Signature signature) {
     }
 }

@@ -2,279 +2,94 @@ package io.ib67.yuanban.bot.decode;
 
 import io.ib67.yuanban.bot.ChunkBuilder;
 import io.ib67.yuanban.bot.TestServer;
-import io.ib67.yuanban.bot.registry.VanillaReference;
-import io.ib67.yuanban.bot.transport.InboundSink;
+import io.ib67.yuanban.bot.registry.TagTable;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import net.kyori.adventure.key.Key;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.minestom.server.coordinate.CoordConversion;
-import net.minestom.server.entity.GameMode;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.instance.block.BlockHandler;
-import net.minestom.server.instance.palette.Palette;
-import net.minestom.server.network.ConnectionState;
-import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.PacketVanilla;
-import net.minestom.server.network.packet.PacketWriting;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.common.KeepAlivePacket;
-import net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket;
-import net.minestom.server.network.packet.server.login.LoginPluginRequestPacket;
-import net.minestom.server.network.packet.server.login.LoginSuccessPacket;
-import net.minestom.server.network.packet.server.login.SetCompressionPacket;
-import net.minestom.server.network.packet.server.play.ChunkDataPacket;
-import net.minestom.server.network.packet.server.play.data.ChunkData;
-import net.minestom.server.network.packet.server.play.data.LightData;
-import net.minestom.server.network.player.GameProfile;
-import net.minestom.server.registry.Registries;
-import net.minestom.server.tag.Tag;
-import org.jetbrains.annotations.Nullable;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkSection;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.level.LightUpdateData;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityInfo;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityType;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundHelloPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.EOFException;
-import java.nio.channels.Channels;
-import java.util.ArrayList;
+import java.security.KeyPairGenerator;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Consumer;
-import java.util.zip.DataFormatException;
-import java.util.zip.Deflater;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DecodeTest {
+    private static final int BIOMES = TestServer.biomeCount();
+
     /**
-     * 用 TcpInbound 读出全部字节，返回读出的数据包；读到末尾以外的异常照常抛出
+     * 经过 MCProtocolLib 的编码与解码，与 TCP 连接收到的数据包相同
      */
-    private static List<ServerPacket> read(byte[] bytes) throws Exception {
-        var received = new ArrayList<ServerPacket>();
-        var inbound = new TcpInbound(Channels.newChannel(new ByteArrayInputStream(bytes)), new InboundSink() {
-            @Override
-            public void accept(ServerPacket packet) {
-                received.add(packet);
-            }
-
-            @Override
-            public Registries registries() {
-                return VanillaReference.get();
-            }
-
-            @Override
-            public void closed(@Nullable Throwable error) {
-            }
-        });
+    private static ClientboundLevelChunkWithLightPacket roundTrip(ClientboundLevelChunkWithLightPacket packet) {
+        var buffer = Unpooled.buffer();
         try {
-            inbound.run();
-        } catch (EOFException e) {
-            return received;
+            packet.serialize(buffer);
+            var read = new ClientboundLevelChunkWithLightPacket(buffer);
+            assertFalse(buffer.isReadable());
+            return read;
+        } finally {
+            buffer.release();
         }
-        throw new AssertionError("the channel did not end");
     }
 
-    private static byte[] bytes(Consumer<NetworkBuffer> writer) {
-        var buffer = NetworkBuffer.resizableBuffer(256, VanillaReference.get());
-        writer.accept(buffer);
-        var bytes = new byte[(int) buffer.writeIndex()];
-        buffer.copyTo(0, bytes, 0, bytes.length);
-        return bytes;
-    }
-
-    /**
-     * 启用压缩之后的一帧：声明的解压长度，然后是 zlib 压缩的数据包（编号与内容）
-     */
-    private static byte[] compressedFrame(byte[] payload, int declaredLength) {
-        var deflater = new Deflater();
-        deflater.setInput(payload);
-        deflater.finish();
-        var compressed = new byte[payload.length + 1024];
-        var compressedLength = deflater.deflate(compressed);
-        deflater.end();
-        var body = bytes(buffer -> {
-            buffer.write(NetworkBuffer.VAR_INT, declaredLength);
-            buffer.write(NetworkBuffer.RAW_BYTES, Arrays.copyOf(compressed, compressedLength));
-        });
-        return bytes(buffer -> {
-            buffer.write(NetworkBuffer.VAR_INT, body.length);
-            buffer.write(NetworkBuffer.RAW_BYTES, body);
-        });
-    }
-
-    private static byte[] loginPluginRequestPayload(LoginPluginRequestPacket packet) {
-        var id = PacketVanilla.SERVER_PACKET_PARSER.login().packetInfo(LoginPluginRequestPacket.class).id();
-        return bytes(buffer -> {
-            buffer.write(NetworkBuffer.VAR_INT, id);
-            buffer.write(LoginPluginRequestPacket.SERIALIZER, packet);
-        });
+    private static ClientboundLevelChunkWithLightPacket chunkPacket(byte[] data) {
+        var light = new LightUpdateData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of());
+        return new ClientboundLevelChunkWithLightPacket(0, 0, data, Map.of(), new BlockEntityInfo[0], light);
     }
 
     @Test
-    void compressedPacketRightAfterSetCompressionInTheSameRead() throws Exception {
-        var threshold = 16;
-        var profile = TestServer.profile(UUID.randomUUID(), "compressed_name",
-                List.of(new GameProfile.Property("textures", "x".repeat(200), null)));
-        var bytes = bytes(buffer -> {
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new SetCompressionPacket(threshold), 0);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new LoginSuccessPacket(profile, new UUID(0, 0)), threshold);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.CONFIGURATION, new KeepAlivePacket(7), threshold);
-        });
-        var received = new ArrayList<ServerPacket>();
-        var inbound = new TcpInbound(Channels.newChannel(new ByteArrayInputStream(bytes)), new InboundSink() {
-            @Override
-            public void accept(ServerPacket packet) {
-                received.add(packet);
-            }
-
-            @Override
-            public Registries registries() {
-                return VanillaReference.get();
-            }
-
-            @Override
-            public void closed(@Nullable Throwable error) {
-            }
-        });
-        assertThrows(EOFException.class, inbound::run);
-        assertEquals(List.of(new SetCompressionPacket(threshold), new LoginSuccessPacket(profile, new UUID(0, 0)), new KeepAlivePacket(7)),
-                received);
-        assertEquals(threshold, inbound.compressionThreshold());
-    }
-
-    @Test
-    void loginPacketsLargerThanTheServerLimitAreRead() throws Exception {
-        // Minestom 的 PacketReading 在 LOGIN 阶段限制为 8192 字节，解压后限制为 2097151 字节；原版客户端只限制帧长度为 21 位
-        var large = new byte[20_000];
-        large[19_999] = 42;
-        var huge = new byte[3_000_000];
-        huge[2_999_999] = 7;
-        var hugePayload = loginPluginRequestPayload(new LoginPluginRequestPacket(2, "test:huge", huge));
-        var bytes = bytes(buffer -> {
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new LoginPluginRequestPacket(1, "test:large", large), 0);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new SetCompressionPacket(256), 0);
-            buffer.write(NetworkBuffer.RAW_BYTES, compressedFrame(hugePayload, hugePayload.length));
-        });
-        var received = read(bytes);
-        assertEquals(3, received.size());
-        var first = assertInstanceOf(LoginPluginRequestPacket.class, received.get(0));
-        assertArrayEquals(large, first.data());
-        var third = assertInstanceOf(LoginPluginRequestPacket.class, received.get(2));
-        assertArrayEquals(huge, third.data());
-    }
-
-    @Test
-    void framesFollowTheVanillaLimits() {
-        // 长度 VarInt 超过 3 个字节
-        assertThrows(DataFormatException.class, () -> read(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 0x01, 0x00}));
-        // 长度为 0
-        assertThrows(DataFormatException.class, () -> read(new byte[]{0x00}));
-        // 读完数据包之后还有剩余字节
-        var id = PacketVanilla.SERVER_PACKET_PARSER.login().packetInfo(SetCompressionPacket.class).id();
-        var payload = bytes(buffer -> {
-            buffer.write(NetworkBuffer.VAR_INT, id);
-            buffer.write(NetworkBuffer.VAR_INT, 64);
-            buffer.write(NetworkBuffer.BYTE, (byte) 0);
-        });
-        var trailing = bytes(buffer -> {
-            buffer.write(NetworkBuffer.VAR_INT, payload.length);
-            buffer.write(NetworkBuffer.RAW_BYTES, payload);
-        });
-        assertThrows(DataFormatException.class, () -> read(trailing));
-    }
-
-    @Test
-    void decompressedLengthMustMatchTheDeclaredLength() {
-        var payload = loginPluginRequestPayload(new LoginPluginRequestPacket(3, "test:short", new byte[100]));
-        var bytes = bytes(buffer -> {
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new SetCompressionPacket(16), 0);
-            buffer.write(NetworkBuffer.RAW_BYTES, compressedFrame(payload, payload.length + 10));
-        });
-        assertThrows(DataFormatException.class, () -> read(bytes));
-    }
-
-    @Test
-    void decompressedDataLongerThanTheDeclaredLengthIsCut() throws Exception {
-        // 原版把数据解压到声明长度的缓冲区，只要求写满它：数据更长时只取声明长度的部分
-        var payload = loginPluginRequestPayload(new LoginPluginRequestPacket(4, "test:long", new byte[100]));
-        var longer = Arrays.copyOf(payload, payload.length + 10);
-        Arrays.fill(longer, payload.length, longer.length, (byte) 7);
-        var bytes = bytes(buffer -> {
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new SetCompressionPacket(16), 0);
-            buffer.write(NetworkBuffer.RAW_BYTES, compressedFrame(longer, payload.length));
-        });
-        var received = read(bytes);
-        var packet = assertInstanceOf(LoginPluginRequestPacket.class, received.getLast());
-        assertEquals(4, packet.messageId());
-        assertArrayEquals(new byte[100], packet.data());
-    }
-
-    @Test
-    void chunkBlockEntitiesTakeTheirBlockFromTheSections() throws Exception {
+    void chunkBlockEntitiesTakeTheirBlockFromTheSections() {
         var sign = Block.OAK_SIGN.withProperty("rotation", "4");
         var chest = Block.CHEST.withProperty("facing", "east");
-        var text = CompoundBinaryTag.builder().putString("text", "hello").build();
+        var text = NbtMap.builder().putString("text", "hello").build();
         var chunk = ChunkBuilder.overworld()
-                .set(1, 2, 3, sign).blockEntity(1, 2, 3, sign.withNbt(text))
-                .set(4, 2, 3, chest).blockEntity(4, 2, 3, chest)
+                .set(1, 2, 3, sign).blockEntity(1, 2, 3, BlockEntityType.SIGN, text)
+                .set(4, 2, 3, chest).blockEntity(4, 2, 3, BlockEntityType.CHEST, null)
                 // 区段中这个位置是石头：方块实体数据被忽略（原版客户端行为）
-                .set(5, 2, 3, Block.STONE).blockEntity(5, 2, 3, Block.CHEST);
-        var registries = VanillaReference.get();
-        var profile = TestServer.profile(UUID.randomUUID(), "decoder", List.of());
-        var bytes = bytes(buffer -> {
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.LOGIN, new LoginSuccessPacket(profile, new UUID(0, 0)), 0);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.CONFIGURATION, new FinishConfigurationPacket(), 0);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.PLAY, TestServer.joinPacket(GameMode.SURVIVAL), 0);
-            PacketWriting.writeFramedPacket(buffer, ConnectionState.PLAY, chunk.packet(0, 0, registries.biome().size()), 0);
-        });
-        var received = read(bytes);
-        var packet = assertInstanceOf(ChunkDataPacket.class, received.getLast());
-        var blockEntities = packet.chunkData().blockEntities();
-        // 告示牌的方块实体类型名称与方块名称不同，Minestom 的 ChunkData 会把它丢弃
-        assertEquals(sign.withNbt(text), blockEntities.get(CoordConversion.chunkBlockIndex(1, 2, 3)));
-        assertEquals(chest.withNbt(CompoundBinaryTag.empty()), blockEntities.get(CoordConversion.chunkBlockIndex(4, 2, 3)));
-        assertEquals(2, blockEntities.size());
-        var decoded = new SectionDecoder(new SectionPool()).decode(packet, 24, registries.biome().size());
-        assertEquals(text, decoded.blockEntities().get(CoordConversion.chunkBlockIndex(1, 2, 3)));
-    }
-
-    @Test
-    void objectChunksKeepOnlyTheNbtSentToClients() {
-        // 对象级连接拿到的是服务端区块中的方块：只保留 BlockHandler 声明发给客户端的标签，与序列化之后相同
-        var handler = new BlockHandler() {
-            @Override
-            public Collection<Tag<?>> getBlockEntityTags() {
-                return List.of(Tag.String("CustomName"));
-            }
-
-            @Override
-            public Key getKey() {
-                return Key.key("test:chest");
-            }
-        };
-        var nbt = CompoundBinaryTag.builder().putString("CustomName", "box").putString("Secret", "server only").build();
-        var chest = Block.CHEST.withHandler(handler).withNbt(nbt);
-        var chunk = ChunkBuilder.overworld().set(2, 0, 2, Block.CHEST).blockEntity(2, 0, 2, chest);
-        var decoded = new SectionDecoder(new SectionPool()).decode(chunk.packet(0, 0, TestServer.biomeCount()), 24, TestServer.biomeCount());
-        assertEquals(CompoundBinaryTag.builder().putString("CustomName", "box").build(),
-                decoded.blockEntities().get(CoordConversion.chunkBlockIndex(2, 0, 2)));
+                .set(5, 2, 3, Block.STONE).blockEntity(5, 2, 3, BlockEntityType.CHEST, null)
+                // 方块有方块实体，但类型不同：同样被忽略
+                .set(6, 2, 3, Block.CHEST).blockEntity(6, 2, 3, BlockEntityType.BARREL, null)
+                // 超出维度高度
+                .blockEntity(7, 320, 3, BlockEntityType.CHEST, null);
+        var packet = roundTrip(chunk.packet(0, 0, BIOMES));
+        var decoded = new SectionDecoder(new SectionPool()).decode(packet, -64, 384, BIOMES);
+        // 方块实体没有发给客户端的数据时（TAG_END）为空的 NBT
+        assertEquals(Map.of(CoordConversion.chunkBlockIndex(1, 2, 3), text, CoordConversion.chunkBlockIndex(4, 2, 3), NbtMap.EMPTY),
+                decoded.blockEntities());
     }
 
     @Test
     void identicalSectionsAreShared() {
         var pool = new SectionPool();
         var decoder = new SectionDecoder(pool);
-        var biomeCount = TestServer.biomeCount();
         var chunk = ChunkBuilder.overworld().fill(-64, -1, Block.STONE).set(3, 5, 7, Block.GOLD_BLOCK);
-        var first = decoder.decode(chunk.packet(0, 0, biomeCount), 24, biomeCount);
-        var second = decoder.decode(chunk.packet(1, 0, biomeCount), 24, biomeCount);
+        var first = decoder.decode(chunk.packet(0, 0, BIOMES), -64, 384, BIOMES);
+        var second = decoder.decode(chunk.packet(1, 0, BIOMES), -64, 384, BIOMES);
         for (int i = 0; i < 24; i++) {
             assertSame(first.sections()[i].share(), second.sections()[i].share(), "section " + i);
         }
@@ -288,49 +103,89 @@ class DecodeTest {
 
     @Test
     void sectionBytesRoundTrip() {
-        var biomeCount = TestServer.biomeCount();
-        var chunk = ChunkBuilder.overworld().set(1, 2, 3, Block.OAK_LOG.withProperty("axis", "x"));
-        var packet = chunk.packet(0, 0, biomeCount);
-        var decoded = new SectionDecoder(new SectionPool()).decode(packet, 24, biomeCount);
-        assertEquals(Block.OAK_LOG.withProperty("axis", "x").stateId(), decoded.sections()[4].block(1, 2, 3));
-        assertArrayEquals(chunk.data(biomeCount), packet.chunkData().data());
+        var log = Block.OAK_LOG.withProperty("axis", "x");
+        var chunk = ChunkBuilder.overworld().fill(-64, -60, Block.DIRT).set(1, 2, 3, log).biome(5);
+        var packet = chunk.packet(0, 0, BIOMES);
+        var decoded = new SectionDecoder(new SectionPool()).decode(packet, -64, 384, BIOMES);
+        assertEquals(log.stateId(), decoded.sections()[4].block(1, 2, 3));
+        assertEquals(Block.DIRT.stateId(), decoded.sections()[0].block(15, 4, 15));
+        assertEquals(Block.AIR.stateId(), decoded.sections()[0].block(15, 5, 15));
+        assertEquals(5, decoded.sections()[23].biome(3, 3, 3));
         assertTrue(decoded.blockEntities().isEmpty());
+        // 把解码得到的区段重新写出，与数据包中的字节相同
+        var buffer = Unpooled.buffer();
+        try {
+            for (var section : decoded.sections()) {
+                var shared = section.share();
+                MinecraftTypes.writeChunkSection(buffer, new ChunkSection(shared.blockCount(), shared.fluidCount(),
+                        shared.blocks(), shared.biomes()));
+            }
+            assertArrayEquals(packet.getChunkData(), ByteBufUtil.getBytes(buffer));
+        } finally {
+            buffer.release();
+        }
     }
 
     @Test
-    void directBiomePalettesUseTheVanillaBitCount() {
-        // 64 个生物群系：原版直接调色板为 ceillog2(64) = 6 位、7 个 long；Minestom 的 Palette.biomeSerializer 算出 7 位（M20）
-        var biomeCount = 64;
-        var ids = new int[64];
-        for (int i = 0; i < ids.length; i++) {
-            ids[i] = i;
-        }
-        // 一个区段中超过 8 种生物群系时使用直接调色板；方块为单值调色板（空气）
-        var vanilla = NetworkBuffer.makeArray(buffer -> {
-            buffer.write(NetworkBuffer.SHORT, (short) 0);
-            buffer.write(NetworkBuffer.SHORT, (short) 0);
-            buffer.write(Palette.BLOCK_SERIALIZER, Palette.blocks());
-            buffer.write(NetworkBuffer.RAW_BYTES, ChunkBuilder.vanillaDirectBiomes(6, ids));
-        });
-        var decoded = new SectionDecoder(new SectionPool()).decode(chunkPacket(vanilla), 1, biomeCount);
-        assertEquals(1 + 4 * 2 + 16 * 3, decoded.sections()[0].biome(1, 3, 2));
-        assertEquals(63, decoded.sections()[0].biome(3, 3, 3));
-        // Minestom 服务端为 64 个生物群系写出 7 位的直接调色板，原版客户端读错，bot 因异常结束
-        var minestomBiomes = Palette.biomes();
-        minestomBiomes.setAll((x, y, z) -> x + 4 * z + 16 * y);
-        var minestom = NetworkBuffer.makeArray(buffer -> {
-            buffer.write(NetworkBuffer.SHORT, (short) 0);
-            buffer.write(NetworkBuffer.SHORT, (short) 0);
-            buffer.write(Palette.BLOCK_SERIALIZER, Palette.blocks());
-            buffer.write(Palette.biomeSerializer(biomeCount), minestomBiomes);
-        });
-        // 两个数量、方块的单值调色板（位数与值）各占 2 个字节，之后是生物群系调色板的位数
-        assertEquals(7, minestom[6]);
-        assertThrows(IllegalArgumentException.class, () -> new SectionDecoder(new SectionPool()).decode(chunkPacket(minestom), 1, biomeCount));
+    void trailingBytesAfterTheSectionsFail() {
+        var data = ChunkBuilder.overworld().data(BIOMES);
+        var decoder = new SectionDecoder(new SectionPool());
+        assertThrows(IllegalStateException.class,
+                () -> decoder.decode(chunkPacket(Arrays.copyOf(data, data.length + 1)), -64, 384, BIOMES));
+        // 区段数按维度高度计算：数据比维度高度要求的少时读出界
+        assertThrows(IndexOutOfBoundsException.class, () -> decoder.decode(chunkPacket(data), -64, 400, BIOMES));
     }
 
-    private static ChunkDataPacket chunkPacket(byte[] data) {
-        var light = new LightData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of());
-        return new ChunkDataPacket(0, 0, new ChunkData(Map.of(), data, Map.of()), light);
+    @Test
+    void encryptionRequestsAreNotSupported() throws Exception {
+        var keys = KeyPairGenerator.getInstance("RSA");
+        keys.initialize(1024);
+        var request = new ClientboundHelloPacket("", keys.generateKeyPair().getPublic(), new byte[4], true);
+        assertThrows(UnsupportedOperationException.class, () -> new DecodeContext(new SectionPool()).process(request));
+    }
+
+    @Test
+    void chunksUseTheDimensionOfTheLastLoginOrRespawn() {
+        var context = new DecodeContext(new SectionPool());
+        configure(context);
+        assertNull(context.process(TestServer.joinPacket(GameMode.SURVIVAL)));
+        var overworld = assertInstanceOf(DecodedChunk.class, context.process(ChunkBuilder.overworld().packet(0, 0, BIOMES)));
+        assertEquals(24, overworld.sections().length);
+        assertNull(context.process(TestServer.netherRespawn(GameMode.SURVIVAL, (byte) 0)));
+        var nether = assertInstanceOf(DecodedChunk.class, context.process(new ChunkBuilder(0, 256).packet(0, 0, BIOMES)));
+        assertEquals(16, nether.sections().length);
+    }
+
+    @Test
+    void reconfigurationDropsTheTagsOfTheResentRegistries() {
+        var context = new DecodeContext(new SectionPool());
+        var first = configure(context);
+        var enchantment = Key.key("enchantment");
+        var block = Key.key("block");
+        assertFalse(first.tags().tagNames(enchantment).isEmpty());
+        context.process(new ClientboundStartConfigurationPacket());
+        // 重新配置的第一个 Registry Data 让之前的同步注册表与它们的标签作废；方块标签不属于同步注册表，保留
+        var chatTypes = TestServer.registryData(false).stream()
+                .filter(packet -> packet.getRegistry().equals(Key.key("chat_type")))
+                .findFirst().orElseThrow();
+        assertNull(context.process(chatTypes));
+        var finished = assertInstanceOf(DecodeContext.ConfigurationFinished.class,
+                context.process(new ClientboundFinishConfigurationPacket()));
+        assertTrue(finished.tags().tagNames(enchantment).isEmpty());
+        assertFalse(finished.tags().tagNames(block).isEmpty());
+        assertEquals(0, finished.registries().biomeCount());
+    }
+
+    /**
+     * 完整的配置阶段：Login Finished、全部同步注册表、原版标签、Finish Configuration
+     */
+    private static DecodeContext.ConfigurationFinished configure(DecodeContext context) {
+        assertNull(context.process(new ClientboundLoginFinishedPacket(TestServer.profile("decoder"), new UUID(0, 0))));
+        TestServer.registryData(true).forEach(packet -> assertNull(context.process(packet)));
+        assertInstanceOf(TagTable.class, context.process(TestServer.tags()));
+        var finished = assertInstanceOf(DecodeContext.ConfigurationFinished.class,
+                context.process(new ClientboundFinishConfigurationPacket()));
+        assertEquals(BIOMES, finished.registries().biomeCount());
+        return finished;
     }
 }

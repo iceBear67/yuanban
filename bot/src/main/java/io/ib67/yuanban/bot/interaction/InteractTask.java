@@ -3,9 +3,9 @@ package io.ib67.yuanban.bot.interaction;
 import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.movement.Rotation;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;
-import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.PlayerHand;
-import net.minestom.server.network.packet.client.play.ClientInteractEntityPacket;
+import org.cloudburstmc.math.vector.Vector3d;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundInteractPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
@@ -17,11 +17,11 @@ import java.util.Objects;
  */
 public final class InteractTask extends HandAction {
     private final int entityId;
-    private final PlayerHand hand;
+    private final Hand hand;
     private @Nullable Rotation rotation;
     private boolean sent;
 
-    public InteractTask(ActionImpl handle, int entityId, PlayerHand hand) {
+    public InteractTask(ActionImpl handle, int entityId, Hand hand) {
         super(handle);
         this.entityId = entityId;
         this.hand = hand;
@@ -51,8 +51,8 @@ public final class InteractTask extends HandAction {
             return;
         }
         sent = true;
-        var offset = new Vec(0, target.snapshot().boundingBox().height() / 2, 0);
-        state.outbox().send(new ClientInteractEntityPacket(entityId, hand, offset, controller.sneaking()));
+        var offset = Vector3d.from(0, target.snapshot().boundingBox().height() / 2, 0);
+        state.outbox().send(new ServerboundInteractPacket(entityId, hand, offset, controller.sneaking()));
         state.outbox().completeWhenWritten(handle);
     }
 

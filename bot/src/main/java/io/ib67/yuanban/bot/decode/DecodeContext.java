@@ -1,50 +1,37 @@
 package io.ib67.yuanban.bot.decode;
 
-import io.ib67.yuanban.bot.registry.ClientRegistries;
-import io.ib67.yuanban.bot.registry.ClientRegistriesBuilder;
+import io.ib67.yuanban.bot.registry.DimensionInfo;
+import io.ib67.yuanban.bot.registry.SyncedRegistries;
+import io.ib67.yuanban.bot.registry.SyncedRegistriesBuilder;
 import io.ib67.yuanban.bot.registry.TagTable;
-import io.ib67.yuanban.bot.registry.VanillaReference;
-import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.common.TagsPacket;
-import net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket;
-import net.minestom.server.network.packet.server.configuration.RegistryDataPacket;
-import net.minestom.server.network.packet.server.login.EncryptionRequestPacket;
-import net.minestom.server.network.packet.server.login.LoginSuccessPacket;
-import net.minestom.server.network.packet.server.play.ChunkDataPacket;
-import net.minestom.server.network.packet.server.play.JoinGamePacket;
-import net.minestom.server.network.packet.server.play.RespawnPacket;
-import net.minestom.server.network.packet.server.play.StartConfigurationPacket;
-import net.minestom.server.network.packet.server.play.data.PlayerSpawnInfo;
-import net.minestom.server.registry.Registries;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerSpawnInfo;
+import org.geysermc.mcprotocollib.protocol.packet.common.clientbound.ClientboundUpdateTagsPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundRegistryDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundStartConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundHelloPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
 /**
  * 属于一条连接，按数据包到达顺序维护数据包到达调度线程之前需要的信息：
- * 注册表、标签、当前维度的高度与最低 y。调用不会并发：TCP 连接在入站线程上调用，
- * 对象级连接在发送数据包的服务端线程上调用（见 {@link io.ib67.yuanban.bot.transport.InboundSink}）。
+ * 同步注册表、标签、当前维度的高度与最低 y。调用不会并发（见 {@link io.ib67.yuanban.bot.transport.InboundSink}）。
  */
 public final class DecodeContext {
-    private final ClientRegistriesBuilder builder = new ClientRegistriesBuilder();
+    private final SyncedRegistriesBuilder builder = new SyncedRegistriesBuilder();
     private final SectionDecoder sections;
     private TagTable tags = TagTable.EMPTY;
-    /**
-     * TCP 连接的写线程也读取它（{@link #registries()}）
-     */
-    private volatile @Nullable ClientRegistries registries;
-    private int height;
+    private @Nullable SyncedRegistries registries;
+    private @Nullable DimensionInfo dimension;
 
     public DecodeContext(SectionPool pool) {
         this.sections = new SectionDecoder(pool);
-    }
-
-    /**
-     * 解码数据包使用的注册表：收到 Finish Configuration 之后为按服务端编号构建的注册表，在此之前为原版注册表
-     */
-    public Registries registries() {
-        var built = registries;
-        return built != null ? built : VanillaReference.get();
     }
 
     /**
@@ -53,15 +40,15 @@ public final class DecodeContext {
      * @return {@link DecodedChunk}、{@link TagTable}、{@link ConfigurationFinished} 或 null
      * @throws UnsupportedOperationException 收到 Encryption Request（本库不支持加密）
      */
-    public @Nullable Object process(ServerPacket packet) {
+    public @Nullable Object process(MinecraftPacket packet) {
         return switch (packet) {
-            case EncryptionRequestPacket _ ->
+            case ClientboundHelloPacket _ ->
                     throw new UnsupportedOperationException("the server requested encryption, which is not supported");
-            case LoginSuccessPacket _, StartConfigurationPacket _ -> {
+            case ClientboundLoginFinishedPacket _, ClientboundStartConfigurationPacket _ -> {
                 builder.startConfiguration();
                 yield null;
             }
-            case RegistryDataPacket registryData -> {
+            case ClientboundRegistryDataPacket registryData -> {
                 var previous = builder.registryNames();
                 if (builder.accept(registryData)) {
                     // 重新配置期间收到任何 Registry Data，之前的同步注册表与标签全部作废
@@ -69,41 +56,42 @@ public final class DecodeContext {
                 }
                 yield null;
             }
-            case TagsPacket tagsPacket -> {
+            case ClientboundUpdateTagsPacket tagsPacket -> {
                 tags = tags.apply(tagsPacket);
-                var built = registries;
-                if (built != null) {
-                    built.createTags(tags);
-                }
                 yield tags;
             }
-            case FinishConfigurationPacket _ -> {
-                var built = builder.build(tags);
+            case ClientboundFinishConfigurationPacket _ -> {
+                var built = builder.build();
                 registries = built;
                 yield new ConfigurationFinished(built, tags);
             }
-            case JoinGamePacket join -> {
-                enterDimension(join.playerSpawnInfo());
+            case ClientboundLoginPacket join -> {
+                enterDimension(join.getCommonPlayerSpawnInfo());
                 yield null;
             }
-            case RespawnPacket respawn -> {
-                enterDimension(respawn.playerSpawnInfo());
+            case ClientboundRespawnPacket respawn -> {
+                enterDimension(respawn.getCommonPlayerSpawnInfo());
                 yield null;
             }
-            case ChunkDataPacket chunk -> sections.decode(chunk, height / 16, registries().biome().size());
+            case ClientboundLevelChunkWithLightPacket chunk -> {
+                var current = Objects.requireNonNull(dimension, "chunk data before Login (play)");
+                yield sections.decode(chunk, current.minY(), current.height(), registries().biomeCount());
+            }
             default -> null;
         };
     }
 
+    private SyncedRegistries registries() {
+        return Objects.requireNonNull(registries, "no registries before Finish Configuration");
+    }
+
     private void enterDimension(PlayerSpawnInfo spawnInfo) {
-        var type = Objects.requireNonNull(registries().dimensionType().get(spawnInfo.dimensionType()),
-                () -> "unknown dimension type id " + spawnInfo.dimensionType());
-        height = type.height();
+        dimension = registries().dimensionType(spawnInfo.getDimension());
     }
 
     /**
      * Finish Configuration 时构建的注册表与此刻的标签
      */
-    public record ConfigurationFinished(ClientRegistries registries, TagTable tags) {
+    public record ConfigurationFinished(SyncedRegistries registries, TagTable tags) {
     }
 }

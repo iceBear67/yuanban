@@ -8,9 +8,10 @@ import io.ib67.yuanban.bot.view.EntitySnapshot;
 import io.ib67.yuanban.bot.view.HudSnapshot;
 import io.ib67.yuanban.bot.view.PlayerSnapshot;
 import io.ib67.yuanban.bot.view.WindowSnapshot;
-import net.minestom.server.entity.EquipmentSlot;
 import net.minestom.server.instance.block.Block;
-import net.minestom.server.item.ItemStack;
+import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -61,6 +62,11 @@ final class BotViewImpl implements BotView {
     }
 
     @Override
+    public @Nullable NbtMap blockEntity(int x, int y, int z) {
+        return bot.query(() -> bot.reader().blockEntity(x, y, z));
+    }
+
+    @Override
     public boolean chunkLoaded(int chunkX, int chunkZ) {
         return bot.query(() -> bot.reader().chunkLoaded(chunkX, chunkZ));
     }
@@ -86,12 +92,12 @@ final class BotViewImpl implements BotView {
     }
 
     @Override
-    public ItemStack cursor() {
+    public @Nullable ItemStack cursor() {
         return bot.query(() -> bot.reader().cursor());
     }
 
     @Override
-    public ItemStack equipment(EquipmentSlot slot) {
+    public @Nullable ItemStack equipment(EquipmentSlot slot) {
         return bot.query(() -> bot.reader().equipment(slot));
     }
 

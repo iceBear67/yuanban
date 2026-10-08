@@ -1,6 +1,8 @@
 package io.ib67.yuanban.bot.entity;
 
 import io.ib67.yuanban.bot.player.AttributeMap;
+import io.ib67.yuanban.bot.view.ActiveEffect;
+import io.ib67.yuanban.bot.view.EntityMetaIndex;
 import io.ib67.yuanban.bot.view.EntitySnapshot;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -8,14 +10,13 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.EntityType;
-import net.minestom.server.entity.EquipmentSlot;
-import net.minestom.server.entity.Metadata;
-import net.minestom.server.entity.MetadataDef;
-import net.minestom.server.entity.attribute.Attribute;
-import net.minestom.server.item.ItemStack;
-import net.minestom.server.potion.Potion;
-import net.minestom.server.potion.PotionEffect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.object.ObjectData;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.EnumMap;
@@ -42,15 +43,18 @@ public final class ClientEntity {
     private final int id;
     private final UUID uuid;
     private final EntityType type;
-    private final int data;
+    private final ObjectData data;
     private Pos position;
     private float headYaw;
     private Vec velocity;
     private boolean onGround;
-    private final Map<Integer, Metadata.Entry<?>> metadata = new Int2ObjectOpenHashMap<>();
+    private final Map<Integer, EntityMetadata<?, ?>> metadata = new Int2ObjectOpenHashMap<>();
+    /**
+     * 装备；没有装备的槽位不在其中
+     */
     private final Map<EquipmentSlot, ItemStack> equipment = new EnumMap<>(EquipmentSlot.class);
     private final AttributeMap attributes = new AttributeMap(AttributeMap.DEFAULT_BASE);
-    private final Map<PotionEffect, Potion> effects = new HashMap<>();
+    private final Map<Effect, ActiveEffect> effects = new HashMap<>();
     private @Nullable Integer vehicle;
     private final IntList passengers = new IntArrayList();
     private @Nullable Integer leashHolder;
@@ -60,7 +64,7 @@ public final class ClientEntity {
     private float standAnim;
     private float standAnimO;
 
-    public ClientEntity(int id, UUID uuid, EntityType type, int data, Pos position, float headYaw, Vec velocity) {
+    public ClientEntity(int id, UUID uuid, EntityType type, ObjectData data, Pos position, float headYaw, Vec velocity) {
         this.id = id;
         this.uuid = uuid;
         this.type = type;
@@ -103,10 +107,13 @@ public final class ClientEntity {
         this.velocity = velocity;
     }
 
-    public Map<Integer, Metadata.Entry<?>> metadata() {
+    public Map<Integer, EntityMetadata<?, ?>> metadata() {
         return metadata;
     }
 
+    /**
+     * 装备；没有装备的槽位不在其中，写入时空装备移除这个槽位
+     */
     public Map<EquipmentSlot, ItemStack> equipment() {
         return equipment;
     }
@@ -115,7 +122,7 @@ public final class ClientEntity {
         return attributes;
     }
 
-    public Map<PotionEffect, Potion> effects() {
+    public Map<Effect, ActiveEffect> effects() {
         return effects;
     }
 
@@ -154,8 +161,7 @@ public final class ClientEntity {
             return;
         }
         standAnimO = standAnim;
-        var flags = metadata.get(MetadataDef.AbstractHorse.ABSTRACT_HORSE_FLAGS.index());
-        if (flags != null && ((Byte) flags.value() & 0x20) != 0) {
+        if (EntityMetaIndex.get(metadata, EntityMetaIndex.HORSE_IS_REARING)) {
             standAnim = standAnim + ((1.0F - standAnim) * 0.4F + 0.05F);
             if (standAnim > 1.0F) {
                 standAnim = 1.0F;
@@ -172,7 +178,7 @@ public final class ClientEntity {
      * 包围盒：按原版的姿势、幼年与固定尺寸计算，活体的非固定尺寸乘以 {@code minecraft:scale} 属性，见 {@link EntityDimensions}
      */
     public BoundingBox boundingBox() {
-        return EntityDimensions.boundingBox(type, metadata, attributes.value(Attribute.SCALE));
+        return EntityDimensions.boundingBox(type, metadata, attributes.value(AttributeType.Builtin.SCALE));
     }
 
     public EntitySnapshot snapshot() {
