@@ -3,9 +3,7 @@ package io.ib67.yuanban.loot;
 import io.ib67.yuanban.loot.entry.CompositeEntry;
 import io.ib67.yuanban.loot.entry.LootEntry;
 import io.ib67.yuanban.loot.entry.SingletonEntry;
-import io.ib67.yuanban.loot.entry.TagEntry;
 import net.kyori.adventure.key.Key;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -83,6 +81,13 @@ public final class LootManager {
         return cache.computeIfAbsent(table, LootContents::inspect);
     }
 
+    private static void checkTable(Key id, LootTable table, NavigableMap<Key, LootTable> tables,
+                                   Map<LootTable, LootContents> inspectCache) {
+        var pathIds = new ArrayDeque<Key>();
+        var pathTables = Collections.newSetFromMap(new IdentityHashMap<LootTable, Boolean>());
+        walk(id, table, tables, inspectCache, pathIds, pathTables);
+    }
+
     /**
      * 沿战利品表的引用链深搜：规则 2 的无环检查顺带完成规则 1 的存在性核对，
      * 每条引用链路径只走一遍；环、缺失引用、权重超限都在当前路径上报错。
@@ -91,13 +96,6 @@ public final class LootManager {
      * @param pathIds    从根到当前表的引用链上出现的表 ID，用来检出表引用成环
      * @param pathTables 引用链上出现的表对象（含内联表），用来检出内联表自引用
      */
-    private static void checkTable(Key id, LootTable table, NavigableMap<Key, LootTable> tables,
-                                   Map<LootTable, LootContents> inspectCache) {
-        var pathIds = new ArrayDeque<Key>();
-        var pathTables = Collections.newSetFromMap(new IdentityHashMap<LootTable, Boolean>());
-        walk(id, table, tables, inspectCache, pathIds, pathTables);
-    }
-
     private static void walk(Key id, LootTable table, NavigableMap<Key, LootTable> tables,
                              Map<LootTable, LootContents> inspectCache,
                              ArrayDeque<Key> pathIds, Set<LootTable> pathTables) {

@@ -233,7 +233,7 @@ public final class Kinematics {
         if (jumpPower <= 1.0E-5F) {
             return velocity;
         }
-        velocity = new Vec(velocity.x(), Math.max((double) jumpPower, velocity.y()), velocity.z());
+        velocity = new Vec(velocity.x(), Math.max(jumpPower, velocity.y()), velocity.z());
         if (sprinting) {
             var angle = position.yaw() * (float) (Math.PI / 180.0);
             velocity = velocity.add(-SineTable.sin(angle) * SPRINT_JUMP_BOOST, 0, SineTable.cos(angle) * SPRINT_JUMP_BOOST);

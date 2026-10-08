@@ -1,5 +1,7 @@
 package io.ib67.yuanban.datapack.pack;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.Locale;
 
 /**
@@ -36,7 +38,7 @@ public record PackFormat(int major, int minor) implements Comparable<PackFormat>
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return minor == ANY_MINOR
                 ? String.format(Locale.ROOT, "%d.*", major)
                 : String.format(Locale.ROOT, "%d.%d", major, minor);

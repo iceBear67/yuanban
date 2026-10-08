@@ -64,7 +64,7 @@ public final class BuiltInPackProvider implements PackProvider {
         }
         try (var entries = Files.newDirectoryStream(featurePacks)) {
             for (var entry : entries) {
-                var packRoot = PackDetector.detect(entry, path -> false);
+                var packRoot = PackDetector.detect(entry, _ -> false);
                 if (packRoot == null) {
                     continue;
                 }

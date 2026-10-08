@@ -19,8 +19,8 @@ public record ScoreboardValue(ScoreboardName target, String score, float scale) 
      */
     @Override
     public Set<ContextKey<?>> referencedParams() {
-        if (target instanceof ScoreboardName.Context context) {
-            return Set.of(context.target().contextParam());
+        if (target instanceof ScoreboardName.Context(var entity)) {
+            return Set.of(entity.contextParam());
         }
         return Set.of();
     }

@@ -551,7 +551,7 @@ public final class LootSelector {
      * 原版 {@code BuiltInRegistries.ITEM.getTagOrEmpty}：标签不存在时为空。
      */
     private List<Material> tagMembers(Key tag) {
-        var members = process.material().getTag(net.minestom.server.registry.TagKey.<Material>of(tag));
+        var members = process.material().getTag(net.minestom.server.registry.TagKey.of(tag));
         if (members == null) {
             return List.of();
         }

@@ -64,7 +64,7 @@ public final class ViewBuilder {
             forEachFile(pack, directory, extension,
                     resource -> result.computeIfAbsent(resource.id(), ignored -> new ArrayList<>()).add(resource));
         }
-        result.replaceAll((id, layers) -> List.copyOf(layers));
+        result.replaceAll((_, layers) -> List.copyOf(layers));
         return new LayersView(Collections.unmodifiableNavigableMap(result));
     }
 

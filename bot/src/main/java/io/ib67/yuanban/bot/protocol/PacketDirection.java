@@ -4,6 +4,7 @@ import org.geysermc.mcprotocollib.network.packet.PacketRegistry;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodec;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * 数据包类的方向。MCProtocolLib 的数据包都只实现 {@link MinecraftPacket}，没有区分方向的类型，
@@ -12,13 +13,13 @@ import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
 public final class PacketDirection {
     private static final ClassValue<Boolean> CLIENTBOUND = new ClassValue<>() {
         @Override
-        protected Boolean computeValue(Class<?> type) {
+        protected Boolean computeValue(@NotNull Class<?> type) {
             return registered(type, PacketRegistry::getClientboundId);
         }
     };
     private static final ClassValue<Boolean> SERVERBOUND = new ClassValue<>() {
         @Override
-        protected Boolean computeValue(Class<?> type) {
+        protected Boolean computeValue(@NotNull Class<?> type) {
             return registered(type, PacketRegistry::getServerboundId);
         }
     };

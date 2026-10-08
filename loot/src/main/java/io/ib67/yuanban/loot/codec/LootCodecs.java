@@ -193,9 +193,9 @@ public final class LootCodecs {
      * 原版 {@code IntRange#unpackExact}：两端是同一个整数常量时写成裸整数。
      */
     private static Either<Integer, IntRange> packRange(IntRange range) {
-        if (range.min() instanceof ConstantValue min && range.max() instanceof ConstantValue max
-                && min.value() == max.value() && min.value() == (float) Math.floor(min.value())) {
-            return Either.left((int) Math.floor(min.value()));
+        if (range.min() instanceof ConstantValue(var min) && range.max() instanceof ConstantValue(var max)
+                && min == max && min == (float) Math.floor(min)) {
+            return Either.left((int) Math.floor(min));
         }
         return Either.right(range);
     }

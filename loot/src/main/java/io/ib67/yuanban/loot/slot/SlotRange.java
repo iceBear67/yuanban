@@ -1,5 +1,7 @@
 package io.ib67.yuanban.loot.slot;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -72,7 +74,7 @@ public record SlotRange(String name, List<Integer> slots) {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return name;
     }
 }

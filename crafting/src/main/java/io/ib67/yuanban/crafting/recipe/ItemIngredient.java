@@ -53,14 +53,14 @@ public sealed interface ItemIngredient {
     /**
      * 原版 {@code Ingredient.testOptionalIngredient}：没有原料的位置只接受空物品。
      */
-    public static boolean testOptional(Optional<ItemIngredient> ingredient, ItemStack stack) {
+    static boolean testOptional(Optional<ItemIngredient> ingredient, ItemStack stack) {
         return ingredient.map(value -> value.test(stack)).orElseGet(stack::isAir);
     }
 
     /**
      * 原版 {@code Ingredient.optionalIngredientToDisplay}。
      */
-    public static SlotDisplay displayOptional(Optional<ItemIngredient> ingredient) {
+    static SlotDisplay displayOptional(Optional<ItemIngredient> ingredient) {
         return ingredient.map(ItemIngredient::display).orElse(SlotDisplay.Empty.INSTANCE);
     }
 

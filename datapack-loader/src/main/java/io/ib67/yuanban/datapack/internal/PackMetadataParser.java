@@ -20,6 +20,7 @@ import io.ib67.yuanban.datapack.pack.ResourceFilter;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.HashSet;
 import java.util.List;
@@ -165,7 +166,7 @@ public final class PackMetadataParser {
      */
     private record IntermediateEntry(IntermediaryFormat format, String overlay) implements IntermediaryFormatHolder {
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return overlay;
         }
     }

@@ -34,7 +34,7 @@ final class BotClientSession extends ClientNetworkSession {
 
     @Override
     protected ChannelHandler getChannelHandler() {
-        return new MinecraftChannelInitializer<BotClientSession>(_ -> {
+        return new MinecraftChannelInitializer<>(_ -> {
             getPacketProtocol().newClientSession(this);
             return this;
         }, true) {

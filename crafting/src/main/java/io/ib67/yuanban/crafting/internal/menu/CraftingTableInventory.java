@@ -13,6 +13,7 @@ import net.minestom.server.inventory.InventoryType;
 import net.minestom.server.inventory.click.ClickType;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.utils.inventory.PlayerInventoryUtils;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
@@ -79,7 +80,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean leftClick(Player player, int slot) {
+    public boolean leftClick(@NotNull Player player, int slot) {
         if (!accepts(player)) {
             return false;
         }
@@ -91,7 +92,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean rightClick(Player player, int slot) {
+    public boolean rightClick(@NotNull Player player, int slot) {
         if (!accepts(player)) {
             return false;
         }
@@ -103,7 +104,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean shiftClick(Player player, int slot, int button) {
+    public boolean shiftClick(@NotNull Player player, int slot, int button) {
         if (!accepts(player)) {
             return false;
         }
@@ -113,7 +114,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean changeHeld(Player player, int slot, int key) {
+    public boolean changeHeld(@NotNull Player player, int slot, int key) {
         if (!accepts(player)) {
             return false;
         }
@@ -126,7 +127,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean middleClick(Player player, int slot) {
+    public boolean middleClick(@NotNull Player player, int slot) {
         if (!accepts(player)) {
             return false;
         }
@@ -138,7 +139,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean drop(Player player, boolean all, int slot) {
+    public boolean drop(@NotNull Player player, boolean all, int slot) {
         if (!accepts(player)) {
             return false;
         }
@@ -150,7 +151,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean dragging(Player player, List<Integer> slots, int button) {
+    public boolean dragging(@NotNull Player player, @NotNull List<Integer> slots, int button) {
         if (!accepts(player)) {
             return false;
         }
@@ -164,7 +165,7 @@ public final class CraftingTableInventory extends Inventory {
     }
 
     @Override
-    public boolean doubleClick(Player player, int slot) {
+    public boolean doubleClick(@NotNull Player player, int slot) {
         if (!accepts(player)) {
             return false;
         }
@@ -177,7 +178,7 @@ public final class CraftingTableInventory extends Inventory {
      * 合成格变化之后重新计算结果，对应原版 {@code TransientCraftingContainer} 调用的 {@code slotsChanged}。
      */
     @Override
-    public void setItemStack(int slot, ItemStack itemStack, boolean sendPacket) {
+    public void setItemStack(int slot, @NotNull ItemStack itemStack, boolean sendPacket) {
         var previous = getItemStack(slot);
         super.setItemStack(slot, itemStack, sendPacket);
         if (slot >= menu.gridStart && slot < menu.gridStart + menu.width * menu.height && !previous.equals(itemStack)) {
@@ -189,7 +190,7 @@ public final class CraftingTableInventory extends Inventory {
      * 原版 {@code CraftingMenu.removed}：光标物品和合成格的物品放回背包。
      */
     @Override
-    public boolean removeViewer(Player player) {
+    public boolean removeViewer(@NotNull Player player) {
         if (!getViewers().contains(player)) {
             return super.removeViewer(player);
         }

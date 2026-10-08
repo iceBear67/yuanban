@@ -62,15 +62,14 @@ final class PlayerCraftingMenu extends CraftingMenu {
             return ItemStack.AIR;
         }
         var stack = slot.getItem();
-        var clicked = stack;
-        var equipmentSlot = equipmentSlotForItem(clicked);
+        var equipmentSlot = equipmentSlotForItem(stack);
         MoveResult moved;
         if (index == 0) {
             moved = moveItemStackTo(stack, INVENTORY_START, OFFHAND, true);
             if (!moved.changed()) {
                 return ItemStack.AIR;
             }
-            slot.onQuickCraft(moved.remaining(), clicked);
+            slot.onQuickCraft(moved.remaining(), stack);
         } else if (index < INVENTORY_START) {
             // 合成格和盔甲格移入背包和快捷栏
             moved = moveItemStackTo(stack, INVENTORY_START, OFFHAND, false);
@@ -89,6 +88,6 @@ final class PlayerCraftingMenu extends CraftingMenu {
         if (!moved.changed()) {
             return ItemStack.AIR;
         }
-        return finishQuickMove(index, moved.remaining(), clicked);
+        return finishQuickMove(index, moved.remaining(), stack);
     }
 }

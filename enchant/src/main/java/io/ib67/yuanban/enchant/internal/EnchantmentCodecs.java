@@ -33,6 +33,7 @@ import net.minestom.server.item.enchant.EffectComponent;
 import net.minestom.server.item.enchant.Enchantment;
 import net.minestom.server.registry.RegistryKey;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.IdentityHashMap;
@@ -306,12 +307,12 @@ public final class EnchantmentCodecs {
     private static <T> net.minestom.server.codec.Codec<T> minestomCodec(DataComponent<T> component) {
         return new net.minestom.server.codec.Codec<>() {
             @Override
-            public <D> Result<T> decode(Transcoder<D> coder, D value) {
+            public <D> @NotNull Result<T> decode(@NotNull Transcoder<D> coder, @NotNull D value) {
                 return component.decode(coder, value);
             }
 
             @Override
-            public <D> Result<D> encode(Transcoder<D> coder, @Nullable T value) {
+            public <D> @NotNull Result<D> encode(@NotNull Transcoder<D> coder, @Nullable T value) {
                 return component.encode(coder, value);
             }
         };

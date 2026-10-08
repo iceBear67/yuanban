@@ -9,7 +9,6 @@ import io.ib67.yuanban.enchant.EnchantmentException;
 import io.ib67.yuanban.enchant.EnchantmentTags;
 import net.kyori.adventure.key.Key;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,7 +20,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * 按原版 {@code TagLoader.build} 展开附魔标签，展开顺序复现原版 {@code DependencySorter}。
@@ -73,8 +71,7 @@ public final class EnchantmentTagExpander {
             throw new EnchantmentException(message);
         });
 
-        var result = new TreeMap<Key, List<Key>>();
-        expansion.built.forEach(result::put);
+        var result = new TreeMap<>(expansion.built);
         return new EnchantmentTags(result);
     }
 

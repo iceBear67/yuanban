@@ -16,6 +16,7 @@ import net.kyori.adventure.nbt.ShortBinaryTag;
 import net.kyori.adventure.nbt.StringBinaryTag;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -100,7 +101,7 @@ public final class StringTagVisitor {
                 builder.append('{');
                 List<Map.Entry<String, ? extends BinaryTag>> entries = new ArrayList<>();
                 compound.forEach(entries::add);
-                entries.sort((a, b) -> a.getKey().compareTo(b.getKey()));
+                entries.sort(Comparator.comparing(Map.Entry::getKey));
                 for (int i = 0; i < entries.size(); i++) {
                     if (i != 0) {
                         builder.append(',');

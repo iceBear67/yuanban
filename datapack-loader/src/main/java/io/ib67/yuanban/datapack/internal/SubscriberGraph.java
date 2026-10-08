@@ -94,7 +94,8 @@ public final class SubscriberGraph {
     }
 
     private static String findCycle(List<Subscription<?>> remaining) {
-        var byKey = remaining.stream().collect(Collectors.toMap(Subscription::key, subscription -> subscription));
+        Map<SubscriberKey<?>, Subscription<?>> byKey = remaining.stream()
+                .collect(Collectors.toMap(Subscription::key, subscription -> subscription));
         var path = new ArrayList<SubscriberKey<?>>();
         var current = remaining.getFirst();
         while (!path.contains(current.key())) {

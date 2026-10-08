@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import net.minestom.server.codec.Result;
 import net.minestom.server.codec.Transcoder;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -24,6 +25,7 @@ import java.util.Map;
  *   float、double；Minestom 的版本把全部数字转换成 double。</li>
  * </ul>
  */
+@NotNullByDefault
 public final class StrictJsonTranscoder implements Transcoder<JsonElement> {
     public static final StrictJsonTranscoder INSTANCE = new StrictJsonTranscoder();
 
@@ -211,8 +213,7 @@ public final class StrictJsonTranscoder implements Transcoder<JsonElement> {
                     switch (convertTo(coder, array.get(i))) {
                         case Result.Ok<O>(O data) -> list.add(data);
                         case Result.Error<O>(String message) -> {
-                            final int index = i;
-                            yield new Result.Error<>(index + ": " + message);
+                            yield new Result.Error<>(i + ": " + message);
                         }
                     }
                 }

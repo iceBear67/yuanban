@@ -18,6 +18,7 @@ import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.chunk.palette.PaletteType;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 import org.geysermc.mcprotocollib.protocol.data.game.setting.Difficulty;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
@@ -341,7 +342,7 @@ public final class ClientWorld implements Block.Getter {
      * @throws ChunkNotLoadedException 所在区块没有加载
      */
     @Override
-    public Block getBlock(int x, int y, int z, Condition condition) {
+    public Block getBlock(int x, int y, int z, @NotNull Condition condition) {
         if (y < minY || y >= minY + height) {
             return Block.AIR;
         }

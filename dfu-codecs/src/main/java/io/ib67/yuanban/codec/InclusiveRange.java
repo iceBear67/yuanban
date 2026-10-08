@@ -2,6 +2,7 @@ package io.ib67.yuanban.codec;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * 原版 {@code net.minecraft.util.InclusiveRange}：两端包含的范围。
@@ -58,7 +59,7 @@ public record InclusiveRange<T extends Comparable<T>>(T minInclusive, T maxInclu
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return "[" + minInclusive + ", " + maxInclusive + "]";
     }
 }

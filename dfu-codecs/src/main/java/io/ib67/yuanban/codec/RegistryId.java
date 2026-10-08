@@ -2,6 +2,7 @@ package io.ib67.yuanban.codec;
 
 import net.kyori.adventure.key.Key;
 import net.minestom.server.registry.RegistryKey;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 
@@ -39,7 +40,7 @@ public record RegistryId<T>(Key key) {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return "ResourceKey[" + ROOT.asString() + " / " + key.asString() + "]";
     }
 }

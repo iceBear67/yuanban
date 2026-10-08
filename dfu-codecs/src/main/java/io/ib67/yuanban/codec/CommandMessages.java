@@ -129,7 +129,7 @@ final class CommandMessages {
             } else if ("s".equals(formatType)) {
                 String possiblePositionIndex = matcher.group(1);
                 int index = possiblePositionIndex != null ? Integer.parseInt(possiblePositionIndex) - 1 : replacementIndex++;
-                builder.append(String.valueOf(args[index]));
+                builder.append(args[index]);
             } else {
                 throw new IllegalStateException("Unsupported format: '" + format.substring(start, end) + "'");
             }

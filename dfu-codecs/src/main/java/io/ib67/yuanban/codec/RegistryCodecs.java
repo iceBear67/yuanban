@@ -39,8 +39,8 @@ public final class RegistryCodecs {
                         return Identifiers.CODEC.decode(ops, input).flatMap(pair -> {
                             Key id = pair.getFirst();
                             return getter.containsElement(id)
-                                    ? DataResult.success(Pair.of(RegistryKey.<T>of(id), pair.getSecond()), Lifecycle.stable())
-                                    : DataResult.<Pair<RegistryKey<T>, D>>error(() -> "Failed to get element " + id.asString());
+                                    ? DataResult.success(Pair.of(RegistryKey.of(id), pair.getSecond()), Lifecycle.stable())
+                                    : DataResult.error(() -> "Failed to get element " + id.asString());
                         });
                     }
                 }
@@ -84,7 +84,7 @@ public final class RegistryCodecs {
                 var pair = decoded.result().get();
                 Key id = pair.getFirst();
                 return lookup.get().containsElement(id)
-                        ? DataResult.success(Pair.of(RegistryKey.<T>of(id), pair.getSecond()), Lifecycle.stable())
+                        ? DataResult.success(Pair.of(RegistryKey.of(id), pair.getSecond()), Lifecycle.stable())
                         : DataResult.error(() -> "Failed to get element " + registry.element(id));
             }
 

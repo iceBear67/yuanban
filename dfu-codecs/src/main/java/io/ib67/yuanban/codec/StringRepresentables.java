@@ -34,7 +34,7 @@ public final class StringRepresentables {
     public static <E extends Enum<E>> Codec<E> fromEnum(E[] values, Function<E, String> serializedName) {
         var lookup = createNameLookup(values, serializedName);
         return ExtraCodecs.orCompressed(
-                Codec.stringResolver(serializedName, lookup::apply),
+                Codec.stringResolver(serializedName, lookup),
                 ExtraCodecs.idResolverCodec(Enum::ordinal, i -> i >= 0 && i < values.length ? values[i] : null, -1));
     }
 
@@ -45,7 +45,7 @@ public final class StringRepresentables {
         var lookup = createNameLookup(values, serializedName);
         var index = List.of(values);
         return ExtraCodecs.orCompressed(
-                Codec.stringResolver(serializedName, lookup::apply),
+                Codec.stringResolver(serializedName, lookup),
                 ExtraCodecs.idResolverCodec(index::indexOf, i -> i >= 0 && i < values.length ? values[i] : null, -1));
     }
 

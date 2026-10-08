@@ -120,7 +120,7 @@ public final class LoadRun {
                     () -> "subscriber " + subscription.key() + " returned null from prepare")));
         }
 
-        CompletableFuture.allOf(tasks.toArray(CompletableFuture[]::new)).handle((ignored, error) -> null).join();
+        CompletableFuture.allOf(tasks.toArray(CompletableFuture[]::new)).handle((_, _) -> null).join();
 
         if (!failures.isEmpty()) {
             var list = List.copyOf(failures);

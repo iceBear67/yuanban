@@ -346,16 +346,20 @@ final class AdventureText {
 
     private static DataResult<TextStyle> styleFrom(Style style) {
         TextColor color = null;
-        if (style.color() != null) {
-            String name = style.color() instanceof NamedTextColor named ? NamedTextColor.NAMES.key(named) : null;
-            color = new TextColor(style.color().value(), name);
+        var styleColor = style.color();
+        if (styleColor != null) {
+            String name = styleColor instanceof NamedTextColor named ? NamedTextColor.NAMES.key(named) : null;
+            color = new TextColor(styleColor.value(), name);
         }
-        Integer shadowColor = style.shadowColor() != null ? style.shadowColor().value() : null;
-        DataResult<@Nullable ClickEvent> clickEvent = style.clickEvent() != null
-                ? clickEventFrom(style.clickEvent()).map(event -> event)
+        var styleShadowColor = style.shadowColor();
+        Integer shadowColor = styleShadowColor != null ? styleShadowColor.value() : null;
+        var styleClickEvent = style.clickEvent();
+        DataResult<@Nullable ClickEvent> clickEvent = styleClickEvent != null
+                ? clickEventFrom(styleClickEvent).map(event -> event)
                 : DataResult.success(null);
-        DataResult<@Nullable HoverEvent> hoverEvent = style.hoverEvent() != null
-                ? hoverEventFrom(style.hoverEvent()).map(event -> event)
+        var styleHoverEvent = style.hoverEvent();
+        DataResult<@Nullable HoverEvent> hoverEvent = styleHoverEvent != null
+                ? hoverEventFrom(styleHoverEvent).map(event -> event)
                 : DataResult.success(null);
         TextColor finalColor = color;
         return clickEvent.flatMap(click -> hoverEvent.map(hover -> new TextStyle(finalColor, shadowColor,

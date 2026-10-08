@@ -23,7 +23,7 @@ public record MatchToolCondition(Optional<ItemPredicate> predicate) implements L
      */
     public Set<Key> referencedItemTags() {
         return predicate.flatMap(ItemPredicate::items)
-                .<Set<Key>>map(items -> items instanceof HolderSet.Named<?> named ? Set.of(named.tag().key()) : Set.of())
+                .<Set<Key>>map(items -> items instanceof HolderSet.Named<?>(var tag) ? Set.of(tag.key()) : Set.of())
                 .orElse(Set.of());
     }
 

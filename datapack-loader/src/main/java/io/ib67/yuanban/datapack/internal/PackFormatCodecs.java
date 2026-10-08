@@ -139,12 +139,10 @@ public final class PackFormatCodecs {
          * 原版 {@code IntermediaryFormat.effectiveMinMajorVersion}。
          */
         public int effectiveMinMajorVersion() {
-            if (min.isPresent()) {
-                return supported.isPresent()
-                        ? Math.min(min.get().major(), supported.get().minInclusive())
-                        : min.get().major();
-            }
-            return supported.isPresent() ? supported.get().minInclusive() : Integer.MAX_VALUE;
+            return min.map(minFormat -> supported
+                            .map(range -> Math.min(minFormat.major(), range.minInclusive()))
+                            .orElse(minFormat.major()))
+                    .orElseGet(() -> supported.map(InclusiveRange::minInclusive).orElse(Integer.MAX_VALUE));
         }
 
         /**

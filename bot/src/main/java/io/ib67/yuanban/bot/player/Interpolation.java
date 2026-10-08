@@ -58,7 +58,10 @@ public record Interpolation(int steps, Pos target, Pos previous) {
                 current.y() + alpha * (targetPosition.y() - current.y()),
                 current.z() + alpha * (targetPosition.z() - current.z()),
                 yaw, pitch);
-        var next = steps > 1 ? new Interpolation(steps - 1, new Pos(targetPosition, targetYaw, targetPitch), position) : null;
+        var next = steps > 1
+                ? new Interpolation(steps - 1,
+                        new Pos(targetPosition.x(), targetPosition.y(), targetPosition.z(), targetYaw, targetPitch), position)
+                : null;
         return new Step(position, next);
     }
 

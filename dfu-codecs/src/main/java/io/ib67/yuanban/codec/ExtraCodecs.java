@@ -18,6 +18,7 @@ import com.mojang.serialization.RecordBuilder;
 import com.mojang.serialization.codecs.BaseMapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.kyori.adventure.key.Key;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.net.URI;
@@ -230,7 +231,7 @@ public final class ExtraCodecs {
      * 原版 {@code ExtraCodecs.nonEmptyHolderSet}：直接列表为空时 {@code List must have contents}，标签不检查。
      */
     public static <T> Codec<HolderSet<T>> nonEmptyHolderSet(Codec<HolderSet<T>> holderSetCodec) {
-        return holderSetCodec.validate(set -> set instanceof HolderSet.Direct<T> direct && direct.keys().isEmpty()
+        return holderSetCodec.validate(set -> set instanceof HolderSet.Direct<T>(var keys) && keys.isEmpty()
                 ? DataResult.error(() -> "List must have contents")
                 : DataResult.success(set));
     }
@@ -488,7 +489,7 @@ public final class ExtraCodecs {
         }
 
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return "StrictUnboundedMapCodec[" + keyCodec + " -> " + elementCodec + "]";
         }
     }
@@ -502,7 +503,7 @@ public final class ExtraCodecs {
         }
 
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return decoratedId();
         }
     }

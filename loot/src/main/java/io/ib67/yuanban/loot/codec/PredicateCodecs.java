@@ -44,6 +44,7 @@ import net.minestom.server.potion.PotionEffect;
 import net.minestom.server.statistic.StatisticCategory;
 import net.minestom.server.statistic.StatisticType;
 import net.minestom.server.utils.Range;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
@@ -246,8 +247,8 @@ public final class PredicateCodecs {
                 .xmap(map -> List.copyOf(map.values()), list -> {
                     var map = new LinkedHashMap<ComponentPredicateType, ComponentPredicate>();
                     for (var predicate : list) {
-                        var type = predicate instanceof ComponentPredicate.AnyValue anyValue
-                                ? anyValueType(anyValue.component())
+                        var type = predicate instanceof ComponentPredicate.AnyValue(var component)
+                                ? anyValueType(component)
                                 : table.get(componentPredicateId(predicate));
                         map.put(type, predicate);
                     }
@@ -383,7 +384,7 @@ public final class PredicateCodecs {
      */
     private record SubPredicateType(Key id, Codec<? extends EntitySubPredicate> codec) {
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return id.asString();
         }
     }
@@ -598,7 +599,7 @@ public final class PredicateCodecs {
         DROPPED("dropped", StatisticCategory.DROPPED, statKeys(RegistryIds.ITEM, Material::fromKey, Material::key)),
         KILLED("killed", StatisticCategory.KILLED, statKeys(RegistryIds.ENTITY_TYPE, EntityType::fromKey, EntityType::key)),
         KILLED_BY("killed_by", StatisticCategory.KILLED_BY, statKeys(RegistryIds.ENTITY_TYPE, EntityType::fromKey, EntityType::key)),
-        CUSTOM("custom", StatisticCategory.CUSTOM, statKeys(RegistryId.<StatisticType>of("custom_stat"),
+        CUSTOM("custom", StatisticCategory.CUSTOM, statKeys(RegistryId.of("custom_stat"),
                 StatisticType::fromKey, StatisticType::key));
 
         private final Key id;
@@ -616,7 +617,7 @@ public final class PredicateCodecs {
      * 原版 {@code StatType#getRegistry().holderByNameCodec()}：统计项在对应注册表中的 ID。
      */
     private static <T> Codec<Key> statKeys(RegistryId<T> registry, Function<Key, @Nullable T> lookup, Function<T, Key> toKey) {
-        return RegistryCodecs.byName(registry, lookup, toKey).xmap(toKey, key -> lookup.apply(key));
+        return RegistryCodecs.byName(registry, lookup, toKey).xmap(toKey, lookup);
     }
 
     /**
@@ -634,7 +635,7 @@ public final class PredicateCodecs {
             byCategory.put(type.category, type);
         }
         Codec<StatType> typeCodec = RegistryCodecs.byName(RegistryId.of("stat_type"), table::get, type -> type.id);
-        return typeCodec.dispatch(matcher -> byCategory.get(matcher.category()), type -> RecordCodecBuilder.<StatMatcher>mapCodec(i -> i.group(
+        return typeCodec.dispatch(matcher -> byCategory.get(matcher.category()), type -> RecordCodecBuilder.mapCodec(i -> i.group(
                 type.statCodec.fieldOf("stat").forGetter(StatMatcher::stat),
                 MinMaxBounds.INTS.optionalFieldOf("value", ANY_INT).forGetter(StatMatcher::value)
         ).apply(i, (stat, value) -> new StatMatcher(type.category, stat, value))));

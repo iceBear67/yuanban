@@ -4,6 +4,7 @@ import io.ib67.yuanban.datapack.PackStructureException;
 import io.ib67.yuanban.datapack.pack.Pack;
 import net.kyori.adventure.key.Key;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -70,7 +71,7 @@ public final class PackIndex {
                 var files = namespaces.computeIfAbsent(name, ignored -> new TreeMap<>());
                 Files.walkFileTree(child, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<>() {
                     @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    public @NotNull FileVisitResult visitFile(@NotNull Path file, @NotNull BasicFileAttributes attrs) {
                         // 跟随链接的时候仍然拿到链接自身的属性，说明链接目标不存在
                         if (attrs.isSymbolicLink()) {
                             throw new PackStructureException("数据包 " + pack.id() + " 中的符号链接 " + file + " 指向的目标不存在");

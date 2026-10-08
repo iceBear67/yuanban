@@ -75,8 +75,7 @@ public final class TagExpander {
                             .collect(Collectors.joining(", ")))
                     .collect(Collectors.joining("\n")));
         }
-        var result = new TreeMap<Key, List<Material>>();
-        expansion.built.forEach(result::put);
+        var result = new TreeMap<>(expansion.built);
         return new ItemTags(result);
     }
 

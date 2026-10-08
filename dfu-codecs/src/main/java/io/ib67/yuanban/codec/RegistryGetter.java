@@ -44,7 +44,7 @@ public interface RegistryGetter<T> {
      */
     static <T> RegistryGetter<T> of(Registry<T> registry) {
         return of(id -> registry.get(id) != null, tag -> {
-            var resolved = registry.getTag(TagKey.<T>of(tag));
+            var resolved = registry.getTag(TagKey.of(tag));
             if (resolved == null) {
                 return Optional.empty();
             }

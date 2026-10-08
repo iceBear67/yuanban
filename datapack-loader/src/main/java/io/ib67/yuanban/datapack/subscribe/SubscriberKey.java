@@ -1,6 +1,7 @@
 package io.ib67.yuanban.datapack.subscribe;
 
 import net.kyori.adventure.key.Key;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 
@@ -19,7 +20,7 @@ public record SubscriberKey<R>(Key name) {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return name.asString();
     }
 }

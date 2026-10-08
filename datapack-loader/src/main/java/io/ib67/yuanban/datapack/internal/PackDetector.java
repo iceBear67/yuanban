@@ -3,6 +3,7 @@ package io.ib67.yuanban.datapack.internal;
 import io.ib67.yuanban.datapack.PackStructureException;
 import io.ib67.yuanban.datapack.pack.PackRoot;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -63,13 +64,13 @@ public final class PackDetector {
     private static void validateDirectory(Path directory, PathMatcher symlinkAllowList) throws IOException {
         Files.walkFileTree(directory, new SimpleFileVisitor<>() {
             @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+            public @NotNull FileVisitResult preVisitDirectory(@NotNull Path dir, @NotNull BasicFileAttributes attrs) throws IOException {
                 check(dir, attrs);
                 return FileVisitResult.CONTINUE;
             }
 
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+            public @NotNull FileVisitResult visitFile(@NotNull Path file, @NotNull BasicFileAttributes attrs) throws IOException {
                 check(file, attrs);
                 return FileVisitResult.CONTINUE;
             }

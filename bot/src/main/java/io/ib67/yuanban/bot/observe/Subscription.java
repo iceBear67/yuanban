@@ -15,13 +15,15 @@ import java.util.Set;
  *                     {@code MinecraftPacket.class} 表示全部
  * @param sent         以 {@link PacketSent} 投递的出站数据包类，必须是客户端发往服务端的数据包；
  *                     {@code MinecraftPacket.class} 表示全部
- * @throws IllegalArgumentException 数据包类的方向不对，或者 observations 包含 {@link PacketReceived}、{@link PacketSent}
  */
 public record Subscription(Set<Class<? extends Observation>> observations,
                            Set<Class<? extends MinecraftPacket>> received,
                            Set<Class<? extends MinecraftPacket>> sent) {
     public static final Subscription NONE = new Subscription(Set.of(), Set.of(), Set.of());
 
+    /**
+     * @throws IllegalArgumentException 数据包类的方向不对，或者 observations 包含 {@link PacketReceived}、{@link PacketSent}
+     */
     public Subscription {
         observations = Set.copyOf(observations);
         received = Set.copyOf(received);
@@ -54,7 +56,7 @@ public record Subscription(Set<Class<? extends Observation>> observations,
     }
 
     private static <T> Set<T> union(Set<T> left, Iterable<? extends T> right) {
-        var result = new HashSet<T>(left);
+        var result = new HashSet<>(left);
         right.forEach(result::add);
         return result;
     }

@@ -180,25 +180,21 @@ public final class LootTypeRegistry {
     }
 
     public Optional<LootEntryType<? extends LootEntry>> entry(Key id) {
-        @SuppressWarnings("unchecked")
         var type = (LootEntryType<? extends LootEntry>) entries.get(id);
         return Optional.ofNullable(type);
     }
 
     public Optional<LootConditionType<? extends LootCondition>> condition(Key id) {
-        @SuppressWarnings("unchecked")
         var type = (LootConditionType<? extends LootCondition>) conditions.get(id);
         return Optional.ofNullable(type);
     }
 
     public Optional<LootFunctionType<? extends LootFunction>> function(Key id) {
-        @SuppressWarnings("unchecked")
         var type = (LootFunctionType<? extends LootFunction>) functions.get(id);
         return Optional.ofNullable(type);
     }
 
     public Optional<NumberProviderType<? extends NumberProvider>> numberProvider(Key id) {
-        @SuppressWarnings("unchecked")
         var type = (NumberProviderType<? extends NumberProvider>) numberProviders.get(id);
         return Optional.ofNullable(type);
     }

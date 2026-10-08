@@ -135,9 +135,7 @@ final class EntityPredicates {
             }
             case EntitySubPredicate.TargetedEntity targeted -> matches(targeted.targetedEntity(), level, position,
                     entity instanceof EntityCreature creature ? creature.getTarget() : null, process);
-            case EntitySubPredicate.Team team -> {
-                yield team.team().equals(teamName(entity, process));
-            }
+            case EntitySubPredicate.Team team -> team.team().equals(teamName(entity, process));
             case EntitySubPredicate.Slots slots -> {
                 for (var entry : slots.slots().entrySet()) {
                     if (!matchesSlots(entity, entry.getKey().slots(), entry.getValue(), process)) {

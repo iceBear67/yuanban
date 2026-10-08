@@ -3,6 +3,7 @@ package io.ib67.yuanban.bot.world;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.instance.block.Block;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 
@@ -22,7 +23,7 @@ public final class WorldSnapshot implements Block.Getter {
     }
 
     @Override
-    public Block getBlock(int x, int y, int z, Condition condition) {
+    public Block getBlock(int x, int y, int z, @NotNull Condition condition) {
         if (y < minY || y >= minY + height) {
             return Block.AIR;
         }

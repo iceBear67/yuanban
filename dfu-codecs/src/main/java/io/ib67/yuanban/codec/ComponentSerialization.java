@@ -185,7 +185,7 @@ public final class ComponentSerialization {
      * 原版 {@code TranslatableContents.ARG_CODEC}：可以写成纯文本的组件按字符串保存。
      */
     private static final Codec<Object> ARG_CODEC = Codec.either(PRIMITIVE_ARG_CODEC, VANILLA_CODEC).xmap(
-            either -> either.map(o -> o, component -> Objects.<Object>requireNonNullElse(component.tryCollapseToString(), component)),
+            either -> either.map(o -> o, component -> Objects.requireNonNullElse(component.tryCollapseToString(), component)),
             o -> o instanceof TextComponent component ? Either.right(component) : Either.left(o));
 
     // 七种内容
@@ -214,7 +214,7 @@ public final class ComponentSerialization {
      */
     private static final MapCodec<Score> SCORE_INNER = RecordCodecBuilder.mapCodec(i -> i.group(
             Codec.either(SELECTOR_STRING, Codec.STRING).fieldOf("name")
-                    .forGetter(o -> Either.<CompilableString<EntitySelectorParser.Selector>, String>right(o.name())),
+                    .forGetter(o -> Either.right(o.name())),
             Codec.STRING.fieldOf("objective").forGetter(Score::objective)
     ).apply(i, (name, objective) -> new Score(name.map(CompilableString::source, s -> s), objective)));
     /**
@@ -345,7 +345,7 @@ public final class ComponentSerialization {
             public <T> DataResult<Pair<Component, T>> decode(DynamicOps<T> ops, T input) {
                 return VANILLA_CODEC.decode(ops, input)
                         .flatMap(pair -> isTooLarge(ops, pair.getFirst())
-                                ? DataResult.<Pair<TextComponent, T>>error(() -> "Component was too large: greater than max size " + maxFlatSize)
+                                ? DataResult.error(() -> "Component was too large: greater than max size " + maxFlatSize)
                                 : DataResult.success(pair))
                         .flatMap(pair -> AdventureText.toAdventure(pair.getFirst()).map(component -> Pair.of(component, pair.getSecond())));
             }

@@ -86,7 +86,6 @@ public final class NbtOps implements DynamicOps<BinaryTag> {
             case CompoundBinaryTag _ -> convertMap(outOps, input);
             case IntArrayBinaryTag tag -> outOps.createIntList(Arrays.stream(tag.value()));
             case LongArrayBinaryTag tag -> outOps.createLongList(Arrays.stream(tag.value()));
-            default -> throw new IllegalArgumentException("Unknown tag type: " + input.type());
         };
     }
 
@@ -247,7 +246,7 @@ public final class NbtOps implements DynamicOps<BinaryTag> {
     @Override
     public DataResult<Stream<Pair<BinaryTag, BinaryTag>>> getMapValues(BinaryTag input) {
         if (input instanceof CompoundBinaryTag compound) {
-            return DataResult.success(compound.stream().map(entry -> Pair.<BinaryTag, BinaryTag>of(createString(entry.getKey()), entry.getValue())));
+            return DataResult.success(compound.stream().map(entry -> Pair.of(createString(entry.getKey()), entry.getValue())));
         }
         return DataResult.error(() -> "Not a map: " + StringTagVisitor.toString(input));
     }
@@ -283,7 +282,7 @@ public final class NbtOps implements DynamicOps<BinaryTag> {
 
                 @Override
                 public Stream<Pair<BinaryTag, BinaryTag>> entries() {
-                    return compound.stream().map(entry -> Pair.<BinaryTag, BinaryTag>of(createString(entry.getKey()), entry.getValue()));
+                    return compound.stream().map(entry -> Pair.of(createString(entry.getKey()), entry.getValue()));
                 }
 
                 @Override

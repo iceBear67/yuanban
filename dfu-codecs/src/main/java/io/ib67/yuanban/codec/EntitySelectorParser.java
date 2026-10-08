@@ -177,19 +177,18 @@ final class EntitySelectorParser {
         register("tag", parser -> {
             parser.shouldInvertValue();
             parser.reader.readUnquotedString();
-        }, parser -> true);
+        }, _ -> true);
         register("nbt", parser -> {
             parser.shouldInvertValue();
             TagParser.parseCompoundAsArgument(parser.reader);
-        }, parser -> true);
+        }, _ -> true);
         register("scores", parser -> {
             StringReader reader = parser.reader;
-            Map<String, Bounds<Integer>> expected = new HashMap<>();
             reader.expect('{');
             reader.skipWhitespace();
             while (reader.canRead() && reader.peek() != '}') {
                 reader.skipWhitespace();
-                String name = reader.readUnquotedString();
+                reader.readUnquotedString();
                 reader.skipWhitespace();
                 reader.expect('=');
                 reader.skipWhitespace();
@@ -200,7 +199,6 @@ final class EntitySelectorParser {
                     reader.setCursor(start);
                     throw ERROR_RANGE_SWAPPED.createWithContext(reader);
                 }
-                expected.put(name, value);
                 reader.skipWhitespace();
                 if (reader.canRead() && reader.peek() == ',') {
                     reader.skip();
@@ -257,7 +255,7 @@ final class EntitySelectorParser {
         register("predicate", parser -> {
             parser.shouldInvertValue();
             Identifiers.read(parser.reader);
-        }, parser -> true);
+        }, _ -> true);
     }
 
     private final StringReader reader;

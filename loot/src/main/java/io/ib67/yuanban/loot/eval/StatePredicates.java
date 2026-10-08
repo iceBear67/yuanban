@@ -54,13 +54,13 @@ final class StatePredicates {
      * 方块的属性定义，按方块缓存。
      */
     static Map<String, Property> properties(Block block) {
-        return BLOCK_PROPERTIES.computeIfAbsent(block.id(), id -> definition(block));
+        return BLOCK_PROPERTIES.computeIfAbsent(block.id(), _ -> definition(block));
     }
 
     private static Map<String, Property> definition(Block block) {
         var values = new LinkedHashMap<String, LinkedHashSet<String>>();
         for (var state : block.possibleStates()) {
-            state.properties().forEach((name, value) -> values.computeIfAbsent(name, key -> new LinkedHashSet<>()).add(value));
+            state.properties().forEach((name, value) -> values.computeIfAbsent(name, _ -> new LinkedHashSet<>()).add(value));
         }
         var result = new LinkedHashMap<String, Property>();
         values.forEach((name, set) -> result.put(name, new Property(kindOf(set), List.copyOf(set))));

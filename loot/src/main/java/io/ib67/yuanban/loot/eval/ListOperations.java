@@ -30,7 +30,7 @@ final class ListOperations {
                 if (original.size() + replacement.size() > maxSize) {
                     yield original;
                 }
-                var result = new ArrayList<T>(original);
+                var result = new ArrayList<>(original);
                 result.addAll(replacement);
                 yield List.copyOf(result);
             }
@@ -49,7 +49,7 @@ final class ListOperations {
         if (insert.offset() > originalSize || originalSize + replacement.size() > maxSize) {
             return original;
         }
-        var result = new ArrayList<T>(original.subList(0, insert.offset()));
+        var result = new ArrayList<>(original.subList(0, insert.offset()));
         result.addAll(replacement);
         result.addAll(original.subList(insert.offset(), originalSize));
         return List.copyOf(result);
@@ -60,7 +60,7 @@ final class ListOperations {
         if (section.offset() > originalSize) {
             return original;
         }
-        var result = new ArrayList<T>(original.subList(0, section.offset()));
+        var result = new ArrayList<>(original.subList(0, section.offset()));
         result.addAll(replacement);
         int resumeIndex = section.offset() + section.size().orElse(replacement.size());
         if (resumeIndex < originalSize) {
