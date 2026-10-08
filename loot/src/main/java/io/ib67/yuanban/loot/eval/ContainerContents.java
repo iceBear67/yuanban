@@ -3,7 +3,6 @@ package io.ib67.yuanban.loot.eval;
 import io.ib67.yuanban.loot.slot.ContainerComponent;
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.ItemStack;
-import org.apache.commons.lang3.math.Fraction;
 
 import java.util.ArrayList;
 import java.util.List;

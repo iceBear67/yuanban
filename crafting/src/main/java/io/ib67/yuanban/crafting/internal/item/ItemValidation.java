@@ -2,7 +2,6 @@ package io.ib67.yuanban.crafting.internal.item;
 
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.ItemStack;
-import org.apache.commons.lang3.math.Fraction;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.List;
