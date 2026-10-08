@@ -21,8 +21,9 @@ import java.util.Set;
  * 一张战利品表引用到的内容：物品标签、其他战利品表的 ID、嵌套的内联战利品表。
  * {@link #inspect(LootTable)} 沿条目和修饰器深度优先走查，只看 record 的字段，不做解析。
  * <p>
- * {@code tag} 条目的 {@code name} 和 {@code match_tool} 条件里 {@code #id} 形式的物品谓词进入 {@link #itemTags()}
- * （标签是否存在不在本模块校验，由 loot-table-parser 按当次加载的 {@code ItemTags} 核对）；
+ * {@code tag} 条目的 {@code name} 和 {@code match_tool} 条件的物品谓词中以标签给出的 {@code items} 进入
+ * {@link #itemTags()}（物品谓词的标签在解码时已经按当次加载的物品标签检查；{@code tag} 条目的标签与原版相同，
+ * 不检查是否存在，求值时找不到按空标签处理）；
  * {@code loot_table} 条目的 ID 形式和 {@code set_container_loot_table} 修饰器的 {@code name} 进入 {@link #tables()}；
  * {@code loot_table} 条目的内联表形式按出现顺序进入 {@link #nested()}，内联表自身继续按同一规则走查。
  */

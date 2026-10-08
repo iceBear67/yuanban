@@ -1,6 +1,9 @@
 package io.ib67.yuanban.datapack.internal;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.TypeAdapter;
 import io.ib67.yuanban.datapack.LoaderSettings;
 import io.ib67.yuanban.datapack.PackMetadataException;
 import io.ib67.yuanban.datapack.PackStructureException;
@@ -19,6 +22,11 @@ import java.nio.file.Files;
 @ApiStatus.Internal
 public final class PackMetadataReader {
     public static final String FILE_NAME = "pack.mcmeta";
+    /**
+     * 和原版 {@code GsonHelper.parse(Reader)} 相同，根元素用 Gson 的 {@link JsonObject} 适配器读取，
+     * 根元素不是对象的时候 Gson 抛出语法错误。
+     */
+    private static final TypeAdapter<JsonObject> JSON_OBJECT = new Gson().getAdapter(JsonObject.class);
 
     private PackMetadataReader() {
     }
@@ -30,10 +38,10 @@ public final class PackMetadataReader {
                 throw new PackStructureException("数据包 " + packId + " 缺少 " + FILE_NAME);
             }
             try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                var json = StrictJson.parse(reader);
+                var json = JSON_OBJECT.fromJsonTree(StrictJson.parse(reader));
                 return PackMetadataParser.parse(packId, json, settings);
             } catch (JsonParseException e) {
-                throw new PackMetadataException(packId, "", "JSON 语法错误：" + e.getMessage(), e);
+                throw new PackMetadataException(packId, "JSON 语法错误：" + e.getMessage(), e);
             }
         } catch (IOException e) {
             throw new UncheckedIOException("无法读取数据包 " + packId + " 的 " + FILE_NAME, e);

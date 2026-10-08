@@ -1,6 +1,7 @@
 package io.ib67.yuanban.enchant;
 
 import com.google.gson.JsonParser;
+import io.ib67.yuanban.codec.HolderSet;
 import io.ib67.yuanban.datapack.DataPackLoader;
 import io.ib67.yuanban.datapack.LoaderSettings;
 import io.ib67.yuanban.datapack.provider.BuiltInPackProvider;
@@ -28,8 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 读取原版 26.2 服务端 jar 中的全部附魔、附魔标签和附魔提供器。jar 由 {@code build.gradle}
- * 的下载任务准备，路径通过系统属性 {@code yuanban.vanilla-server} 传入。
+ * 读取原版 26.2 服务端 jar 中的全部附魔、附魔标签和附魔提供器。jar 由根项目的
+ * {@code extractVanillaServer} 任务准备，路径通过系统属性 {@code yuanban.vanilla-server} 传入。
  */
 @EnvTest
 @ExtendWith(ResetItemTags.class)
@@ -71,8 +72,9 @@ class VanillaDataTest {
             assertEquals(sharpnessJson.get("min_cost").getAsJsonObject().get("per_level_above_first").getAsInt(), sharpness.minCost().perLevelAboveFirst());
             assertEquals(sharpnessJson.get("max_cost").getAsJsonObject().get("base").getAsInt(), sharpness.maxCost().base());
             assertEquals(sharpnessJson.get("max_cost").getAsJsonObject().get("per_level_above_first").getAsInt(), sharpness.maxCost().perLevelAboveFirst());
-            assertEquals(sharpnessJson.get("exclusive_set").getAsString(), "#" + sharpness.exclusiveSet().asString());
-            assertEquals(sharpnessJson.get("supported_items").getAsString(), "#" + sharpness.supportedItems().asString());
+            assertEquals(HolderSet.named(Key.key(sharpnessJson.get("exclusive_set").getAsString().substring(1))), sharpness.exclusiveSet());
+            assertEquals(HolderSet.named(Key.key(sharpnessJson.get("supported_items").getAsString().substring(1))), sharpness.supportedItems());
+            assertEquals(HolderSet.named(Key.key(sharpnessJson.get("primary_items").getAsString().substring(1))), sharpness.primaryItems());
 
             // 注册表里的条目和数据包一致
             var registrySharpness = process.enchantment().get(Key.key("minecraft:sharpness"));
@@ -103,7 +105,7 @@ class VanillaDataTest {
                     "minecraft:sharpness", 2);
             var mobSpawnByCost = assertInstanceOf(ProviderEntry.ByCostWithDifficulty.class,
                     providerData.get(Key.key("minecraft:mob_spawn_equipment")));
-            assertEquals(Key.key("minecraft:on_mob_spawn_equipment"), mobSpawnByCost.enchantments());
+            assertEquals(HolderSet.named(Key.key("minecraft:on_mob_spawn_equipment")), mobSpawnByCost.enchantments());
             assertEquals(5, mobSpawnByCost.minCost());
             assertEquals(17, mobSpawnByCost.maxCostSpan());
         }

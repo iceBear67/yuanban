@@ -1,30 +1,38 @@
 package io.ib67.yuanban.lootparser;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
+import com.mojang.serialization.JsonOps;
+import io.ib67.yuanban.codec.RegistryGetter;
+import io.ib67.yuanban.codec.RegistryIds;
+import io.ib67.yuanban.codec.RegistryLookup;
+import io.ib67.yuanban.codec.RegistryOps;
 import io.ib67.yuanban.datapack.subscribe.Lifecycle;
 import io.ib67.yuanban.datapack.subscribe.PrepareContext;
 import io.ib67.yuanban.datapack.subscribe.Subscriber;
 import io.ib67.yuanban.datapack.subscribe.SubscriberKey;
 import io.ib67.yuanban.datapack.subscribe.Subscription;
+import io.ib67.yuanban.datapack.tag.TagDeclarations;
+import io.ib67.yuanban.datapack.tag.TagValue;
+import io.ib67.yuanban.datapack.topic.Resource;
 import io.ib67.yuanban.datapack.topic.Topic;
+import io.ib67.yuanban.enchant.EnchantmentSubscriber;
+import io.ib67.yuanban.enchant.EnchantmentTagSubscriber;
 import io.ib67.yuanban.itemtag.ItemTagSubscriber;
 import io.ib67.yuanban.itemtag.ItemTags;
 import io.ib67.yuanban.loot.LootManager;
-import io.ib67.yuanban.loot.LootTypeRegistry;
-import io.ib67.yuanban.loot.entry.SingletonEntry;
-import io.ib67.yuanban.loot.entry.TagEntry;
-import io.ib67.yuanban.loot.condition.LocationCheckCondition;
-import io.ib67.yuanban.loot.condition.LootCondition;
-import io.ib67.yuanban.loot.condition.MatchToolCondition;
-import io.ib67.yuanban.lootparser.internal.CodecWiring;
-import io.ib67.yuanban.lootparser.internal.LootCodecs;
+import io.ib67.yuanban.loot.LootTable;
+import io.ib67.yuanban.loot.codec.LootCodecs;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.ServerProcess;
+import net.minestom.server.item.Material;
+import net.minestom.server.registry.Registries;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.TreeMap;
 
@@ -32,33 +40,48 @@ import java.util.TreeMap;
  * 读取数据包里的战利品表，提交阶段交给 {@link LootManager}。
  * <p>
  * 生命周期为 {@link Lifecycle#RELOADABLE}：启动和每次数据包重载都会重新读取。
- * 读取要在 {@link ItemTagSubscriber} 之后完成，满足 {@code tag} 条目、{@code match_tool} 的
- * {@code #id} 引用对照同一次加载的物品标签。
+ * 战利品表按 {@link LootCodecs#table()} 解码，类型 ID 在 {@link LootManager#types()} 中查找，宿主注册的类型同样可以解码。
+ * 解码中的注册表引用按本次加载的内容检查：物品标签来自 {@link ItemTagSubscriber}，附魔与附魔标签来自
+ * {@link EnchantmentSubscriber} 与 {@link EnchantmentTagSubscriber}，结构与结构标签来自本次加载的
+ * {@code worldgen/structure} 文件与标签；其余注册表取 Minestom 的注册表。
  */
 public final class LootTableSubscriber implements Subscriber<LootTableSet> {
     public static final SubscriberKey<LootTableSet> KEY = SubscriberKey.of("yuanban:loot_tables");
     public static final Topic.Single TOPIC = Topic.json("loot_table");
+    /**
+     * 结构文件：只用于检查 {@code exploration_map} 等处的结构引用是否存在。
+     */
+    public static final Topic.Single STRUCTURE_TOPIC = Topic.json("worldgen/structure");
+    /**
+     * 结构标签：只用于检查结构标签是否存在。
+     */
+    public static final Topic.Tags STRUCTURE_TAG_TOPIC = Topic.tags("worldgen/structure");
 
+    private final ServerProcess process;
     private final LootManager manager;
     private final LootCodecs codecs;
     private volatile LootTableSet current = LootTableSet.EMPTY;
 
     public LootTableSubscriber(ServerProcess process, LootManager manager) {
-        Objects.requireNonNull(process, "process");
+        this.process = Objects.requireNonNull(process, "process");
         this.manager = Objects.requireNonNull(manager, "manager");
-        LootTypeRegistry types = manager.types();
-        CodecWiring.wire(types, process);
-        this.codecs = LootCodecs.of(process, types);
+        this.codecs = new LootCodecs(manager.types());
     }
 
     /**
-     * 生命周期为 {@link Lifecycle#RELOADABLE}、读取 {@link #TOPIC}、依赖 {@link ItemTagSubscriber#KEY} 的订阅。
+     * 生命周期为 {@link Lifecycle#RELOADABLE}、读取 {@link #TOPIC}、{@link #STRUCTURE_TOPIC} 与 {@link #STRUCTURE_TAG_TOPIC}，
+     * 依赖 {@link ItemTagSubscriber#KEY}、{@link EnchantmentSubscriber#KEY} 与 {@link EnchantmentTagSubscriber#KEY} 的订阅。
+     * 宿主需要同时注册这三个订阅。
      */
     public Subscription<LootTableSet> subscription() {
         return Subscription.builder(KEY, this)
                 .lifecycle(Lifecycle.RELOADABLE)
                 .topic(TOPIC)
+                .topic(STRUCTURE_TOPIC)
+                .topic(STRUCTURE_TAG_TOPIC)
                 .after(ItemTagSubscriber.KEY)
+                .after(EnchantmentSubscriber.KEY)
+                .after(EnchantmentTagSubscriber.KEY)
                 .build();
     }
 
@@ -69,104 +92,75 @@ public final class LootTableSubscriber implements Subscriber<LootTableSet> {
         return current;
     }
 
+    /**
+     * 解码全部战利品表。任何文件读取或解码失败时收集全部错误，按文本排序之后抛出 {@link LootException}。
+     */
     @Override
-    public LootTableSet prepare(PrepareContext context) throws Exception {
-        var files = context.contents(TOPIC).files();
+    public LootTableSet prepare(PrepareContext context) {
         var itemTags = context.dependency(ItemTagSubscriber.KEY);
+        var enchantments = context.dependency(EnchantmentSubscriber.KEY);
+        var enchantmentTags = context.dependency(EnchantmentTagSubscriber.KEY);
+        var ops = RegistryOps.create(JsonOps.INSTANCE, RegistryLookup.builder(process.registries())
+                .put(RegistryIds.ITEM, items(process.registries(), itemTags))
+                .put(RegistryIds.ENCHANTMENT, RegistryGetter.of(enchantments.enchantments().keySet(), enchantmentTags.tags()))
+                .put(RegistryIds.STRUCTURE, RegistryGetter.of(context.contents(STRUCTURE_TOPIC).files().keySet(),
+                        tags(context.contents(STRUCTURE_TAG_TOPIC))))
+                .build());
 
-        var decoded = new TreeMap<Key, io.ib67.yuanban.loot.LootTable>();
+        var decoded = new TreeMap<Key, LootTable>();
         var failures = new ArrayList<String>();
-        var resources = new TreeMap<Key, io.ib67.yuanban.datapack.topic.Resource>();
-
-        for (Map.Entry<Key, io.ib67.yuanban.datapack.topic.Resource> file : files.entrySet()) {
+        for (var file : context.contents(TOPIC).files().entrySet()) {
             var id = file.getKey();
             var resource = file.getValue();
-            resources.put(id, resource);
+            JsonElement json;
             try {
-                var json = resource.readJson();
-                var result = codecs.decodeTable(json);
-                if (result.error().isPresent()) {
-                    failures.add("Couldn't parse data file '" + id + "' from " + resource + ": "
-                            + result.error().get().message());
-                } else {
-                    decoded.put(id, result.result().orElseThrow());
-                }
-            } catch (IOException | RuntimeException e) {
-                failures.add("Couldn't parse data file '" + id + "' from " + resource + ": " + e.getMessage());
+                json = resource.readJson();
+            } catch (IOException | JsonParseException e) {
+                failures.add(failure(id, resource, e.getMessage()));
+                continue;
             }
-        }
-
-        // 标签核对：tag 条目的 name 与 match_tool 里的 #id 必须在本次加载的 ItemTags 里找得到。
-        for (Map.Entry<Key, io.ib67.yuanban.loot.LootTable> entry : decoded.entrySet()) {
-            validateTagReferences(entry.getKey(), entry.getValue(), resources.get(entry.getKey()), itemTags, failures);
+            var result = codecs.table().parse(ops, json);
+            result.error().ifPresentOrElse(
+                    error -> failures.add(failure(id, resource, error.message())),
+                    () -> decoded.put(id, result.getOrThrow()));
         }
 
         if (!failures.isEmpty()) {
-            // 全部行按资源 ID 字典序排序，与主错误通道的顺序对齐
             failures.sort(String::compareTo);
             throw new LootException(String.join("\n", failures));
         }
         return new LootTableSet(decoded);
     }
 
-    private void validateTagReferences(Key id, io.ib67.yuanban.loot.LootTable table,
-                                       io.ib67.yuanban.datapack.topic.Resource resource,
-                                       ItemTags tags, List<String> failures) {
-        for (var pool : table.pools()) {
-            for (var entry : pool.entries()) {
-                collectTagReferences(id, resource, entry, tags, failures);
-            }
-        }
+    /**
+     * 物品注册表：元素是 Minestom 的全部物品，标签是本次加载展开的物品标签。
+     */
+    private static RegistryGetter<Material> items(Registries registries, ItemTags itemTags) {
+        var materials = registries.material();
+        return RegistryGetter.of(id -> materials.get(id) != null,
+                tag -> itemTags.find(tag).map(items -> items.stream().map(Material::key).toList()));
     }
 
-    private void collectTagReferences(Key id, io.ib67.yuanban.datapack.topic.Resource resource,
-                                      io.ib67.yuanban.loot.entry.LootEntry entry, ItemTags tags,
-                                      List<String> failures) {
-        checkTag(id, resource, entry instanceof TagEntry tag ? tag.name() : null, tags, failures);
-        for (var condition : entry.conditions()) {
-            checkConditionTags(id, resource, condition, tags, failures);
-        }
-        if (entry instanceof io.ib67.yuanban.loot.entry.CompositeEntry composite) {
-            for (var child : composite.children()) {
-                collectTagReferences(id, resource, child, tags, failures);
-            }
-        }
+    /**
+     * 标签声明：解码只检查标签是否存在，内容取声明中直接写出的元素。
+     */
+    private static Map<Key, List<Key>> tags(TagDeclarations declarations) {
+        var result = new LinkedHashMap<Key, List<Key>>();
+        declarations.tags().forEach((id, declaration) -> result.put(id, declaration.values().stream()
+                .map(TagValue::entry)
+                .filter(entry -> !entry.tag())
+                .map(io.ib67.yuanban.datapack.tag.TagEntry::id)
+                .toList()));
+        return result;
     }
 
-    private void checkConditionTags(Key id, io.ib67.yuanban.datapack.topic.Resource resource,
-                                    LootCondition condition, ItemTags tags, List<String> failures) {
-        if (condition instanceof MatchToolCondition matchTool) {
-            var predicate = matchTool.predicate().orElse(null);
-            if (predicate != null && predicate.itemTag() != null) {
-                checkTag(id, resource, predicate.itemTag(), tags, failures);
-            }
-        }
-        var terms = switch (condition) {
-            case io.ib67.yuanban.loot.condition.AllOfCondition all -> all.terms();
-            case io.ib67.yuanban.loot.condition.AnyOfCondition any -> any.terms();
-            default -> List.<LootCondition>of();
-        };
-        for (var term : terms) {
-            checkConditionTags(id, resource, term, tags, failures);
-        }
-    }
-
-    private void checkTag(Key id, io.ib67.yuanban.datapack.topic.Resource resource,
-                          Key tagName, ItemTags tags, List<String> failures) {
-        if (tagName != null && tags.find(tagName).isEmpty()) {
-            failures.add("Couldn't parse data file '" + id + "' from " + resource
-                    + ": Missing tag: '" + tagName + "' in 'minecraft:item'");
-        }
+    private static String failure(Key id, Resource resource, String message) {
+        return "Couldn't parse data file '" + id.asString() + "' from " + resource + ": " + message;
     }
 
     @Override
     public void apply(LootTableSet prepared) {
         manager.replaceAll(prepared.tables());
         this.current = prepared;
-    }
-
-    private static String resourceName(io.ib67.yuanban.datapack.topic.Resource resource) {
-        // Resource 类封装了所在 pack 的路径；toString 已经包含资源位置信息。
-        return resource.toString();
     }
 }

@@ -5,11 +5,12 @@ import io.ib67.yuanban.loot.function.LootFunction;
 import net.kyori.adventure.key.Key;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
- * 原版 {@code tag}：按物品标签取材。JSON 独有字段 {@code name}（物品标签 ID）、
- * {@code expand}。{@code expand=true} 时按标签展开成单例集合（复合语义），{@code false}
- * 时每个物品各一件。
+ * 原版 {@code tag}：按物品标签取材。JSON 独有字段 {@code name}（物品标签 ID，解码时不检查是否存在）、
+ * {@code expand}（必填）。{@code expand=true} 时按标签展开成每个物品一个单例（复合语义），{@code false}
+ * 时每个物品各一件。求值时找不到的标签按空标签处理，与原版 {@code getTagOrEmpty} 相同。
  * <p>
  * 因 Java sealed permits 不能双向继承，本类同时承担 {@code expand=false} 的单例语义与
  * {@code expand=true} 的复合语义；求值器在 {@code expand=true} 时按 {@link #name()} 展开。
@@ -23,5 +24,6 @@ public record TagEntry(List<LootCondition> conditions,
     public TagEntry {
         conditions = conditions == null ? List.of() : List.copyOf(conditions);
         functions = functions == null ? List.of() : List.copyOf(functions);
+        Objects.requireNonNull(name, "name");
     }
 }

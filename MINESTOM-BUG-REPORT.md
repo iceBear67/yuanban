@@ -3,8 +3,10 @@
 Minestom version: `net.minestom:minestom:2026.10.05-26.2`.
 Reference: decompiled vanilla 26.2 server (`server-26.2.jar`, SHA-1 of the bundle `823e2250d24b3ddac457a60c92a6a941943fcd6a`).
 
-yuanban currently works around each issue below. Every workaround is marked in code with
-`FIXME(Minestom M<n>)` and listed in the root `README.md`.
+yuanban works around the issues below that affect its modules. Every workaround is marked in code with
+`FIXME(Minestom M<n>)` and listed in the root `README.md`. M8, M10, M11, M13, M17, M18, M19 and M20 affect clients
+built on Minestom's networking, registries and item data. The bot client uses MCProtocolLib and `net.minestom:data`
+for these, so these issues have no workaround in yuanban.
 
 ## M2. `SlotDisplay.SmithingTrim` encodes the trim pattern with the wrong type ~~PRed~~
 
@@ -84,11 +86,6 @@ registry before it decodes any entry.
 caller create tags and declare every entry name before the values are decoded, and exposes each entry as soon as
 its value is added.
 
-**yuanban workaround:** `:bot` contains a helper class in package `net.minestom.server.registry` that calls the
-package-private `DynamicRegistryImpl` constructor with collections it owns and writes to them directly. It first
-declares the names of all entries of all synced registries (a name without a value yet, so `getKey(Key)` resolves
-it), then adds the values in the server's order. This only works while Minestom runs on the class path.
-
 ## M9. Creating or removing a tag does not invalidate the cached tags packet
 
 `ConnectionManager` caches the tags packet (`cachedTagsPacket`) and only invalidates it from
@@ -117,10 +114,6 @@ block has no block entity of that type (`LevelChunk.replaceWithPacketData`).
 **Suggested fix:** keep the block entity type and NBT of each entry in `ChunkData` (or resolve the block from the
 decoded sections once the dimension's minimum Y is known), instead of looking a block up by the type name.
 
-**yuanban workaround:** the bot's TCP inbound thread (`decode.TcpInbound`) reads the Chunk Data and Update Light
-payload itself: the block of each block entity is the block at that position in the section palette, with the NBT
-attached; entries whose block has no block entity of that type are ignored, as in vanilla.
-
 ## M11. `PacketReading` applies server-side length limits to every reader
 
 `PacketReading.readPacket` takes its limit from `maxPacketSize(state)` (`PacketReading.java:210-212`, `:292-296`),
@@ -136,12 +129,10 @@ The limits cannot be changed per reader without changing global system propertie
 **Suggested fix:** let callers pass the frame and decompression limits (and the handling of leftover bytes) to
 `readPacket`, or provide client-side presets.
 
-**yuanban workaround:** the bot's TCP inbound thread (`decode.TcpInbound`) frames, decompresses and parses packets
-itself with the vanilla client rules, using `PacketVanilla.SERVER_PACKET_PARSER` for the payload.
-
 ## M12. Entity type data has no baby or pose-specific dimensions and attachments
 
-`EntityType.width`, `height` and `entityAttachments` describe the default adult dimensions only. Vanilla entity
+`EntityType.width`, `height` and `entityAttachments`, like the `entity_type.json` of `net.minestom:data` they are
+generated into, describe the default adult dimensions only. Vanilla entity
 classes replace the dimensions of babies (for example `Horse.BABY_DIMENSIONS` with a passenger attachment at
 `height - 0.125` scaled by 0.7, `Pig.BABY_DIMENSIONS`, `Llama.BABY_DIMENSIONS`, `Zombie.BABY_DIMENSIONS`) and of some
 poses (camel sitting dimensions, the `Avatar.POSES` of players and mannequins, including the fixed dying dimensions that
@@ -151,7 +142,8 @@ bounding box of a baby or of a crouching player, from Minestom's data.
 **Suggested fix:** include the baby and pose-specific dimensions with their attachments, and whether they are fixed, in
 the generated entity data.
 
-**yuanban workaround:** the bot's riding position (`movement.RidingSeat`) contains the vanilla 26.2 values for the
+**yuanban workaround:** the bot reads the default dimensions and attachments from `entity_type.json`
+(`data.EntityTypeData`). Its riding position (`movement.RidingSeat`) contains the vanilla 26.2 values for the
 vehicle types it supports (horse, skeleton horse, zombie horse, donkey, mule, llama, pig, strider, nautilus, chicken,
 camel, happy ghast), and its entity bounding boxes (`entity.EntityDimensions`) contain the vanilla 26.2 baby dimensions
 of every entity class that can be a baby and the pose dimensions of players and mannequins.
@@ -172,10 +164,6 @@ Minestom, including `MinecraftServer.init()` and `PacketVanilla`) avoids the cyc
 **Suggested fix:** break the cycle, for example by moving `Codec.COMPONENT` and `Codec.COMPONENT_STYLE` into a lazily
 initialized holder so that initializing `Codec` does not initialize `ComponentCodecs`, or by making the
 `ResolvableProfile` codecs reference `GameProfile.Property.LIST_CODEC` lazily.
-
-**yuanban workaround:** the bot initializes `Codec` before it uses any of these classes (creating a bot initializes the
-attribute, registry and packet classes), so the library itself is not affected. The bot tests construct every
-`GameProfile` through `TestServer.profile`, which initializes `Codec` first.
 
 ## M14. `PlayerStatistic` has no `equals` or `hashCode` (PRed)
 
@@ -231,11 +219,6 @@ changes the server makes to its own tags do not reach them.
 **Suggested fix:** keep item prototypes per `Registries` instance, or decode them lazily against the registries in use
 (for example the server process), or offer a way to rebind them when a server process is created.
 
-**yuanban workaround:** the bot uses the registries of the server process when one exists and constructs its own
-`Registries.vanilla()` only when there is none. It cannot undo the binding, so `VanillaReference` throws an
-`IllegalStateException` when it finds a server process after it has constructed its own registries; a JVM that needs a
-server process must create it before using bots.
-
 ## M18. Chat packets cannot carry a chat type defined inline
 
 The chat type of Player Chat Message and Disguised Chat Message is an `ID or Chat Type` field (vanilla
@@ -249,11 +232,6 @@ has no network type, so `Holder.networkType` cannot be used for it either.
 **Suggested fix:** add a network type for `ChatType` (the chat and narration `ChatTypeDecoration`s: translation key,
 parameters and style) and change both fields to `Holder<ChatType>` encoded with
 `Holder.networkType(Registries::chatType, ChatType.NETWORK_TYPE)`.
-
-**yuanban workaround:** none possible on the client side. The bot resolves the chat type of both packets as registry id
-`value - 1` and ends with an `IllegalStateException` when the value is `0`. Over TCP the definition is read as the
-sender name first, which fails for translation keys such as `chat.type.text` (`Invalid NBT type id: 14`), so the bot
-ends while decoding. Vanilla servers only send chat types from the registry.
 
 ## M19. `PlayerConnection.requestKnownPacks` can drop the client's response
 
@@ -269,10 +247,8 @@ response before it returns reproduces this every time.
 **Suggested fix:** store the future before sending the request, in a volatile field or an `AtomicReference` that
 `receiveKnownPacksResponse` clears with `getAndSet(null)`.
 
-**yuanban workaround:** the bot's embedded connection (`transport.embedded.EmbeddedPlayerConnection`) overrides
-`requestKnownPacks` and `receiveKnownPacksResponse` and keeps the pending future in an `AtomicReference` that is set
-before the request is sent. Over TCP the server side is Minestom's `PlayerSocketConnection`, which the bot cannot change:
-the response has to pass the server's write thread, the network and the bot's scheduler, so it usually arrives after the
+**yuanban workaround:** none. Over TCP the server side is Minestom's `PlayerSocketConnection`, which a client cannot
+change: the response has to pass the server's write thread, the network and the client, so it usually arrives after the
 assignment, but nothing guarantees it.
 
 ## M20. Direct biome palettes use one bit too many when the biome count is a power of two
@@ -295,7 +271,66 @@ entries, for which both give 7 bits.
 **Suggested fix:** use `ceillog2(biomeCount)`, that is `bitsToRepresent(biomeCount - 1)` for counts above 1 and `0`
 otherwise.
 
-**yuanban workaround:** the bot reads the biome palettes of Chunk Data and Update Light and of Chunk Biomes with
-`Palette.serializer` and `ceillog2(biome count)` direct bits (`decode.SectionDecoder.biomeSerializer`). A section that a
-Minestom server writes with a direct biome palette while the biome count is a power of two ends the bot with
-`Invalid bitsPerEntry`; vanilla clients cannot read it either.
+## M22. `Codec.COMPONENT` accepts and builds text components differently from vanilla
+
+`ComponentCodecs.COMPONENT` (`ComponentCodecs.java:313-404`), the codec behind `Codec.COMPONENT`, accepts input that
+vanilla `ComponentSerialization.CODEC` rejects, and decodes some input to other components:
+
+- A list decodes to `Component.empty().children(list)` (`ComponentCodecs.java:326-328`). Vanilla
+  `ComponentSerialization.createFromList` copies the first element and appends the other elements to it, so they inherit
+  its style: `[{"text":"a","bold":true},"b"]` gives a bold `b` in vanilla and a plain `b` in Minestom. An empty list
+  decodes to an empty component, where vanilla reports `List must have contents`. `extra` also accepts an empty list
+  (`ComponentCodecs.java:316`), which vanilla rejects with the same message.
+- An unknown `type` falls back to guessing the content from the other fields (`ComponentCodecs.java:344-368`), so
+  `{"type":"nope","text":"a"}` decodes to the text `a`; vanilla reports `Unknown element id: nope`.
+- `nbt` contents always fail with `NBTComponent not yet supported` (`ComponentCodecs.java:301-311`), although adventure
+  has `BlockNBTComponent`, `EntityNBTComponent` and `StorageNBTComponent`.
+- `show_item` hover events read only `id` and `count` (`ComponentCodecs.java:187-190`, `TODO(1.21.5): components`), so
+  `components` is dropped.
+- Translatable arguments (`with`) are decoded as components (`ComponentCodecs.java:237`): with `Transcoder.JSON` the
+  arguments `1` and `true` become the text components `"1"` and `"true"`. Vanilla keeps numbers and booleans as plain
+  arguments, which adventure holds with `TranslationArgument.numeric` and `TranslationArgument.bool`.
+- A `custom` click event without `payload` gets an empty compound payload (`ComponentCodecs.java:118`) and is encoded
+  again with `"payload": {}`. Vanilla keeps the payload absent; adventure has `ClickEvent.custom(Key)` for that.
+- `open_file` click events are accepted (`ComponentCodecs.java:101-102`); vanilla rejects them in text components with
+  `Click event type not allowed: OPEN_FILE`. `open_url` accepts any string (`ComponentCodecs.java:99-100`), for example
+  `ftp://example.com`; vanilla requires an absolute `http` or `https` URI (`Unsupported protocol in URI: ...`,
+  `Missing protocol in URI: ...`), and also rejects commands that contain characters disallowed in chat
+  (`Disallowed chat character: '§'`).
+- Selectors are taken as plain strings (`ComponentCodecs.java:247`); vanilla parses them with `EntitySelectorParser`
+  and reports `Invalid selector component: <selector>: <error>`.
+- The `player` of `object` contents uses `ResolvableProfile.CODEC` (`ResolvableProfile.java:28-31`), which has no form
+  with only a player name; vanilla `ResolvableProfile.CODEC` also accepts a player name string.
+- Error texts differ from vanilla, for example `Unknown color: rainbow` (`ComponentCodecs.java:56`) for vanilla
+  `Invalid color name: rainbow`, and `Unable to determine component type` (`ComponentCodecs.java:367`) for vanilla
+  `No matching codec found`.
+
+**Suggested fix:** follow vanilla `ComponentSerialization`: build lists from their first element and reject empty lists
+and an empty `extra`; report unknown `type` values; decode `nbt` contents into adventure's NBT components, `show_item`
+components into `DataComponentValue`s, and numeric and boolean translatable arguments into `TranslationArgument`s; keep
+an absent custom payload absent; reject `open_file` and validate URLs, command characters and selectors as vanilla
+does; add the player name form to `ResolvableProfile.CODEC`.
+
+**yuanban workaround:** `ComponentSerialization` in `:dfu-codecs` ports vanilla `ComponentSerialization.CODEC` and
+`ComponentSerialization.flatRestrictedCodec`, together with the parsers they use (`EntitySelectorParser`,
+`NbtPathArgument`, `BlockPosArgument`), and converts the result to adventure `Component`. Data that adventure cannot
+hold fails to decode with an error: relative block coordinates with a fraction in `nbt` block sources
+(`BlockNBTComponent.WorldPos.Coordinate` holds an `int`), and the cape, elytra and model of a player head skin
+(`PlayerHeadObjectContents` keeps only the texture). Adventure stores a hex colour equal to a named colour as the named
+colour, so it is encoded as the colour name.
+
+## M23. Map decoration types have no registry
+
+Minestom has no `map_decoration_type` registry: `MapDecorations.Entry.type` (`MapDecorations.java:33-39`) is a plain
+`String` and `MapDataPacket.Icon.type` (`MapDataPacket.java:62`) a plain `int`. In vanilla both are
+`Holder<MapDecorationType>` from the built-in `minecraft:map_decoration_type` registry, whose entries have the fields
+`assetId`, `showOnItemFrame`, `mapColor`, `explorationMapElement` and `trackCount`. Codecs that refer to a decoration
+type, such as `decoration` of the `exploration_map` loot function, cannot check the id against a registry; vanilla
+reports `Unknown registry key in ResourceKey[minecraft:root / minecraft:map_decoration_type]: <id>`.
+
+**Suggested fix:** add a static `map_decoration_type` registry with the vanilla entries and their fields, and use
+`RegistryKey<MapDecorationType>` for `MapDecorations.Entry.type` and the icon type of `MapDataPacket`.
+
+**yuanban workaround:** `MapDecorationTypes` in `:dfu-codecs` lists the 35 ids of the vanilla 26.2 registry in
+registration order, and `RegistryLookup` checks `map_decoration_type` ids against this list (used by the
+`exploration_map` loot function of `:loot`). Only correct for 26.2.

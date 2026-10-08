@@ -124,7 +124,7 @@ public record RecipeSet(NavigableMap<Key, Recipe<?>> recipes) {
 - `book`：合成配方为 `CraftingBookInfo(category, group)`，烧炼配方为 `CookingBookInfo(category, group)`。
 - `result`：`ItemStackTemplate(material, count, components)`，`components` 是配方文件中的组件补丁。
 - `materialCount`、`allowedGenerations`：`IntBounds(min, max)`，两端都可以为空。
-- `pattern`：Minestom 的 `Holder<TrimPattern>`。
+- `pattern`：Minestom 的 `Holder<TrimPattern>`。配方文件写纹饰样式 ID 时是 `RegistryKey`，写内联对象时是 `TrimPattern`。
 
 配方文件中的 `show_notification` 按原版检查类型，但不保存：它只用于配方解锁时的提示，`crafting` 让全部玩家已知全部配方。
 
@@ -142,14 +142,14 @@ public sealed interface ItemIngredient {
 
 ## 错误
 
-配方文件无法解码时，准备阶段抛出 `RecipeException`，整次加载失败（`datapack-loader` 抛出 `LoadFailedException`，它的 cause 就是这个异常），游戏状态不变。异常信息列出全部失败的文件，每行一个：
+配方文件不是合法的 JSON 或者无法解码时，准备阶段抛出 `RecipeException`，整次加载失败（`datapack-loader` 抛出 `LoadFailedException`，它的 cause 就是这个异常），游戏状态不变。异常信息列出全部失败的文件，每个文件一条，按配方 ID 排序，格式参照原版日志，解码错误的文本与原版相同：
 
 ```
 Couldn't parse data file 'example:foo' from [file/pack] data/example/recipe/foo.json: Missing tag: 'minecraft:logs' in 'minecraft:item'
 ```
 
-原版只记录日志并跳过这些文件。
+JSON 语法错误的错误文本是 Gson 异常的信息，可能带有换行。原版只记录日志并跳过这些文件。
 
 ## 测试
 
-测试会从 Mojang 下载 26.2 服务端 jar（约 60 MB，按 SHA-1 校验，下载一次之后保存在 `build/vanilla/`），用它验证原版全部配方都能解码。测试类使用 item-tag 提供的 `ResetItemTags` 扩展，见 [item-tag/README.md](../item-tag/README.md)；地图数据使用 crafting 的 testFixtures 中的 `InMemoryMaps`。
+测试使用根项目从 Mojang 下载的 26.2 服务端 jar（约 60 MB，按 SHA-1 校验，下载一次之后保存在根目录的 `build/vanilla/`，全部模块共用），用它验证原版全部配方都能解码。测试类使用 item-tag 提供的 `ResetItemTags` 扩展，见 [item-tag/README.md](../item-tag/README.md)；地图数据使用 crafting 的 testFixtures 中的 `InMemoryMaps`。

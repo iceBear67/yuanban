@@ -1,15 +1,17 @@
 package io.ib67.yuanban.loot.function;
 
+import io.ib67.yuanban.codec.NbtPath;
+
+import java.util.Objects;
+
 /**
  * {@code copy_custom_data} 的一次复制动作：原版 {@code CopyCustomDataFunction$CopyOperation}。
- * JSON 字段 {@code source}、{@code target}、{@code op}（默认 {@code replace}）。
+ * JSON 字段 {@code source}、{@code target}（NBT 路径）、{@code op}（必填，{@code replace}、{@code append}、{@code merge}）。
  */
-public record CopyOperation(String source, String target, MergeStrategy op) {
+public record CopyOperation(NbtPath source, NbtPath target, MergeStrategy op) {
     public CopyOperation {
-        op = op == null ? MergeStrategy.REPLACE : op;
-    }
-
-    public CopyOperation(String source, String target) {
-        this(source, target, MergeStrategy.REPLACE);
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(op, "op");
     }
 }

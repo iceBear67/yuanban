@@ -3,6 +3,7 @@ package io.ib67.yuanban.loot.context;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.ServerProcess;
 import net.minestom.server.entity.Player;
+import net.minestom.server.instance.Instance;
 import net.minestom.server.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
@@ -22,6 +23,7 @@ import java.util.Set;
  */
 public final class LootContextImpl implements LootContext {
     private final ServerProcess process;
+    private final @Nullable Instance level;
     private final Key contextType;
     private final Map<ContextKey<?>, Object> params;
     private final float luck;
@@ -31,12 +33,15 @@ public final class LootContextImpl implements LootContext {
      * 经环境构造：{@code process()} 取 {@code environment.process()}，运气按
      * {@link LootEnvironment#luckOf} 计算。{@code tool} 缺省时读取
      * {@link ContextKey#TOOL} 参数的值（与原版工具栏位一致）。
+     *
+     * @param level 取用所在的世界，对应原版 {@code LootParams} 的世界；为 {@code null} 时需要世界的求值抛出异常
      */
-    public LootContextImpl(LootEnvironment environment, Key contextType,
+    public LootContextImpl(LootEnvironment environment, @Nullable Instance level, Key contextType,
                            Map<ContextKey<?>, Object> params,
                            @Nullable Player luckPlayer, @Nullable ItemStack tool, Random random) {
         Objects.requireNonNull(environment, "environment");
         this.process = environment.process();
+        this.level = level;
         this.contextType = Objects.requireNonNull(contextType, "contextType");
         this.params = Map.copyOf(Objects.requireNonNull(params, "params"));
         this.random = Objects.requireNonNull(random, "random");
@@ -47,9 +52,10 @@ public final class LootContextImpl implements LootContext {
     /**
      * 显式给出进程与运气的构造，供求值器派生稳定序列上下文和宿主自己组装的场景使用。
      */
-    public LootContextImpl(ServerProcess process, Key contextType, Map<ContextKey<?>, Object> params,
-                           float luck, Random random) {
+    public LootContextImpl(ServerProcess process, @Nullable Instance level, Key contextType,
+                           Map<ContextKey<?>, Object> params, float luck, Random random) {
         this.process = Objects.requireNonNull(process, "process");
+        this.level = level;
         this.contextType = Objects.requireNonNull(contextType, "contextType");
         this.params = Map.copyOf(Objects.requireNonNull(params, "params"));
         this.random = Objects.requireNonNull(random, "random");
@@ -96,6 +102,11 @@ public final class LootContextImpl implements LootContext {
     }
 
     @Override
+    public @Nullable Instance level() {
+        return level;
+    }
+
+    @Override
     public Random random() {
         return random;
     }
@@ -104,6 +115,6 @@ public final class LootContextImpl implements LootContext {
      * 求值器内部使用的派生副本：替换随机数源（稳定序列），其余内容不变。
      */
     public LootContextImpl withRandom(Random derived) {
-        return new LootContextImpl(process, contextType, params, luck, derived);
+        return new LootContextImpl(process, level, contextType, params, luck, derived);
     }
 }

@@ -1,5 +1,8 @@
 package io.ib67.yuanban.lootparser;
 
+import io.ib67.yuanban.codec.HolderSet;
+import io.ib67.yuanban.datapack.LoadFailedException;
+import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import io.ib67.yuanban.loot.LootManager;
 import io.ib67.yuanban.loot.LootTable;
 import io.ib67.yuanban.loot.LootTypeRegistry;
@@ -7,23 +10,24 @@ import io.ib67.yuanban.loot.condition.*;
 import io.ib67.yuanban.loot.entry.*;
 import io.ib67.yuanban.loot.function.*;
 import io.ib67.yuanban.loot.number.*;
-import io.ib67.yuanban.lootparser.internal.CodecWiring;
+import io.ib67.yuanban.loot.predicate.ItemPredicate;
 import net.kyori.adventure.key.Key;
-import net.minestom.server.ServerProcess;
+import net.minestom.server.item.Material;
 import net.minestom.testing.Env;
 import net.minestom.testing.EnvTest;
-import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 每个原版条目（9）/ 条件（20）/ 修饰器（44）/ 数字提供器（8）至少一个正常用例，断言字段与缺省值；
- * 对照 loot-table-parser 设计第 4 节的字段名与原版 26.2 MapCodec 的缺省值。
+ * 经过数据包加载解码战利品表：原版 9 种条目、20 种条件、43 种修饰器、8 种数字提供器各至少一个用例，
+ * 以及本次修正的原版行为的接受与拒绝用例；错误文本与原版相同。
  */
 @EnvTest
 @ExtendWith(ResetItemTags.class)
@@ -31,970 +35,458 @@ class LootDecodingTest {
     @TempDir
     Path tempDir;
 
-    private static LootTypeRegistry wireTypes(ServerProcess p) {
-        var types = LootTypeRegistry.vanilla();
-        CodecWiring.wire(types, p);
-        return types;
+    private LootTable load(Env env, String json) {
+        return load(env, world -> world, json);
     }
 
-    private LootTable load(Env env, String path, String json) {
-        var world = new LootTestWorld(tempDir).vanilla(path, json);
+    /**
+     * 加载 {@code loot_table/t.json}；{@code setup} 可以向原版数据中加入标签、附魔或其他战利品表。
+     */
+    private LootTable load(Env env, UnaryOperator<LootTestWorld> setup, String json) {
+        var world = setup.apply(new LootTestWorld(tempDir)).vanilla("loot_table/t.json", json);
         var manager = new LootManager(LootTypeRegistry.vanilla());
-        var loottables = new LootTableSubscriber(env.process(), manager);
-        var session = world.loader(env.process(), loottables).start(LootTestWorld.createWorld());
+        var session = world.loader(env.process(), new LootTableSubscriber(env.process(), manager)).start(LootTestWorld.createWorld());
         try {
-            var id = Key.key(path.substring("loot_table/".length(), path.length() - ".json".length()));
-            return manager.get(id).orElseThrow(() -> new AssertionError("loot table not decoded: " + id));
+            return manager.get(Key.key("t")).orElseThrow(() -> new AssertionError("loot table not decoded"));
         } finally {
             session.close();
         }
     }
 
     /**
-     * 一次性加载多份 vanilla 路径文件后取指定 ID 的表；用于「引用必须已存在」的用例。
+     * 加载失败时 {@code loot_table/t.json} 的错误信息（去掉文件位置的前缀）。
      */
-    private LootTable loadReferenced(Env env, java.util.Map<String, String> files, String id) {
-        var world = new LootTestWorld(tempDir);
-        files.forEach(world::vanilla);
+    private String failure(Env env, UnaryOperator<LootTestWorld> setup, String json) {
+        var world = setup.apply(new LootTestWorld(tempDir)).vanilla("loot_table/t.json", json);
         var manager = new LootManager(LootTypeRegistry.vanilla());
-        var loottables = new LootTableSubscriber(env.process(), manager);
-        var session = world.loader(env.process(), loottables).start(LootTestWorld.createWorld());
-        try {
-            return manager.get(Key.key(id)).orElseThrow(() -> new AssertionError("loot table not decoded: " + id));
-        } finally {
-            session.close();
-        }
+        var loader = world.loader(env.process(), new LootTableSubscriber(env.process(), manager));
+        var thrown = assertThrows(LoadFailedException.class, () -> loader.start(LootTestWorld.createWorld()));
+        var exception = assertInstanceOf(LootException.class, thrown.getCause());
+        var prefix = "Couldn't parse data file 'minecraft:t' from [vanilla] data/minecraft/loot_table/t.json: ";
+        assertTrue(exception.getMessage().startsWith(prefix), exception.getMessage());
+        return exception.getMessage().substring(prefix.length());
     }
 
-    private LootEntry firstEntry(LootTable t) {
-        return t.pools().getFirst().entries().getFirst();
+    private String failure(Env env, String json) {
+        return failure(env, world -> world, json);
     }
 
-    private String entryJson(String typeJson) {
-        return "{\"pools\":[{\"rolls\":1,\"entries\":[" + typeJson + "]}]}";
+    private static void assertContains(String expected, String message) {
+        assertTrue(message.contains(expected), "expected [" + expected + "] in [" + message + "]");
+    }
+
+    private static UnaryOperator<LootTestWorld> enchantments() {
+        return world -> world.enchantment("fortune", 3).enchantment("looting", 3).enchantment("sharpness", 5);
+    }
+
+    private static String entries(String... entries) {
+        return "{\"pools\":[{\"rolls\":1,\"entries\":[" + String.join(",", entries) + "]}]}";
+    }
+
+    private static String withConditions(String... conditions) {
+        return entries("{\"type\":\"item\",\"name\":\"stone\",\"conditions\":[" + String.join(",", conditions) + "]}");
+    }
+
+    private static String withFunctions(String... functions) {
+        return entries("{\"type\":\"item\",\"name\":\"stone\",\"functions\":[" + String.join(",", functions) + "]}");
+    }
+
+    private static List<LootCondition> conditions(LootTable table) {
+        return table.pools().getFirst().entries().getFirst().conditions();
+    }
+
+    private static List<LootFunction> functions(LootTable table) {
+        return ((SingletonEntry) table.pools().getFirst().entries().getFirst()).functions();
     }
 
     // ------------------------------------------------------------------
-    // 顶层与池
+    // 表与池
     // ------------------------------------------------------------------
 
     @Test
     void tableDefaults(Env env) {
-        var t = load(env, "loot_table/test.json", "{\"pools\":[]}");
-        assertEquals(Key.key("minecraft:generic"), t.type());
-        assertTrue(t.randomSequence().isEmpty());
-        assertTrue(t.functions().isEmpty());
-        assertTrue(t.pools().isEmpty());
+        var table = load(env, "{\"pools\":[]}");
+        assertEquals(Key.key("minecraft:generic"), table.type());
+        assertTrue(table.randomSequence().isEmpty());
+        assertTrue(table.functions().isEmpty());
+        assertEquals(Key.key("chest"), load(env, "{\"type\":\"minecraft:chest\"}").type());
     }
 
     @Test
-    void tableTypeField(Env env) {
-        var t = load(env, "loot_table/test.json", "{\"type\":\"minecraft:chest\",\"pools\":[]}");
-        assertEquals(Key.key("minecraft:chest"), t.type());
+    void tableUnknownTypeFallsBackToGeneric(Env env) {
+        // 原版 LootTable.DIRECT_CODEC 用 lenientOptionalFieldOf 读 type
+        assertEquals(LootTable.DEFAULT_TYPE, load(env, "{\"type\":\"minecraft:bogus\",\"pools\":[]}").type());
     }
 
     @Test
-    void tableUnknownTypeFails(Env env) {
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json", "{\"type\":\"minecraft:bogus\",\"pools\":[]}"));
-    }
-
-    @Test
-    void poolRollsAndDefaults(Env env) {
-        var t = load(env, "loot_table/test.json",
-                "{\"pools\":[{\"rolls\":3,\"entries\":[{\"type\":\"minecraft:empty\"}]}]}");
-        var pool = t.pools().getFirst();
-        assertEquals(3f, ((ConstantValue) pool.rolls()).value());
+    void poolEntriesMayBeEmpty(Env env) {
+        var pool = load(env, "{\"pools\":[{\"rolls\":3,\"entries\":[]}]}").pools().getFirst();
+        assertTrue(pool.entries().isEmpty());
+        assertEquals(new ConstantValue(3.0f), pool.rolls());
         assertEquals(ConstantValue.ZERO, pool.bonusRolls());
-        assertTrue(pool.conditions().isEmpty());
-        assertTrue(pool.functions().isEmpty());
-    }
-
-    @Test
-    void poolEmptyEntriesFails(Env env) {
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json", "{\"pools\":[{\"rolls\":1,\"entries\":[]}]}"));
+        assertContains("No key entries", failure(env, "{\"pools\":[{\"rolls\":1}]}"));
     }
 
     // ------------------------------------------------------------------
-    // 条目：item / loot_table / dynamic / empty / slots / tag / group / alternatives / sequence
+    // 条目
     // ------------------------------------------------------------------
 
     @Test
-    void itemEntryDefaults(Env env) {
-        var t = load(env, "loot_table/test.json",
-                entryJson("{\"type\":\"minecraft:item\",\"name\":\"minecraft:stone\"}"));
-        var e = assertInstanceOf(ItemEntry.class, firstEntry(t));
-        assertEquals(Key.key("minecraft:stone"), e.name());
-        assertEquals(1, e.weight());
-        assertEquals(0, e.quality());
-        assertTrue(e.conditions().isEmpty());
-        assertTrue(e.functions().isEmpty());
+    void allEntryTypes(Env env) {
+        var table = load(env, world -> world.vanilla("tags/item/planks.json", "{\"values\":[\"minecraft:oak_planks\"]}")
+                .vanilla("loot_table/other.json", "{\"pools\":[]}"), entries(
+                "{\"type\":\"empty\"}",
+                "{\"type\":\"item\",\"name\":\"stone\",\"weight\":5,\"quality\":3}",
+                "{\"type\":\"loot_table\",\"value\":\"minecraft:other\"}",
+                "{\"type\":\"dynamic\",\"name\":\"example:anything\"}",
+                "{\"type\":\"tag\",\"name\":\"minecraft:planks\",\"expand\":true}",
+                "{\"type\":\"slots\",\"slot_source\":{\"type\":\"slot_range\",\"source\":\"this\",\"slots\":\"hotbar.*\"}}",
+                "{\"type\":\"alternatives\",\"children\":[{\"type\":\"empty\"}]}",
+                "{\"type\":\"sequence\"}",
+                "{\"type\":\"group\",\"children\":[],\"conditions\":[{\"condition\":\"killed_by_player\"}]}"));
+        var decoded = table.pools().getFirst().entries();
+        assertInstanceOf(EmptyEntry.class, decoded.get(0));
+        var item = assertInstanceOf(ItemEntry.class, decoded.get(1));
+        assertEquals(Material.STONE, item.name());
+        assertEquals(5, item.weight());
+        assertEquals(3, item.quality());
+        assertEquals(Key.key("other"), assertInstanceOf(NestedTableEntry.class, decoded.get(2)).value().left().orElseThrow());
+        assertEquals(Key.key("example:anything"), assertInstanceOf(DynamicEntry.class, decoded.get(3)).name());
+        assertTrue(assertInstanceOf(TagEntry.class, decoded.get(4)).expand());
+        assertInstanceOf(SlotsEntry.class, decoded.get(5));
+        assertEquals(1, assertInstanceOf(AlternativesEntry.class, decoded.get(6)).children().size());
+        assertTrue(assertInstanceOf(SequenceEntry.class, decoded.get(7)).children().isEmpty());
+        var group = assertInstanceOf(GroupEntry.class, decoded.get(8));
+        assertTrue(group.children().isEmpty());
+        assertEquals(1, group.conditions().size());
     }
 
     @Test
-    void itemEntryWeightAndQuality(Env env) {
-        var t = load(env, "loot_table/test.json",
-                entryJson("{\"type\":\"minecraft:item\",\"name\":\"minecraft:dirt\",\"weight\":5,\"quality\":3}"));
-        var e = assertInstanceOf(ItemEntry.class, firstEntry(t));
-        assertEquals(5, e.weight());
-        assertEquals(3, e.quality());
+    void tagEntryDoesNotCheckTheTag(Env env) {
+        // 原版 TagEntry 的 name 是 TagKey.codec，解码时不检查标签是否存在
+        var entry = assertInstanceOf(TagEntry.class, load(env, entries("{\"type\":\"tag\",\"name\":\"minecraft:no_such_tag\",\"expand\":false}"))
+                .pools().getFirst().entries().getFirst());
+        assertEquals(Key.key("no_such_tag"), entry.name());
     }
 
     @Test
-    void itemEntryWeightNotIntFails(Env env) {
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json",
-                        entryJson("{\"type\":\"minecraft:item\",\"name\":\"minecraft:dirt\",\"weight\":\"x\"}")));
+    void tagEntryExpandIsRequired(Env env) {
+        assertContains("No key expand", failure(env, entries("{\"type\":\"tag\",\"name\":\"minecraft:planks\"}")));
     }
 
     @Test
-    void itemEntryUnknownNameFails(Env env) {
-        // 原版不校验物品是否在注册表，这里测 item.name 必须是合法命名空间 ID
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json",
-                        entryJson("{\"type\":\"minecraft:item\",\"name\":\"not a id\"}")));
+    void unknownEntryType(Env env) {
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:loot_pool_entry_type]: minecraft:bogus_entry",
+                failure(env, entries("{\"type\":\"minecraft:bogus_entry\",\"name\":\"minecraft:stone\"}")));
     }
 
     @Test
-    void nestedTableEntryById(Env env) {
-        // LootManager 校验表 ID 引用必须存在，因此把被引用的表一并加载
-        var t = loadReferenced(env, java.util.Map.of(
-                "loot_table/test.json", entryJson(
-                        "{\"type\":\"minecraft:loot_table\",\"value\":\"minecraft:chests/desert_pyramid\"}"),
-                "loot_table/chests/desert_pyramid.json", "{\"pools\":[]}"
-        ), "test");
-        var e = assertInstanceOf(NestedTableEntry.class, firstEntry(t));
-        assertEquals(Key.key("minecraft:chests/desert_pyramid"), e.value().left().orElseThrow());
-    }
-
-    @Test
-    void dynamicEntryContents(Env env) {
-        var t = load(env, "loot_table/test.json",
-                entryJson("{\"type\":\"minecraft:dynamic\",\"name\":\"minecraft:contents\"}"));
-        var e = assertInstanceOf(DynamicEntry.class, firstEntry(t));
-        assertEquals(Key.key("contents"), e.name());
-    }
-
-    @Test
-    void dynamicEntrySherds(Env env) {
-        var t = load(env, "loot_table/test.json",
-                entryJson("{\"type\":\"minecraft:dynamic\",\"name\":\"sherds\"}"));
-        var e = assertInstanceOf(DynamicEntry.class, firstEntry(t));
-        assertEquals(Key.key("sherds"), e.name());
-    }
-
-    @Test
-    void dynamicEntryWrongNameFails(Env env) {
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json",
-                        entryJson("{\"type\":\"minecraft:dynamic\",\"name\":\"minecraft:other\"}")));
-    }
-
-    @Test
-    void emptyEntry(Env env) {
-        var t = load(env, "loot_table/test.json",
-                entryJson("{\"type\":\"minecraft:empty\"}"));
-        var e = assertInstanceOf(EmptyEntry.class, firstEntry(t));
-        assertEquals(1, e.weight());
-    }
-
-    @Test
-    void tagEntryRequiresItemTagExists(Env env) {
-        var world = new LootTestWorld(tempDir)
-                .vanilla("tags/item/planks.json", "{\"values\":[\"minecraft:oak_planks\"]}")
-                .vanilla("loot_table/test.json", entryJson(
-                        "{\"type\":\"minecraft:tag\",\"name\":\"minecraft:planks\",\"expand\":true}"));
-        var manager = new LootManager(LootTypeRegistry.vanilla());
-        var loottables = new LootTableSubscriber(env.process(), manager);
-        world.loader(env.process(), loottables).start(LootTestWorld.createWorld());
-        var e = assertInstanceOf(TagEntry.class, firstEntry(manager.get(Key.key("test")).orElseThrow()));
-        assertEquals(Key.key("minecraft:planks"), e.name());
-        assertTrue(e.expand());
-    }
-
-    @Test
-    void tagEntryUnknownTagFails(Env env) {
-        assertThrows(Exception.class, () ->
-                load(env, "loot_table/test.json", entryJson(
-                        "{\"type\":\"minecraft:tag\",\"name\":\"minecraft:wel\",\"expand\":true}")));
-    }
-
-    @Test
-    void tagEntryExpandDefaultsFalse(Env env) {
-        var world = new LootTestWorld(tempDir)
-                .vanilla("tags/item/planks.json", "{\"values\":[\"minecraft:oak_planks\"]}")
-                .vanilla("loot_table/test.json", entryJson(
-                        "{\"type\":\"minecraft:tag\",\"name\":\"minecraft:planks\"}"));
-        var manager = new LootManager(LootTypeRegistry.vanilla());
-        var loottables = new LootTableSubscriber(env.process(), manager);
-        world.loader(env.process(), loottables).start(LootTestWorld.createWorld());
-        assertFalse(assertInstanceOf(TagEntry.class, firstEntry(manager.get(Key.key("test")).orElseThrow())).expand());
-    }
-
-    @Test
-    void groupEntry(Env env) {
-        var t = load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:group\",\"children\":[{\"type\":\"minecraft:empty\"},{\"type\":\"minecraft:empty\"}]}"));
-        var e = assertInstanceOf(GroupEntry.class, firstEntry(t));
-        assertEquals(2, e.children().size());
-    }
-
-    @Test
-    void alternativesEntry(Env env) {
-        var t = load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:alternatives\",\"children\":[{\"type\":\"minecraft:empty\"},{\"type\":\"minecraft:item\",\"name\":\"minecraft:stone\"}]}"));
-        var e = assertInstanceOf(AlternativesEntry.class, firstEntry(t));
-        assertEquals(2, e.children().size());
-    }
-
-    @Test
-    void sequenceEntry(Env env) {
-        var t = load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:sequence\",\"children\":[{\"type\":\"minecraft:empty\"},{\"type\":\"minecraft:empty\"}]}"));
-        var e = assertInstanceOf(SequenceEntry.class, firstEntry(t));
-        assertEquals(2, e.children().size());
-    }
-
-    @Test
-    void compositeEntryEmptyChildrenFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:group\",\"children\":[]}")));
-        assertThrows(Exception.class, () -> load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:alternatives\",\"children\":[]}")));
-        assertThrows(Exception.class, () -> load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:sequence\",\"children\":[]}")));
-    }
-
-    @Test
-    void unknownEntryTypeFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"minecraft:bogus_entry\",\"name\":\"minecraft:stone\"}")));
-        assertThrows(Exception.class, () -> load(env, "loot_table/test.json", entryJson(
-                "{\"type\":\"foo:bar\"}")));
+    void itemEntryRejectsAirAndUnknownItems(Env env) {
+        assertContains("Item must not be minecraft:air", failure(env, entries("{\"type\":\"item\",\"name\":\"air\"}")));
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:item]: minecraft:nope",
+                failure(env, entries("{\"type\":\"item\",\"name\":\"nope\"}")));
     }
 
     // ------------------------------------------------------------------
-    // 条件：20 种
+    // 条件
     // ------------------------------------------------------------------
 
-    private String withCondition(String conditionJson) {
-        return "{\"pools\":[{\"rolls\":1,\"entries\":[{\"type\":\"minecraft:item\",\"name\":\"minecraft:stone\",\"conditions\":["
-                + conditionJson + "]}]}]}";
-    }
-
-    private LootCondition firstCondition(LootTable t) {
-        return t.pools().getFirst().entries().getFirst().conditions().getFirst();
+    @Test
+    void allConditionTypes(Env env) {
+        var clock = env.process().worldClock().getKey(0).key().asString();
+        var table = load(env, enchantments(), withConditions(
+                "{\"condition\":\"inverted\",\"term\":{\"condition\":\"killed_by_player\"}}",
+                "{\"condition\":\"any_of\",\"terms\":[{\"condition\":\"survives_explosion\"}]}",
+                "{\"condition\":\"all_of\",\"terms\":[]}",
+                "{\"condition\":\"random_chance\",\"chance\":0.5}",
+                "{\"condition\":\"random_chance_with_enchanted_bonus\",\"unenchanted_chance\":0.1,\"enchanted_chance\":{\"type\":\"linear\",\"base\":0.5,\"per_level_above_first\":0.5},\"enchantment\":\"looting\"}",
+                "{\"condition\":\"entity_properties\",\"entity\":\"this\",\"predicate\":{\"minecraft:entity_type\":\"minecraft:pig\"}}",
+                "{\"condition\":\"killed_by_player\"}",
+                "{\"condition\":\"entity_scores\",\"entity\":\"this\",\"scores\":{\"kills\":{\"min\":1}}}",
+                "{\"condition\":\"block_state_property\",\"block\":\"wheat\",\"properties\":{\"age\":{\"min\":\"3\"}}}",
+                "{\"condition\":\"match_tool\",\"predicate\":{\"items\":\"minecraft:shears\"}}",
+                "{\"condition\":\"table_bonus\",\"enchantment\":\"fortune\",\"chances\":[0.5,0.6]}",
+                "{\"condition\":\"survives_explosion\"}",
+                "{\"condition\":\"damage_source_properties\",\"predicate\":{\"tags\":[{\"id\":\"minecraft:is_fire\",\"expected\":true}]}}",
+                "{\"condition\":\"location_check\",\"offsetY\":1,\"predicate\":{\"block\":{\"blocks\":\"minecraft:stone\"}}}",
+                "{\"condition\":\"weather_check\",\"raining\":true}",
+                "{\"condition\":\"reference\",\"name\":\"example:any\"}",
+                "{\"condition\":\"time_check\",\"clock\":\"" + clock + "\",\"value\":1000}",
+                "{\"condition\":\"value_check\",\"value\":1,\"range\":5}",
+                "{\"condition\":\"enchantment_active_check\",\"active\":true}",
+                "{\"condition\":\"environment_attribute_check\",\"attribute\":\"gameplay/fast_lava\",\"value\":true}"));
+        var decoded = conditions(table);
+        assertEquals(20, decoded.size());
+        assertInstanceOf(InvertedCondition.class, decoded.get(0));
+        assertInstanceOf(AnyOfCondition.class, decoded.get(1));
+        assertInstanceOf(AllOfCondition.class, decoded.get(2));
+        assertInstanceOf(RandomChanceCondition.class, decoded.get(3));
+        assertEquals(Key.key("looting"), assertInstanceOf(RandomChanceWithEnchantedBonusCondition.class, decoded.get(4)).enchantment().key());
+        assertInstanceOf(EntityPropertiesCondition.class, decoded.get(5));
+        assertInstanceOf(KilledByPlayerCondition.class, decoded.get(6));
+        assertInstanceOf(EntityScoresCondition.class, decoded.get(7));
+        assertInstanceOf(BlockStatePropertyCondition.class, decoded.get(8));
+        assertInstanceOf(MatchToolCondition.class, decoded.get(9));
+        assertEquals(2, assertInstanceOf(TableBonusCondition.class, decoded.get(10)).values().size());
+        assertInstanceOf(SurvivesExplosionCondition.class, decoded.get(11));
+        assertInstanceOf(DamageSourcePropertiesCondition.class, decoded.get(12));
+        assertEquals(1, assertInstanceOf(LocationCheckCondition.class, decoded.get(13)).offsetY());
+        assertTrue(assertInstanceOf(WeatherCheckCondition.class, decoded.get(14)).isRaining().orElseThrow());
+        assertEquals(Key.key("example:any"), assertInstanceOf(ReferenceCondition.class, decoded.get(15)).name());
+        assertTrue(assertInstanceOf(TimeCheckCondition.class, decoded.get(16)).period().isEmpty());
+        assertInstanceOf(ValueCheckCondition.class, decoded.get(17));
+        assertInstanceOf(EnchantmentActiveCheckCondition.class, decoded.get(18));
+        assertInstanceOf(EnvironmentAttributeCheckCondition.class, decoded.get(19));
     }
 
     @Test
-    void conditionAllOf(Env env) {
-        var c = assertInstanceOf(AllOfCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:all_of\",\"terms\":[{\"condition\":\"minecraft:inverted\",\"term\":{\"condition\":\"minecraft:killed_by_player\"}}]}"))));
-        assertEquals(1, c.terms().size());
-    }
-
-    @Test
-    void conditionAnyOf(Env env) {
-        var c = assertInstanceOf(AnyOfCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:any_of\",\"terms\":[{\"condition\":\"minecraft:killed_by_player\"},{\"condition\":\"minecraft:survives_explosion\"}]}"))));
-        assertEquals(2, c.terms().size());
-    }
-
-    @Test
-    void conditionBlockStateProperty(Env env) {
-        var c = assertInstanceOf(BlockStatePropertyCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:block_state_property\",\"block\":\"minecraft:torch\"}"))));
-        assertEquals(Key.key("minecraft:torch"), c.block());
-        assertTrue(c.properties().isEmpty());
-    }
-
-    @Test
-    void conditionDamageSourceProperties(Env env) {
-        var c = assertInstanceOf(DamageSourcePropertiesCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:damage_source_properties\"}"))));
-        assertTrue(c.predicate().isEmpty());
-    }
-
-    @Test
-    void conditionEnchantmentActiveCheck(Env env) {
-        var c = assertInstanceOf(EnchantmentActiveCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:enchantment_active_check\",\"active\":true}"))));
-        assertTrue(c.active());
-    }
-
-    @Test
-    void conditionEntityPropertiesDefaults(Env env) {
-        var c = assertInstanceOf(EntityPropertiesCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:entity_properties\"}"))));
-        assertEquals(io.ib67.yuanban.loot.number.EntityTarget.THIS, c.entity());
-    }
-
-    @Test
-    void conditionEntityScores(Env env) {
-        var c = assertInstanceOf(EntityScoresCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:entity_scores\",\"entity\":\"this\",\"scores\":{\"kills\":{\"min\":1}}}"))));
-        assertEquals(1, c.scores().size());
-    }
-
-    @Test
-    void conditionEnvironmentAttributeCheck(Env env) {
-        var c = assertInstanceOf(EnvironmentAttributeCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:environment_attribute_check\",\"attribute\":\"minecraft:visual/firefly_bush_sounds\",\"value\":\"true\"}"))));
-        assertEquals(Key.key("minecraft:visual/firefly_bush_sounds"), c.attribute());
-    }
-
-    @Test
-    void conditionInverted(Env env) {
-        var c = assertInstanceOf(InvertedCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:inverted\",\"term\":{\"condition\":\"minecraft:killed_by_player\"}}"))));
-        assertInstanceOf(KilledByPlayerCondition.class, c.term());
-    }
-
-    @Test
-    void conditionKilledByPlayer(Env env) {
-        assertInstanceOf(KilledByPlayerCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:killed_by_player\"}"))));
-    }
-
-    @Test
-    void conditionLocationCheckDefaults(Env env) {
-        var c = assertInstanceOf(LocationCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:location_check\"}"))));
-        assertTrue(c.predicate().isEmpty());
-        assertEquals(0, c.offsetX());
-        assertEquals(0, c.offsetY());
-        assertEquals(0, c.offsetZ());
-    }
-
-    @Test
-    void conditionMatchToolEmpty(Env env) {
-        var c = assertInstanceOf(MatchToolCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:match_tool\"}"))));
-        assertTrue(c.predicate().isEmpty());
+    void conditionListIsAllOf(Env env) {
+        var table = load(env, withConditions("[{\"condition\":\"killed_by_player\"},{\"condition\":\"survives_explosion\"}]"));
+        assertEquals(2, assertInstanceOf(AllOfCondition.class, conditions(table).getFirst()).terms().size());
     }
 
     @Test
     void conditionMatchToolItemTag(Env env) {
-        var world = new LootTestWorld(tempDir)
-                .vanilla("tags/item/planks.json", "{\"values\":[\"minecraft:oak_planks\"]}")
-                .vanilla("loot_table/t.json",
-                        withCondition("{\"condition\":\"minecraft:match_tool\",\"predicate\":\"#minecraft:planks\"}"));
-        var manager = new LootManager(LootTypeRegistry.vanilla());
-        var loottables = new LootTableSubscriber(env.process(), manager);
-        world.loader(env.process(), loottables).start(LootTestWorld.createWorld());
-        var c = assertInstanceOf(MatchToolCondition.class,
-                manager.get(Key.key("t")).orElseThrow().pools().getFirst().entries().getFirst().conditions().getFirst());
-        assertEquals(Key.key("minecraft:planks"), c.predicate().orElseThrow().itemTag());
+        var table = load(env, world -> world.vanilla("tags/item/planks.json", "{\"values\":[\"minecraft:oak_planks\"]}"),
+                withConditions("{\"condition\":\"match_tool\",\"predicate\":{\"items\":\"#minecraft:planks\"}}"));
+        var predicate = assertInstanceOf(MatchToolCondition.class, conditions(table).getFirst()).predicate().orElseThrow();
+        assertEquals(HolderSet.named(Key.key("planks")), predicate.items().orElseThrow());
     }
 
     @Test
     void conditionMatchToolUnknownTagFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:match_tool\",\"predicate\":\"#minecraft:does_not_exist\"}")));
+        assertContains("Missing tag: 'minecraft:does_not_exist' in 'minecraft:item'", failure(env,
+                withConditions("{\"condition\":\"match_tool\",\"predicate\":{\"items\":\"#minecraft:does_not_exist\"}}")));
     }
 
     @Test
-    void conditionRandomChance(Env env) {
-        var c = assertInstanceOf(RandomChanceCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:random_chance\",\"chance\":0.5}"))));
-        assertEquals(0.5f, ((ConstantValue) c.chance()).value());
+    void conditionEntityRequired(Env env) {
+        assertContains("No key entity", failure(env, withConditions("{\"condition\":\"entity_properties\"}")));
+        assertContains("No key entity", failure(env, withConditions("{\"condition\":\"entity_scores\",\"scores\":{}}")));
     }
 
     @Test
-    void conditionRandomChanceWithEnchantedBonus(Env env) {
-        var c = assertInstanceOf(RandomChanceWithEnchantedBonusCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:random_chance_with_enchanted_bonus\",\"unenchanted_chance\":0.1,\"enchanted_chance\":{\"type\":\"minecraft:linear\",\"base\":0.5,\"per_level_above_first\":0.5},\"enchantment\":\"minecraft:looting\"}"))));
-        assertEquals(0.1f, c.unenchantedChance());
-        assertEquals(Key.key("minecraft:looting"), c.enchantment());
-        assertInstanceOf(LevelBasedValue.Linear.class, c.enchantedChance());
+    void conditionTimeCheckClockRequired(Env env) {
+        assertContains("No key clock", failure(env, withConditions("{\"condition\":\"time_check\",\"value\":1000}")));
+        assertContains("Failed to get element example:nope", failure(env,
+                withConditions("{\"condition\":\"time_check\",\"clock\":\"example:nope\",\"value\":1000}")));
     }
 
     @Test
-    void conditionReference(Env env) {
-        var c = assertInstanceOf(ReferenceCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:reference\",\"name\":\"minecraft:entities/zombie\"}"))));
-        assertEquals(Key.key("minecraft:entities/zombie"), c.name());
+    void conditionEnchantmentsAreCheckedAgainstThisLoad(Env env) {
+        // 附魔来自同一次加载的附魔文件
+        assertContains("Failed to get element minecraft:fortune", failure(env,
+                withConditions("{\"condition\":\"table_bonus\",\"enchantment\":\"fortune\",\"chances\":[0.5]}")));
+        assertContains("List must have contents", failure(env, enchantments(),
+                withConditions("{\"condition\":\"table_bonus\",\"enchantment\":\"fortune\",\"chances\":[]}")));
     }
 
     @Test
-    void conditionReferenceInvalidIdFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:reference\",\"name\":\"not a id\"}")));
+    void conditionBlockStatePropertyChecksNames(Env env) {
+        assertContains("Block Reference{ResourceKey[minecraft:block / minecraft:stone]=Block{minecraft:stone}} has no propertysnowy",
+                failure(env, withConditions("{\"condition\":\"block_state_property\",\"block\":\"stone\",\"properties\":{\"snowy\":\"true\"}}")));
     }
 
     @Test
-    void conditionSurvivesExplosion(Env env) {
-        assertInstanceOf(SurvivesExplosionCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:survives_explosion\"}"))));
-    }
-
-    @Test
-    void conditionTableBonus(Env env) {
-        var c = assertInstanceOf(TableBonusCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:table_bonus\",\"enchantment\":\"minecraft:looting\",\"chances\":[0.5,0.6,0.7]}"))));
-        assertEquals(Key.key("minecraft:looting"), c.enchantment());
-        assertEquals(3, c.values().size());
-    }
-
-    @Test
-    void conditionTimeCheckDefaults(Env env) {
-        var c = assertInstanceOf(TimeCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:time_check\",\"value\":1000}"))));
-        assertEquals(Key.key("minecraft:clock"), c.clock());
-        assertTrue(c.period().isEmpty());
-    }
-
-    @Test
-    void conditionValueCheck(Env env) {
-        var c = assertInstanceOf(ValueCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:value_check\",\"value\":1,\"range\":5}"))));
-        assertEquals(1f, ((ConstantValue) c.value()).value());
-        assertEquals(5f, ((ConstantValue) c.range().min()).value());
-    }
-
-    @Test
-    void conditionWeatherCheckDefaults(Env env) {
-        var c = assertInstanceOf(WeatherCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:weather_check\"}"))));
-        assertTrue(c.isRaining().isEmpty());
-        assertTrue(c.isThundering().isEmpty());
-    }
-
-    @Test
-    void unknownConditionTypeFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:bogus_condition\"}")));
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"bogus:x\"}")));
+    void unknownConditionType(Env env) {
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:loot_condition_type]: minecraft:bogus_condition",
+                failure(env, withConditions("{\"condition\":\"minecraft:bogus_condition\"}")));
     }
 
     // ------------------------------------------------------------------
-    // 修饰器：44 种
-    // ------------------------------------------------------------------
-
-    private String withFunction(String functionJson) {
-        return "{\"pools\":[{\"rolls\":1,\"entries\":[{\"type\":\"minecraft:item\",\"name\":\"minecraft:stone\",\"functions\":["
-                + functionJson + "]}]}]}";
-    }
-
-    private LootFunction firstFunction(LootTable t) {
-        return t.pools().getFirst().entries().getFirst().functions().getFirst();
-    }
-
-    @Test
-    void functionSetCount(Env env) {
-        var f = assertInstanceOf(SetCountFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_count\",\"count\":5}"))));
-        assertEquals(5f, ((ConstantValue) f.count()).value());
-        assertFalse(f.add());
-        assertTrue(f.conditions().isEmpty());
-    }
-
-    @Test
-    void functionSetItem(Env env) {
-        var f = assertInstanceOf(SetItemFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_item\",\"item\":\"minecraft:dirt\"}"))));
-        assertEquals(Key.key("minecraft:dirt"), f.id());
-    }
-
-    @Test
-    void functionEnchantWithLevelsDefaults(Env env) {
-        var f = assertInstanceOf(EnchantWithLevelsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:enchant_with_levels\",\"levels\":1}"))));
-        assertTrue(f.options().isEmpty());
-        assertFalse(f.includeAdditionalCostComponent());
-    }
-
-    @Test
-    void functionEnchantRandomlyDefaults(Env env) {
-        var f = assertInstanceOf(EnchantRandomlyFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:enchant_randomly\",\"options\":[\"minecraft:sharpness\"]}"))));
-        assertTrue(f.onlyCompatible());
-        assertFalse(f.includeAdditionalCostComponent());
-        assertEquals(Key.key("minecraft:sharpness"), f.options().orElseThrow().enchantments().getFirst());
-    }
-
-    @Test
-    void functionSetEnchantmentsDefaults(Env env) {
-        var f = assertInstanceOf(SetEnchantmentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_enchantments\",\"enchantments\":{\"minecraft:looting\":2}}"))));
-        assertEquals(2f, ((ConstantValue) f.enchantments().get(Key.key("minecraft:looting"))).value());
-        assertFalse(f.add());
-    }
-
-    @Test
-    void functionSetCustomDataFromString(Env env) {
-        var f = assertInstanceOf(SetCustomDataFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_custom_data\",\"tag\":\"{foo:1}\"}"))));
-        assertNotNull(f.tag().get("foo"));
-    }
-
-    @Test
-    void functionSetComponents(Env env) {
-        var f = assertInstanceOf(SetComponentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_components\",\"components\":{\"!minecraft:damage\":1,\"minecraft:item_model\":\"minecraft:dirt\"}}"))));
-        assertNotNull(f.components());
-    }
-
-    @Test
-    void functionSetComponentsInvalidFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_components\",\"components\":123}")));
-    }
-
-    @Test
-    void functionFurnaceSmelt(Env env) {
-        var f = assertInstanceOf(SmeltFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:furnace_smelt\"}"))));
-        // 原版 FurnaceSmeltFunction 无 use_input_count 字段，loot 记录该字段在本模块恒为 false
-        assertFalse(f.useInputCount());
-    }
-
-    @Test
-    void functionEnchantedCountIncreaseDefaults(Env env) {
-        var f = assertInstanceOf(EnchantedCountIncreaseFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:enchanted_count_increase\",\"enchantment\":\"minecraft:looting\",\"count\":1}"))));
-        assertEquals(0, f.limit());
-        assertTrue(f.conditions().isEmpty());
-        assertEquals(1f, ((ConstantValue) f.count()).value());
-    }
-
-    @Test
-    void functionSetDamageDefaults(Env env) {
-        var f = assertInstanceOf(SetDamageFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_damage\",\"damage\":0.5}"))));
-        assertFalse(f.add());
-    }
-
-    @Test
-    void functionSetAttributes(Env env) {
-        var f = assertInstanceOf(SetAttributesFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_attributes\",\"modifiers\":[{\"attribute\":\"minecraft:generic.attack_damage\",\"name\":\"minecraft:attack\",\"amount\":1,\"operation\":\"add_value\",\"slot\":\"mainhand\",\"id\":\"minecraft:attack\"}]}"))));
-        assertFalse(f.replace());
-        var m = f.modifiers().getFirst();
-        assertEquals(Key.key("minecraft:generic.attack_damage"), m.attribute());
-        assertEquals(AttributeOperation.ADD_VALUE, m.operation());
-    }
-
-    @Test
-    void functionSetNameDefaults(Env env) {
-        var f = assertInstanceOf(SetNameFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_name\",\"name\":\"Stone\"}"))));
-        assertEquals(SetNameTarget.CUSTOM_NAME, f.target());
-        assertTrue(f.name().isPresent());
-    }
-
-    @Test
-    void functionExplorationMapDefaults(Env env) {
-        var f = assertInstanceOf(ExplorationMapFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:exploration_map\"}"))));
-        assertEquals(ExplorationMapFunction.DEFAULT_DESTINATION, f.destination());
-        assertEquals(ExplorationMapFunction.DEFAULT_DECORATION, f.mapDecoration());
-        assertEquals(2, f.zoom());
-        assertEquals(50, f.searchRadius());
-        assertTrue(f.skipExistingChunks());
-    }
-
-    @Test
-    void functionSetStewEffect(Env env) {
-        var f = assertInstanceOf(SetStewEffectFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_stew_effect\",\"effects\":[{\"type\":\"minecraft:saturation\",\"duration\":1}]}"))));
-        var entry = f.effects().getFirst();
-        assertEquals(Key.key("minecraft:saturation"), entry.effect());
-        assertEquals(1f, ((ConstantValue) entry.duration()).value());
-    }
-
-    @Test
-    void functionCopyName(Env env) {
-        var f = assertInstanceOf(CopyNameFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:copy_name\",\"source\":\"block_entity\"}"))));
-        assertInstanceOf(CopyNameSource.BlockEntity.class, f.source());
-    }
-
-    @Test
-    void functionSetContents(Env env) {
-        var f = assertInstanceOf(SetContainerContentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_contents\",\"component\":\"minecraft:container\",\"entries\":[{\"type\":\"minecraft:item\",\"name\":\"minecraft:stone\"}]}"))));
-        assertEquals(1, f.entries().size());
-    }
-
-    @Test
-    void functionModifyContents(Env env) {
-        var f = assertInstanceOf(ModifyContentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:modify_contents\",\"component\":\"minecraft:container\",\"modifier\":{\"function\":\"minecraft:discard\"}}"))));
-        assertInstanceOf(DiscardFunction.class, f.modifier());
-    }
-
-    @Test
-    void functionFiltered(Env env) {
-        var f = assertInstanceOf(FilteredFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:filtered\",\"item_filter\":\"minecraft:stone\",\"on_pass\":{\"function\":\"minecraft:discard\"}}"))));
-        assertTrue(f.onMatch().isPresent());
-        assertTrue(f.onFail().isEmpty());
-        assertEquals(Key.key("minecraft:stone"), f.itemFilter().items().getFirst());
-    }
-
-    @Test
-    void functionLimitCount(Env env) {
-        var f = assertInstanceOf(LimitCountFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:limit_count\",\"limit\":{\"min\":1,\"max\":3}}"))));
-        assertEquals(1f, ((ConstantValue) f.limit().min()).value());
-        assertEquals(3f, ((ConstantValue) f.limit().max()).value());
-    }
-
-    @Test
-    void functionLimitCountDefault(Env env) {
-        var f = assertInstanceOf(LimitCountFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:limit_count\"}"))));
-        assertNull(f.limit().min());
-        assertNull(f.limit().max());
-    }
-
-    @Test
-    void functionApplyBonusOreDrops(Env env) {
-        var f = assertInstanceOf(ApplyBonusFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:apply_bonus\",\"enchantment\":\"minecraft:fortune\",\"formula\":\"minecraft:ore_drops\"}"))));
-        assertInstanceOf(ApplyBonusFormula.OreDrops.class, f.formula());
-    }
-
-    @Test
-    void functionSetLootTable(Env env) {
-        // LootManager 校验 set_loot_table 引用的表必须存在，把目标表一并加载
-        var f = assertInstanceOf(SetContainerLootTableFunction.class, firstFunction(loadReferenced(env, java.util.Map.of(
-                "loot_table/t.json", withFunction("{\"function\":\"minecraft:set_loot_table\",\"name\":\"minecraft:chest_simple_dungeon\",\"seed\":42,\"type\":\"minecraft:chest\"}"),
-                "loot_table/chest_simple_dungeon.json", "{\"pools\":[]}"
-        ), "t")));
-        assertEquals(Key.key("minecraft:chest_simple_dungeon"), f.name());
-        assertEquals(42L, f.seed());
-        assertEquals(Key.key("minecraft:chest"), f.type());
-    }
-
-    @Test
-    void functionSetLootTableSeedDefault(Env env) {
-        var f = assertInstanceOf(SetContainerLootTableFunction.class, firstFunction(loadReferenced(env, java.util.Map.of(
-                "loot_table/t.json", withFunction("{\"function\":\"minecraft:set_loot_table\",\"name\":\"minecraft:chest_simple_dungeon\",\"type\":\"minecraft:chest\"}"),
-                "loot_table/chest_simple_dungeon.json", "{\"pools\":[]}"
-        ), "t")));
-        assertEquals(0L, f.seed());
-    }
-
-    @Test
-    void functionExplosionDecay(Env env) {
-        var f = assertInstanceOf(ExplosionDecayFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:explosion_decay\"}"))));
-        assertTrue(f.conditions().isEmpty());
-    }
-
-    @Test
-    void functionSetLoreDefaults(Env env) {
-        var f = assertInstanceOf(SetLoreFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_lore\",\"lore\":[\"line1\",\"line2\"]}"))));
-        assertInstanceOf(AppendOperation.class, f.mode());
-        assertTrue(f.resolutionContext().isEmpty());
-        assertEquals(2, f.lore().size());
-    }
-
-    @Test
-    void functionFillPlayerHeadDefaults(Env env) {
-        var f = assertInstanceOf(FillPlayerHeadFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:fill_player_head\"}"))));
-        assertEquals(io.ib67.yuanban.loot.number.EntityTarget.THIS, f.entity());
-    }
-
-    @Test
-    void functionCopyCustomData(Env env) {
-        var f = assertInstanceOf(CopyCustomDataFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:copy_custom_data\",\"source\":{\"type\":\"minecraft:storage\",\"source\":\"minecraft:entity/chest\"},\"ops\":[{\"source\":\"a\",\"target\":\"b\"}]}"))));
-        assertInstanceOf(NbtSource.Storage.class, f.source());
-    }
-
-    @Test
-    void functionCopyState(Env env) {
-        var f = assertInstanceOf(CopyBlockStateFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:copy_state\",\"block\":\"minecraft:oak_log\",\"properties\":[\"axis\"]}"))));
-        assertEquals(Key.key("minecraft:oak_log"), f.block());
-        assertTrue(f.properties().contains("axis"));
-    }
-
-    @Test
-    void functionSetBannerPattern(Env env) {
-        var f = assertInstanceOf(SetBannerPatternFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_banner_pattern\",\"patterns\":[{\"pattern\":\"minecraft:creeper\",\"color\":\"red\"}]}"))));
-        assertTrue(f.append());
-        assertEquals(Key.key("minecraft:creeper"), f.patterns().getFirst().pattern());
-    }
-
-    @Test
-    void functionSetPotion(Env env) {
-        var f = assertInstanceOf(SetPotionFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_potion\",\"id\":\"minecraft:fire_resistance\"}"))));
-        assertEquals(Key.key("minecraft:fire_resistance"), f.id());
-    }
-
-    @Test
-    void functionSetRandomDyes(Env env) {
-        var f = assertInstanceOf(SetRandomDyesFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_random_dyes\",\"number_of_dyes\":3}"))));
-        assertEquals(3f, ((ConstantValue) f.numberOfDyes()).value());
-    }
-
-    @Test
-    void functionSetRandomPotionDefaults(Env env) {
-        var f = assertInstanceOf(SetRandomPotionFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_random_potion\"}"))));
-        assertTrue(f.options().isEmpty());
-    }
-
-    @Test
-    void functionSetInstrument(Env env) {
-        var f = assertInstanceOf(SetInstrumentFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_instrument\",\"options\":[\"minecraft:ponder_goat_horn\"]}"))));
-        assertEquals(Key.key("minecraft:ponder_goat_horn"), f.options().enchantments().getFirst());
-    }
-
-    @Test
-    void functionReference(Env env) {
-        var f = assertInstanceOf(FunctionReference.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:reference\",\"name\":\"minecraft:chest_simple\"}"))));
-        assertEquals(Key.key("minecraft:chest_simple"), f.name());
-    }
-
-    @Test
-    void functionSequence(Env env) {
-        var f = assertInstanceOf(SequenceFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:sequence\",\"functions\":[{\"function\":\"minecraft:discard\"},{\"function\":\"minecraft:set_count\",\"count\":1}]}"))));
-        assertEquals(2, f.functions().size());
-    }
-
-    @Test
-    void functionCopyComponents(Env env) {
-        var f = assertInstanceOf(CopyComponentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:copy_components\",\"source\":\"block_entity\",\"include\":[\"minecraft:custom_name\"]}"))));
-        assertTrue(f.include().isPresent());
-        assertEquals(Key.key("minecraft:custom_name"), f.include().orElseThrow().getFirst());
-    }
-
-    @Test
-    void functionCopyComponentsExcludeDefaults(Env env) {
-        var f = assertInstanceOf(CopyComponentsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:copy_components\",\"source\":\"this\"}"))));
-        assertTrue(f.include().isEmpty());
-        assertTrue(f.exclude().isEmpty());
-    }
-
-    @Test
-    void functionSetFireworks(Env env) {
-        var f = assertInstanceOf(SetFireworksFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_fireworks\",\"explosions\":{\"values\":[\"small_ball\"]},\"flight_duration\":2}"))));
-        assertEquals(2, f.flightDuration().orElse(0));
-        assertEquals(FireworkExplosionShape.SMALL_BALL, f.explosions().orElseThrow().values().getFirst());
-    }
-
-    @Test
-    void functionSetFireworkExplosion(Env env) {
-        var f = assertInstanceOf(SetFireworkExplosionFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_firework_explosion\",\"shape\":\"large_ball\",\"colors\":[255,0]}"))));
-        assertEquals(FireworkExplosionShape.LARGE_BALL, f.shape().orElseThrow());
-    }
-
-    @Test
-    void functionSetBookCoverDefaults(Env env) {
-        var f = assertInstanceOf(SetBookCoverFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_book_cover\"}"))));
-        assertTrue(f.author().isEmpty());
-        assertTrue(f.title().isEmpty());
-        assertTrue(f.generation().isEmpty());
-    }
-
-    @Test
-    void functionSetWrittenBookPagesDefaults(Env env) {
-        var f = assertInstanceOf(SetWrittenBookPagesFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_written_book_pages\",\"pages\":[\"page1\"]}"))));
-        assertInstanceOf(AppendOperation.class, f.mode());
-    }
-
-    @Test
-    void functionSetWritableBookPages(Env env) {
-        var f = assertInstanceOf(SetWritableBookPagesFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_writable_book_pages\",\"pages\":[\"p1\"]}"))));
-        assertInstanceOf(AppendOperation.class, f.mode());
-        assertEquals(new FilteredText("p1"), f.pages().getFirst());
-    }
-
-    @Test
-    void functionToggleTooltips(Env env) {
-        var f = assertInstanceOf(ToggleTooltipsFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:toggle_tooltips\",\"toggles\":{\"minecraft:enchantments\":false}}"))));
-        assertFalse(f.toggles().get(Key.key("minecraft:enchantments")));
-    }
-
-    @Test
-    void functionSetOminousBottleAmplifier(Env env) {
-        var f = assertInstanceOf(SetOminousBottleAmplifierFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_ominous_bottle_amplifier\",\"amplifier\":4}"))));
-        assertEquals(4f, ((ConstantValue) f.amplifier()).value());
-    }
-
-    @Test
-    void functionSetCustomModelData(Env env) {
-        var f = assertInstanceOf(SetCustomModelDataFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_custom_model_data\",\"floats\":{\"values\":[1.0]},\"flags\":{\"values\":[true]}}"))));
-        assertTrue(f.flags().isPresent());
-    }
-
-    @Test
-    void functionDiscard(Env env) {
-        var f = assertInstanceOf(DiscardFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:discard\"}"))));
-        assertTrue(f.conditions().isEmpty());
-    }
-
-    @Test
-    void unknownFunctionTypeFails(Env env) {
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:bogus_function\"}")));
-        assertThrows(Exception.class, () -> load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"bogus:x\"}")));
-    }
-
-    @Test
-    void functionConditionVariantParse(Env env) {
-        // With conditions element and a body of set_count - verify conditions field is dotted through
-        var f = assertInstanceOf(SetCountFunction.class, firstFunction(load(env, "loot_table/t.json",
-                withFunction("{\"function\":\"minecraft:set_count\",\"count\":1,\"conditions\":[{\"condition\":\"minecraft:survives_explosion\"}]}"))));
-        assertEquals(1, f.conditions().size());
-        assertInstanceOf(SurvivesExplosionCondition.class, f.conditions().getFirst());
-    }
-
-    // ------------------------------------------------------------------
-    // 数字提供器：8 种
-    // ------------------------------------------------------------------
-
-    private NumberProvider decodeNumber(Env env, String numberJson) {
-        var c = assertInstanceOf(ValueCheckCondition.class, firstCondition(load(env, "loot_table/t.json",
-                withCondition("{\"condition\":\"minecraft:value_check\",\"value\":" + numberJson + ",\"range\":1}"))));
-        return c.value();
-    }
-
-    @Test
-    void numberConstantInline(Env env) {
-        var n = decodeNumber(env, "5");
-        assertInstanceOf(ConstantValue.class, n);
-        assertEquals(5f, ((ConstantValue) n).value());
-    }
-
-    @Test
-    void numberConstantObjectForm(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:constant\",\"value\":3}");
-        assertEquals(3f, ((ConstantValue) n).value());
-    }
-
-    @Test
-    void numberUniform(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:uniform\",\"min\":0,\"max\":2}");
-        var u = assertInstanceOf(UniformValue.class, n);
-        assertEquals(0f, ((ConstantValue) u.min()).value());
-        assertEquals(2f, ((ConstantValue) u.max()).value());
-    }
-
-    @Test
-    void numberBinomial(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:binomial\",\"n\":5,\"p\":0.5}");
-        assertInstanceOf(BinomialValue.class, n);
-    }
-
-    @Test
-    void numberScoreboard(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:score\",\"target\":{\"type\":\"minecraft:fixed\",\"name\":\"player\"},\"score\":\"kills\"}");
-        var s = assertInstanceOf(ScoreboardValue.class, n);
-        assertEquals(new ScoreboardName.Fixed("player"), s.target());
-        assertEquals("kills", s.score());
-        assertEquals(1.0f, s.scale());
-    }
-
-    @Test
-    void numberScoreboardContext(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:score\",\"target\":{\"type\":\"minecraft:context\",\"target\":\"this\"},\"score\":\"x\"}");
-        var s = assertInstanceOf(ScoreboardValue.class, n);
-        assertInstanceOf(ScoreboardName.Context.class, s.target());
-    }
-
-    @Test
-    void numberStorage(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:storage\",\"storage\":\"minecraft:entity/chest\",\"path\":\"Items\"}");
-        assertEquals(Key.key("minecraft:entity/chest"), ((StorageValue) n).storage());
-        assertEquals("Items", ((StorageValue) n).path());
-    }
-
-    @Test
-    void numberSum(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:sum\",\"terms\":[1,2,3]}");
-        assertEquals(3, assertInstanceOf(SumValue.class, n).terms().size());
-    }
-
-    @Test
-    void numberEnchantmentLevel(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:enchantment_level\",\"amount\":{\"type\":\"minecraft:linear\",\"base\":1,\"per_level_above_first\":1}}");
-        assertInstanceOf(EnchantmentLevelValue.class, n);
-    }
-
-    @Test
-    void numberEnvironmentAttribute(Env env) {
-        var n = decodeNumber(env, "{\"type\":\"minecraft:environment_attribute\",\"attribute\":\"minecraft:visual/firefly_bush_sounds\"}");
-        assertEquals(Key.key("minecraft:visual/firefly_bush_sounds"), ((EnvironmentAttributeValue) n).attribute());
-    }
-
-    @Test
-    void unknownNumberProviderTypeFails(Env env) {
-        assertThrows(Exception.class, () -> decodeNumber(env, "{\"type\":\"minecraft:not_a_provider\",\"x\":1}"));
-        assertThrows(Exception.class, () -> decodeNumber(env, "{\"type\":\"bogus:x\",\"x\":1}"));
-    }
-
-    // ------------------------------------------------------------------
-    // 81 个 vanilla 类型 codec 装配
+    // 修饰器
     // ------------------------------------------------------------------
 
     @Test
-    void allVanillaCodecsWired(Env env) {
-        var types = wireTypes(env.process());
-        var missing = new java.util.ArrayList<String>();
-        for (var e : java.util.List.<java.util.Map.Entry<Key, ?>>of()) {}
-        // entries: 9
-        var entryIds = new String[]{"empty","item","loot_table","dynamic","tag","slots","alternatives","sequence","group"};
-        assertEquals(9, entryIds.length);
-        for (var id : entryIds) types.entry(Key.key(id)).ifPresentOrElse(
-                t -> assertNotNull(t.codec(), "entry codec null: " + id),
-                () -> fail("entry absent: " + id));
-        // conditions: 20
-        var conIds = new String[]{"inverted","any_of","all_of","random_chance","random_chance_with_enchanted_bonus",
-                "entity_properties","killed_by_player","entity_scores","block_state_property","match_tool",
-                "table_bonus","survives_explosion","damage_source_properties","location_check","weather_check",
-                "reference","time_check","value_check","enchantment_active_check","environment_attribute_check"};
-        assertEquals(20, conIds.length);
-        for (var id : conIds) types.condition(Key.key(id)).ifPresentOrElse(
-                t -> assertNotNull(t.codec(), "condition codec null: " + id),
-                () -> fail("condition absent: " + id));
-        // functions: 44
-        var fnIds = new String[]{"set_count","set_item","enchant_with_levels","enchant_randomly","set_enchantments",
-                "set_custom_data","set_components","furnace_smelt","enchanted_count_increase","set_damage",
-                "set_attributes","set_name","exploration_map","set_stew_effect","copy_name","set_contents",
-                "modify_contents","filtered","limit_count","apply_bonus","set_loot_table","explosion_decay",
-                "set_lore","fill_player_head","copy_custom_data","copy_state","set_banner_pattern","set_potion",
-                "set_random_dyes","set_random_potion","set_instrument","reference","sequence","copy_components",
-                "set_fireworks","set_firework_explosion","set_book_cover","set_written_book_pages",
-                "set_writable_book_pages","toggle_tooltips","set_ominous_bottle_amplifier","set_custom_model_data",
-                "discard","function"};
-        assertEquals(44, fnIds.length);
-        for (var id : fnIds) types.function(Key.key(id)).ifPresentOrElse(
-                t -> assertNotNull(t.codec(), "function codec null: " + id),
-                () -> fail("function absent: " + id));
-        // number providers: 8
-        var npIds = new String[]{"constant","uniform","binomial","score","storage","sum","enchantment_level",
-                "environment_attribute"};
-        assertEquals(8, npIds.length);
-        for (var id : npIds) types.numberProvider(Key.key(id)).ifPresentOrElse(
-                t -> assertNotNull(t.codec(), "number provider codec null: " + id),
-                () -> fail("number provider absent: " + id));
+    void allFunctionTypes(Env env) {
+        // set_loot_table 引用的表由 LootManager 检查存在
+        UnaryOperator<LootTestWorld> setup = world -> enchantments().apply(world).vanilla("loot_table/any.json", "{\"pools\":[]}");
+        var table = load(env, setup, withFunctions(
+                "{\"function\":\"set_count\",\"count\":5}",
+                "{\"function\":\"set_item\",\"item\":\"dirt\"}",
+                "{\"function\":\"enchant_with_levels\",\"levels\":30}",
+                "{\"function\":\"enchant_randomly\",\"options\":[\"sharpness\"]}",
+                "{\"function\":\"set_enchantments\",\"enchantments\":{\"looting\":2}}",
+                "{\"function\":\"set_custom_data\",\"tag\":\"{foo:1}\"}",
+                "{\"function\":\"set_components\",\"components\":{\"!minecraft:damage\":{},\"minecraft:max_stack_size\":1}}",
+                "{\"function\":\"furnace_smelt\"}",
+                "{\"function\":\"enchanted_count_increase\",\"enchantment\":\"looting\",\"count\":1}",
+                "{\"function\":\"set_damage\",\"damage\":0.5}",
+                "{\"function\":\"set_attributes\",\"modifiers\":[{\"id\":\"example:a\",\"attribute\":\"attack_damage\",\"operation\":\"add_value\",\"amount\":1,\"slot\":[\"mainhand\",\"offhand\"]}]}",
+                "{\"function\":\"set_name\",\"name\":\"Stone\",\"target\":\"item_name\"}",
+                "{\"function\":\"exploration_map\"}",
+                "{\"function\":\"set_stew_effect\",\"effects\":[{\"type\":\"saturation\",\"duration\":1}]}",
+                "{\"function\":\"copy_name\",\"source\":\"block_entity\"}",
+                "{\"function\":\"set_contents\",\"component\":\"container\",\"entries\":[{\"type\":\"item\",\"name\":\"stone\"}]}",
+                "{\"function\":\"modify_contents\",\"component\":\"bundle_contents\",\"modifier\":{\"function\":\"discard\"}}",
+                "{\"function\":\"filtered\",\"item_filter\":{\"items\":\"stone\"},\"on_pass\":{\"function\":\"discard\"}}",
+                "{\"function\":\"limit_count\",\"limit\":{\"min\":1,\"max\":3}}",
+                "{\"function\":\"apply_bonus\",\"enchantment\":\"fortune\",\"formula\":\"ore_drops\"}",
+                "{\"function\":\"set_loot_table\",\"name\":\"minecraft:any\",\"seed\":42,\"type\":\"chest\"}",
+                "{\"function\":\"explosion_decay\"}",
+                "{\"function\":\"set_lore\",\"lore\":[\"line1\"],\"mode\":\"append\"}",
+                "{\"function\":\"fill_player_head\",\"entity\":\"this\"}",
+                "{\"function\":\"copy_custom_data\",\"source\":{\"type\":\"storage\",\"source\":\"example:chest\"},\"ops\":[{\"source\":\"a\",\"target\":\"b\",\"op\":\"merge\"}]}",
+                "{\"function\":\"copy_state\",\"block\":\"oak_log\",\"properties\":[\"axis\"]}",
+                "{\"function\":\"set_banner_pattern\",\"patterns\":[{\"pattern\":\"minecraft:creeper\",\"color\":\"red\"}],\"append\":true}",
+                "{\"function\":\"set_potion\",\"id\":\"fire_resistance\"}",
+                "{\"function\":\"set_random_dyes\",\"number_of_dyes\":3}",
+                "{\"function\":\"set_random_potion\"}",
+                "{\"function\":\"set_instrument\",\"options\":\"#minecraft:goat_horns\"}",
+                "{\"function\":\"reference\",\"name\":\"example:modifier\"}",
+                "{\"function\":\"sequence\",\"functions\":[{\"function\":\"discard\"}]}",
+                "{\"function\":\"copy_components\",\"source\":\"tool\",\"include\":[\"custom_name\"]}",
+                "{\"function\":\"set_fireworks\",\"explosions\":{\"values\":[{\"shape\":\"small_ball\"}],\"mode\":\"append\"},\"flight_duration\":2}",
+                "{\"function\":\"set_firework_explosion\",\"shape\":\"large_ball\",\"colors\":[255,0]}",
+                "{\"function\":\"set_book_cover\",\"title\":{\"raw\":\"Title\"},\"generation\":1}",
+                "{\"function\":\"set_written_book_pages\",\"pages\":[\"page1\"],\"mode\":\"replace_all\"}",
+                "{\"function\":\"set_writable_book_pages\",\"pages\":[\"p1\"],\"mode\":\"insert\",\"offset\":0}",
+                "{\"function\":\"toggle_tooltips\",\"toggles\":{\"minecraft:enchantments\":false}}",
+                "{\"function\":\"set_ominous_bottle_amplifier\",\"amplifier\":4}",
+                "{\"function\":\"set_custom_model_data\",\"floats\":{\"values\":[1.0],\"mode\":\"append\"}}",
+                "{\"function\":\"discard\"}"));
+        var decoded = functions(table);
+        assertEquals(43, decoded.size());
+        assertInstanceOf(SetCountFunction.class, decoded.get(0));
+        assertEquals(Material.DIRT, assertInstanceOf(SetItemFunction.class, decoded.get(1)).item());
+        assertInstanceOf(EnchantWithLevelsFunction.class, decoded.get(2));
+        assertTrue(assertInstanceOf(EnchantRandomlyFunction.class, decoded.get(3)).onlyCompatible());
+        assertFalse(assertInstanceOf(SetEnchantmentsFunction.class, decoded.get(4)).add());
+        assertNotNull(assertInstanceOf(SetCustomDataFunction.class, decoded.get(5)).tag().get("foo"));
+        assertInstanceOf(SetComponentsFunction.class, decoded.get(6));
+        assertTrue(assertInstanceOf(SmeltFunction.class, decoded.get(7)).useInputCount());
+        assertEquals(0, assertInstanceOf(EnchantedCountIncreaseFunction.class, decoded.get(8)).limit());
+        assertInstanceOf(SetDamageFunction.class, decoded.get(9));
+        var attributes = assertInstanceOf(SetAttributesFunction.class, decoded.get(10));
+        assertTrue(attributes.replace());
+        assertEquals(2, attributes.modifiers().getFirst().slots().size());
+        assertEquals(SetNameTarget.ITEM_NAME, assertInstanceOf(SetNameFunction.class, decoded.get(11)).target());
+        var map = assertInstanceOf(ExplorationMapFunction.class, decoded.get(12));
+        assertEquals(Key.key("mansion"), map.mapDecoration());
+        assertEquals((byte) 2, map.zoom());
+        assertInstanceOf(SetStewEffectFunction.class, decoded.get(13));
+        assertInstanceOf(CopyNameFunction.class, decoded.get(14));
+        assertInstanceOf(SetContainerContentsFunction.class, decoded.get(15));
+        assertInstanceOf(ModifyContentsFunction.class, decoded.get(16));
+        assertInstanceOf(FilteredFunction.class, decoded.get(17));
+        assertInstanceOf(LimitCountFunction.class, decoded.get(18));
+        assertEquals(ApplyBonusFormula.OreDrops.INSTANCE, assertInstanceOf(ApplyBonusFunction.class, decoded.get(19)).formula());
+        assertEquals(42L, assertInstanceOf(SetContainerLootTableFunction.class, decoded.get(20)).seed());
+        assertInstanceOf(ExplosionDecayFunction.class, decoded.get(21));
+        assertSame(AppendOperation.INSTANCE, assertInstanceOf(SetLoreFunction.class, decoded.get(22)).mode());
+        assertInstanceOf(FillPlayerHeadFunction.class, decoded.get(23));
+        assertEquals(MergeStrategy.MERGE, assertInstanceOf(CopyCustomDataFunction.class, decoded.get(24)).ops().getFirst().op());
+        assertEquals(List.of("axis"), assertInstanceOf(CopyBlockStateFunction.class, decoded.get(25)).properties());
+        assertTrue(assertInstanceOf(SetBannerPatternFunction.class, decoded.get(26)).append());
+        assertInstanceOf(SetPotionFunction.class, decoded.get(27));
+        assertInstanceOf(SetRandomDyesFunction.class, decoded.get(28));
+        assertTrue(assertInstanceOf(SetRandomPotionFunction.class, decoded.get(29)).options().isEmpty());
+        assertInstanceOf(SetInstrumentFunction.class, decoded.get(30));
+        assertInstanceOf(FunctionReference.class, decoded.get(31));
+        assertEquals(1, assertInstanceOf(SequenceFunction.class, decoded.get(32)).functions().size());
+        assertInstanceOf(CopyComponentsFunction.class, decoded.get(33));
+        assertEquals(2, assertInstanceOf(SetFireworksFunction.class, decoded.get(34)).flightDuration().orElseThrow());
+        assertEquals(List.of(255, 0), assertInstanceOf(SetFireworkExplosionFunction.class, decoded.get(35)).colors().orElseThrow());
+        assertEquals("Title", assertInstanceOf(SetBookCoverFunction.class, decoded.get(36)).title().orElseThrow().text());
+        assertSame(ReplaceAllOperation.INSTANCE, assertInstanceOf(SetWrittenBookPagesFunction.class, decoded.get(37)).mode());
+        assertEquals(new InsertOperation(0), assertInstanceOf(SetWritableBookPagesFunction.class, decoded.get(38)).mode());
+        assertInstanceOf(ToggleTooltipsFunction.class, decoded.get(39));
+        assertInstanceOf(SetOminousBottleAmplifierFunction.class, decoded.get(40));
+        assertTrue(assertInstanceOf(SetCustomModelDataFunction.class, decoded.get(41)).floats().isPresent());
+        assertInstanceOf(DiscardFunction.class, decoded.get(42));
+    }
+
+    @Test
+    void functionListIsSequence(Env env) {
+        var table = load(env, withFunctions("[{\"function\":\"set_count\",\"count\":1},{\"function\":\"discard\"}]"));
+        assertEquals(2, assertInstanceOf(SequenceFunction.class, functions(table).getFirst()).functions().size());
+    }
+
+    @Test
+    void functionRequiredFields(Env env) {
+        assertContains("No key limit", failure(env, withFunctions("{\"function\":\"limit_count\"}")));
+        assertContains("No key entity", failure(env, withFunctions("{\"function\":\"fill_player_head\"}")));
+        assertContains("No key append", failure(env, withFunctions("{\"function\":\"set_banner_pattern\",\"patterns\":[]}")));
+        assertContains("No key mode", failure(env, withFunctions("{\"function\":\"set_lore\",\"lore\":[\"line\"]}")));
+        assertContains("No key op", failure(env, withFunctions(
+                "{\"function\":\"copy_custom_data\",\"source\":\"block_entity\",\"ops\":[{\"source\":\"a\",\"target\":\"b\"}]}")));
+        assertContains("No key id", failure(env, withFunctions(
+                "{\"function\":\"set_attributes\",\"modifiers\":[{\"attribute\":\"attack_damage\",\"operation\":\"add_value\",\"amount\":1,\"slot\":\"mainhand\"}]}")));
+    }
+
+    @Test
+    void functionSetCustomModelDataColorsAcceptRgb(Env env) {
+        var function = assertInstanceOf(SetCustomModelDataFunction.class, functions(load(env, withFunctions(
+                "{\"function\":\"set_custom_model_data\",\"colors\":{\"values\":[[0.0,0.0,1.0]],\"mode\":\"replace_all\"}}"))).getFirst());
+        assertEquals(List.of(new ConstantValue((float) 0xFF0000FF)), function.colors().orElseThrow().values());
+    }
+
+    @Test
+    void functionUnknownTypeIncludesTheRemovedFunctionType(Env env) {
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:loot_function_type]: minecraft:function",
+                failure(env, withFunctions("{\"function\":\"minecraft:function\"}")));
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:loot_function_type]: bogus:x",
+                failure(env, withFunctions("{\"function\":\"bogus:x\"}")));
+    }
+
+    @Test
+    void functionExplorationMapDecorationChecked(Env env) {
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:map_decoration_type]: minecraft:bogus",
+                failure(env, withFunctions("{\"function\":\"exploration_map\",\"decoration\":\"bogus\"}")));
+    }
+
+    // ------------------------------------------------------------------
+    // 数字提供器
+    // ------------------------------------------------------------------
+
+    private NumberProvider number(Env env, String json) {
+        var table = load(env, withFunctions("{\"function\":\"set_count\",\"count\":" + json + "}"));
+        return assertInstanceOf(SetCountFunction.class, functions(table).getFirst()).count();
+    }
+
+    @Test
+    void allNumberProviderTypes(Env env) {
+        assertEquals(new ConstantValue(3.0f), number(env, "{\"type\":\"constant\",\"value\":3}"));
+        assertEquals(new ConstantValue(2.0f), number(env, "2"));
+        assertInstanceOf(UniformValue.class, number(env, "{\"type\":\"uniform\",\"min\":0,\"max\":2}"));
+        assertInstanceOf(UniformValue.class, number(env, "{\"min\":0,\"max\":2}"));
+        assertInstanceOf(BinomialValue.class, number(env, "{\"type\":\"binomial\",\"n\":5,\"p\":0.5}"));
+        assertEquals(new ScoreboardName.Fixed("player"), assertInstanceOf(ScoreboardValue.class,
+                number(env, "{\"type\":\"score\",\"target\":{\"type\":\"fixed\",\"name\":\"player\"},\"score\":\"kills\"}")).target());
+        assertEquals(new ScoreboardName.Context(EntityTarget.THIS), assertInstanceOf(ScoreboardValue.class,
+                number(env, "{\"type\":\"score\",\"target\":\"this\",\"score\":\"x\"}")).target());
+        assertInstanceOf(StorageValue.class, number(env, "{\"type\":\"storage\",\"storage\":\"example:chest\",\"path\":\"Items[0]\"}"));
+        assertEquals(3, assertInstanceOf(SumValue.class, number(env, "{\"type\":\"sum\",\"summands\":[1,2,3]}")).summands().size());
+        assertInstanceOf(EnchantmentLevelValue.class, number(env,
+                "{\"type\":\"enchantment_level\",\"amount\":{\"type\":\"linear\",\"base\":1,\"per_level_above_first\":1}}"));
+        assertInstanceOf(EnvironmentAttributeValue.class, number(env, "{\"type\":\"environment_attribute\",\"attribute\":\"gameplay/sky_light_level\"}"));
+    }
+
+    @Test
+    void numberSumReadsSummands(Env env) {
+        assertContains("No key summands", failure(env, withFunctions("{\"function\":\"set_count\",\"count\":{\"type\":\"sum\",\"terms\":[1]}}")));
+    }
+
+    @Test
+    void numberStoragePathErrors(Env env) {
+        assertContains("Failed to parse path a..b", failure(env, withFunctions(
+                "{\"function\":\"set_count\",\"count\":{\"type\":\"storage\",\"storage\":\"example:chest\",\"path\":\"a..b\"}}")));
+    }
+
+    @Test
+    void unknownNumberProviderType(Env env) {
+        assertContains("Unknown registry key in ResourceKey[minecraft:root / minecraft:loot_number_provider_type]: minecraft:not_a_provider",
+                failure(env, withFunctions("{\"function\":\"set_count\",\"count\":{\"type\":\"not_a_provider\",\"x\":1}}")));
+    }
+
+    @Test
+    void itemPredicateRecordsAreDecoded(Env env) {
+        var filtered = assertInstanceOf(FilteredFunction.class, functions(load(env, withFunctions(
+                "{\"function\":\"filtered\",\"item_filter\":{\"items\":[\"stone\",\"dirt\"],\"count\":{\"min\":2},\"predicates\":{\"minecraft:damage\":{}}}}")))
+                .getFirst());
+        ItemPredicate predicate = filtered.itemFilter();
+        assertEquals(2, ((HolderSet.Direct<Material>) predicate.items().orElseThrow()).keys().size());
+        assertEquals(2, predicate.count().min());
+        assertEquals(1, predicate.components().partial().size());
     }
 }

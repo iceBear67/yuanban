@@ -10,15 +10,19 @@ import io.ib67.yuanban.datapack.topic.Topic;
 import net.kyori.adventure.key.Key;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TagMergeTest {
     private static final Topic.Tags BLOCK_TAGS = Topic.tags("block");
@@ -89,21 +93,53 @@ class TagMergeTest {
     }
 
     @ParameterizedTest
+    @EnumSource(Layout.class)
+    void nullFieldsCountAsAbsent(Layout layout) {
+        var world = new TestWorld(tempDir).vanilla("minecraft", "tags/block/logs.json", "{\"values\": [\"oak_log\"]}");
+        var a = world.worldPack(TestPack.create()
+                .data("minecraft", "tags/block/logs.json",
+                        "{\"replace\": null, \"values\": [{\"id\": \"#example:logs\", \"required\": null}]}"), layout, "a");
+
+        assertEquals(List.of("vanilla minecraft:oak_log", a + " #example:logs"), values(load(world, BLOCK_TAGS), "minecraft:logs"));
+    }
+
+    static Stream<Arguments> invalidTagFilesFail() {
+        return Stream.of(
+                Arguments.of("[]", "Not a JSON object: []"),
+                Arguments.of("{}", "No key values in MapLike[{}]"),
+                Arguments.of("{\"values\": null}", "No key values in MapLike[{\"values\":null}]"),
+                Arguments.of("{\"values\": {}}", "Not a json array: {}"),
+                Arguments.of("{\"values\": [1]}", "Failed to parse either. First: Not a string: 1; Second: Not a JSON object: 1"),
+                Arguments.of("{\"values\": [\"Bad\"]}", "Failed to parse either."
+                        + " First: Not a valid resource location: Bad Non [a-z0-9/._-] character in path of location: minecraft:Bad;"
+                        + " Second: Not a JSON object: \"Bad\""),
+                Arguments.of("{\"values\": [{\"required\": false}]}", "Failed to parse either."
+                        + " First: Not a string: {\"required\":false}; Second: No key id in MapLike[{\"required\":false}]"),
+                // 对象写法的错误带有部分结果（required 取缺省值），Codec.either 直接返回它的错误
+                Arguments.of("{\"values\": [{\"id\": \"a\", \"required\": \"no\"}]}", "Not a boolean: \"no\""),
+                Arguments.of("{\"values\": [], \"replace\": 1}", "Not a boolean: 1")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource
+    void invalidTagFilesFail(String content, String message) {
+        var world = new TestWorld(tempDir).vanilla("minecraft", "tags/block/broken.json", content);
+        var exception = assertThrows(LoadFailedException.class, () -> load(world, BLOCK_TAGS));
+        var cause = assertInstanceOf(TagFileException.class, exception.getCause());
+        assertEquals("标签文件 [vanilla] data/minecraft/tags/block/broken.json 不合法：" + message, cause.getMessage());
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
-            "[]",
-            "{}",
-            "{\"values\": {}}",
-            "{\"values\": [1]}",
-            "{\"values\": [\"Bad\"]}",
-            "{\"values\": [{\"required\": false}]}",
-            "{\"values\": [{\"id\": \"a\", \"required\": \"no\"}]}",
-            "{\"values\": [], \"replace\": 1}",
             "{\"values\": []} trailing",
             "{values: []}"
     })
-    void invalidTagFilesFail(String content) {
+    void tagFileSyntaxErrorsFail(String content) {
         var world = new TestWorld(tempDir).vanilla("minecraft", "tags/block/broken.json", content);
         var exception = assertThrows(LoadFailedException.class, () -> load(world, BLOCK_TAGS));
-        assertInstanceOf(TagFileException.class, exception.getCause());
+        var cause = assertInstanceOf(TagFileException.class, exception.getCause());
+        assertTrue(cause.getMessage().startsWith("标签文件 [vanilla] data/minecraft/tags/block/broken.json 的 JSON 语法错误："),
+                cause.getMessage());
     }
 }

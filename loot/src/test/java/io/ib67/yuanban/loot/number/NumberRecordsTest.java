@@ -1,10 +1,13 @@
 package io.ib67.yuanban.loot.number;
 
-import io.ib67.yuanban.loot.number.LevelBasedValue;
+import io.ib67.yuanban.codec.NbtPath;
+import io.ib67.yuanban.loot.context.ContextKey;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.world.attribute.EnvironmentAttribute;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -61,11 +64,12 @@ class NumberRecordsTest {
     }
 
     @Test
-    void storageValue() {
+    void storageValue() throws Exception {
         var storage = Key.key("minecraft:test");
-        var value = new StorageValue(storage, "Items[0].Count");
+        var path = NbtPath.of("Items[0].Count");
+        var value = new StorageValue(storage, path);
         assertEquals(storage, value.storage());
-        assertEquals("Items[0].Count", value.path());
+        assertEquals(path, value.path());
     }
 
     @Test
@@ -73,7 +77,7 @@ class NumberRecordsTest {
         var a = new ConstantValue(1.0f);
         var b = new ConstantValue(2.0f);
         var sum = new SumValue(List.of(a, b));
-        assertEquals(List.of(a, b), sum.terms());
+        assertEquals(List.of(a, b), sum.summands());
     }
 
     @Test
@@ -85,9 +89,19 @@ class NumberRecordsTest {
 
     @Test
     void environmentAttributeValue() {
-        var attribute = Key.key("minecraft:ambient_darkness");
-        var value = new EnvironmentAttributeValue(attribute);
-        assertEquals(attribute, value.attribute());
+        var value = new EnvironmentAttributeValue(EnvironmentAttribute.SKY_LIGHT_LEVEL);
+        assertEquals(EnvironmentAttribute.SKY_LIGHT_LEVEL, value.attribute());
+    }
+
+    @Test
+    void environmentAttributeValue与位置有关时引用origin() {
+        assertEquals(Set.of(ContextKey.ORIGIN), new EnvironmentAttributeValue(EnvironmentAttribute.MUSIC_VOLUME).referencedParams());
+    }
+
+    @Test
+    void environmentAttributeValue与位置无关时不引用参数() {
+        // 原版 EnvironmentAttributes 中 gameplay/sky_light_level 与 gameplay/fast_lava 的取值与位置无关
+        assertEquals(Set.of(), new EnvironmentAttributeValue(EnvironmentAttribute.SKY_LIGHT_LEVEL).referencedParams());
     }
 
     @Test

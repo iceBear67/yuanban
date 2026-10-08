@@ -2,6 +2,7 @@ package io.ib67.yuanban.enchant.internal;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import io.ib67.yuanban.codec.RegistryIds;
 import io.ib67.yuanban.datapack.tag.TagDeclaration;
 import io.ib67.yuanban.datapack.tag.TagDeclarations;
 import io.ib67.yuanban.enchant.EnchantmentException;
@@ -25,6 +26,10 @@ import java.util.stream.Collectors;
 /**
  * 按原版 {@code TagLoader.build} 展开附魔标签，展开顺序复现原版 {@code DependencySorter}。
  * 附魔标签的条目不解析成注册表条目；每个标签保存它引用的附魔 ID 集合。
+ * <p>
+ * 原版在附魔注册之后构建附魔标签（{@code ResourceManagerRegistryLoadTask}），元素条目按
+ * {@code TagLoader.ElementLookup.fromGetters} 查找：必需的元素一律放入标签，没有注册的在冻结注册表时报
+ * {@code Unbound values}；可选的元素只在已经注册时放入。找不到的可选标签引用跳过，与 {@code TagEntry.build} 相同。
  */
 @ApiStatus.Internal
 public final class EnchantmentTagExpander {
@@ -40,9 +45,11 @@ public final class EnchantmentTagExpander {
     }
 
     /**
-     * @throws EnchantmentException 附魔标签之间有循环引用
+     * @param enchantments 本次加载的全部附魔 ID
+     * @throws EnchantmentException 必需的标签引用找不到（包括附魔标签之间的循环引用），
+     *                              或者必需的元素不在 {@code enchantments} 中
      */
-    public static EnchantmentTags expand(TagDeclarations declarations) {
+    public static EnchantmentTags expand(TagDeclarations declarations, Set<Key> enchantments) {
         // 原版 TagLoader.load 按文件位置的顺序放入 HashMap，build 再按这个 HashMap 的遍历顺序放入 DependencySorter
         var builders = new HashMap<TagId, TagDeclaration>();
         declarations.tags().values().stream()
@@ -57,11 +64,14 @@ public final class EnchantmentTagExpander {
         contents.forEach((id, declaration) -> forEachTagReference(declaration, false,
                 dependency -> addDependencyIfNotCyclic(dependencies, id, dependency)));
 
-        var expansion = new Expansion(contents, dependencies);
+        var expansion = new Expansion(contents, dependencies, enchantments);
         var visited = new HashSet<TagId>();
         for (var id : contents.keySet()) {
             expansion.visit(visited, id);
         }
+        UnboundReferences.message(RegistryIds.ENCHANTMENT, expansion.unbound, List.of()).ifPresent(message -> {
+            throw new EnchantmentException(message);
+        });
 
         var result = new TreeMap<Key, List<Key>>();
         expansion.built.forEach(result::put);
@@ -91,11 +101,17 @@ public final class EnchantmentTagExpander {
     private static final class Expansion {
         private final Map<TagId, TagDeclaration> contents;
         private final Multimap<TagId, TagId> dependencies;
+        private final Set<Key> enchantments;
         private final Map<Key, List<Key>> built = new HashMap<>();
+        /**
+         * 放入了标签但不在本次加载中的必需元素。
+         */
+        private final List<Key> unbound = new ArrayList<>();
 
-        private Expansion(Map<TagId, TagDeclaration> contents, Multimap<TagId, TagId> dependencies) {
+        private Expansion(Map<TagId, TagDeclaration> contents, Multimap<TagId, TagId> dependencies, Set<Key> enchantments) {
             this.contents = contents;
             this.dependencies = dependencies;
+            this.enchantments = enchantments;
         }
 
         private void visit(Set<TagId> visited, TagId id) {
@@ -118,13 +134,19 @@ public final class EnchantmentTagExpander {
                 if (entry.tag()) {
                     var tag = built.get(entry.id());
                     if (tag == null) {
+                        if (!entry.required()) {
+                            continue;
+                        }
                         // 循环引用被 addDependencyIfNotCyclic 过滤之后，引用方认不到这个条目；原版在这种情况下跳过
                         throw new EnchantmentException("Couldn't load tag " + declaration.id().asString()
                                 + " as it references missing tag " + entry.id().asString());
                     }
                     values.addAll(tag);
-                } else {
+                } else if (enchantments.contains(entry.id())) {
                     values.add(entry.id());
+                } else if (entry.required()) {
+                    values.add(entry.id());
+                    unbound.add(entry.id());
                 }
             }
             built.put(declaration.id(), List.copyOf(values));

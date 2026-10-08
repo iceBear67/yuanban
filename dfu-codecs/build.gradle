@@ -1,0 +1,17 @@
+dependencies {
+    // 原版 26.2 使用的 DataFixerUpper，版本取自原版 META-INF/libraries.list
+    api("com.mojang:datafixerupper:10.0.21")
+    api("net.minestom:minestom:2026.10.05-26.2")
+    // 原版 26.2 使用的 Brigadier，用于移植实体选择器、NBT 路径和坐标的解析器
+    api("com.mojang:brigadier:1.3.10")
+    // 原版 MinMaxBounds 的错误文本使用 Guava Range 的字符串形式，版本取自原版 26.2 的 META-INF/libraries.list
+    implementation("com.google.guava:guava:33.6.0-jre")
+    // 与 Minestom 运行时使用的版本相同
+    implementation("it.unimi.dsi:fastutil:8.5.19")
+    testImplementation("net.minestom:testing:2026.10.05-26.2")
+}
+
+tasks.test {
+    // net.minestom:testing 在平台线程上创建玩家，需要关闭 Minestom 的虚拟线程断言
+    systemProperty("minestom.inside-test", "true")
+}

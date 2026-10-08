@@ -1,22 +1,19 @@
 package io.ib67.yuanban.loot.condition;
 
 import io.ib67.yuanban.loot.context.ContextKey;
-import org.jetbrains.annotations.Nullable;
+import io.ib67.yuanban.loot.predicate.DamageSourcePredicate;
 
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 /**
  * 原版 {@code damage_source_properties}：伤害来源匹配。JSON 字段 {@code predicate}
- * （原版 {@code DamageSourcePredicate}）。
+ * （可选，原版 {@code DamageSourcePredicate}）。上下文缺少伤害来源或 {@code origin} 时不通过。
  */
 public record DamageSourcePropertiesCondition(Optional<DamageSourcePredicate> predicate) implements LootCondition {
     public DamageSourcePropertiesCondition {
-        predicate = predicate == null ? Optional.empty() : predicate;
-    }
-
-    public DamageSourcePropertiesCondition(@Nullable DamageSourcePredicate predicate) {
-        this(Optional.ofNullable(predicate));
+        Objects.requireNonNull(predicate, "predicate");
     }
 
     /**

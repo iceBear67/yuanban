@@ -1,7 +1,9 @@
 package io.ib67.yuanban.datapack;
 
+import io.ib67.yuanban.datapack.pack.FormatRange;
 import io.ib67.yuanban.datapack.pack.KnownPack;
 import io.ib67.yuanban.datapack.pack.Pack;
+import io.ib67.yuanban.datapack.pack.PackCompatibility;
 import io.ib67.yuanban.datapack.pack.PackFormat;
 import io.ib67.yuanban.datapack.pack.PackOrigin;
 import io.ib67.yuanban.datapack.pack.PackPosition;
@@ -78,18 +80,35 @@ class DiscoveryTest {
     }
 
     @Test
-    void invalidMcmetaReportsPackId() {
+    void packWithOnlyLegacyPackFormatIsTooOld() {
         var folder = tempDir.resolve("datapacks");
         TestPack.withMcmeta("{\"pack\": {\"description\": \"d\", \"pack_format\": 48}}").writeDirectory(folder.resolve("old"));
+        var pack = discover(new FolderPackProvider(folder, PackOrigin.WORLD, path -> false)).get("file/old");
+        assertEquals(new FormatRange(PackFormat.of(48), PackFormat.of(48)), pack.metadata().formats());
+        assertEquals(PackCompatibility.TOO_OLD, pack.compatibility());
+    }
+
+    @Test
+    void invalidMcmetaReportsPackId() {
+        var folder = tempDir.resolve("datapacks");
+        TestPack.withMcmeta("{\"pack\": {\"description\": \"d\", \"pack_format\": 107}}").writeDirectory(folder.resolve("new"));
         var exception = assertThrows(PackMetadataException.class,
                 () -> discover(new FolderPackProvider(folder, PackOrigin.WORLD, path -> false)));
-        assertEquals("file/old", exception.getPackId());
-        assertEquals("pack.min_format", exception.getField());
+        assertEquals("file/new", exception.getPackId());
+        assertEquals("数据包 file/new 的 pack.mcmeta 不合法：Pack declares support for version newer than 81,"
+                + " but is missing mandatory fields min_format and max_format", exception.getMessage());
 
         TestPack.withMcmeta("{\"pack\": {\"description\": \"d\", \"min_format\": 107, \"max_format\": 107}} trailing")
-                .writeDirectory(folder.resolve("old"));
-        assertEquals("", assertThrows(PackMetadataException.class,
-                () -> discover(new FolderPackProvider(folder, PackOrigin.WORLD, path -> false))).getField());
+                .writeDirectory(folder.resolve("new"));
+        var trailing = assertThrows(PackMetadataException.class,
+                () -> discover(new FolderPackProvider(folder, PackOrigin.WORLD, path -> false)));
+        assertTrue(trailing.getMessage().startsWith("数据包 file/new 的 pack.mcmeta 不合法：JSON 语法错误："), trailing.getMessage());
+
+        TestPack.withMcmeta("[]").writeDirectory(folder.resolve("new"));
+        assertEquals("数据包 file/new 的 pack.mcmeta 不合法：JSON 语法错误：Expected a com.google.gson.JsonObject"
+                        + " but was com.google.gson.JsonArray; at path $",
+                assertThrows(PackMetadataException.class,
+                        () -> discover(new FolderPackProvider(folder, PackOrigin.WORLD, path -> false))).getMessage());
     }
 
     @Test

@@ -9,15 +9,16 @@ import org.jetbrains.annotations.Nullable;
 @Getter
 public class PackMetadataException extends DataPackException {
     private final String packId;
-    private final String field;
 
-    public PackMetadataException(String packId, String field, String message) {
-        this(packId, field, message, null);
+    /**
+     * @param reason 原因，解码失败时是编解码器给出的错误文本
+     */
+    public PackMetadataException(String packId, String reason) {
+        this(packId, reason, null);
     }
 
-    public PackMetadataException(String packId, String field, String message, @Nullable Throwable cause) {
-        super("数据包 " + packId + " 的 pack.mcmeta 中 " + (field.isEmpty() ? "<根>" : field) + " 不合法：" + message, cause);
+    public PackMetadataException(String packId, String reason, @Nullable Throwable cause) {
+        super("数据包 " + packId + " 的 pack.mcmeta 不合法：" + reason, cause);
         this.packId = packId;
-        this.field = field;
     }
 }

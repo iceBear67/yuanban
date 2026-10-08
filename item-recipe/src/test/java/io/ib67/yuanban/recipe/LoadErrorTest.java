@@ -60,4 +60,41 @@ class LoadErrorTest {
         assertEquals(RecipeSet.EMPTY, subscriber.current());
         assertEquals(Map.of(), crafting.recipes().recipes());
     }
+
+    /**
+     * JSON 语法错误与解码错误一起按配方 ID 汇总。错误信息是 Gson 异常的信息。
+     */
+    @Test
+    void reportsJsonSyntaxErrorsWithDecodingErrors(Env env) {
+        var world = new RecipeWorld(tempDir)
+                .vanilla("recipe/good.json", """
+                        {"type": "stonecutting", "ingredient": "minecraft:stone", "result": "minecraft:stick"}
+                        """)
+                .pack("broken", "example", "recipe/c_unterminated.json", """
+                        {"type": "stonecutting",
+                        """)
+                .pack("broken", "example", "recipe/b_unknown_type.json", """
+                        {"type": "minecraft:brewing"}
+                        """)
+                .pack("broken", "example", "recipe/a_trailing.json", """
+                        {"type": "stonecutting", "ingredient": "minecraft:stone", "result": "minecraft:stick"} {}
+                        """);
+        var crafting = new Crafting(env.process(), new InMemoryMaps());
+        var subscriber = new RecipeSubscriber(env.process(), crafting.recipes());
+        var loader = world.loader(env.process(), subscriber);
+
+        var message = assertInstanceOf(RecipeException.class,
+                assertThrows(LoadFailedException.class, () -> loader.start(RecipeWorld.createWorld())).getCause()).getMessage();
+        int trailing = message.indexOf("Couldn't parse data file 'example:a_trailing' from [file/broken] data/example/recipe/a_trailing.json: ");
+        int unknownType = message.indexOf("Couldn't parse data file 'example:b_unknown_type' from [file/broken] data/example/recipe/b_unknown_type.json: "
+                + "Unknown registry key in ResourceKey[minecraft:root / minecraft:recipe_serializer]: minecraft:brewing\n");
+        int unterminated = message.indexOf("Couldn't parse data file 'example:c_unterminated' from [file/broken] data/example/recipe/c_unterminated.json: ");
+        assertEquals(0, trailing, message);
+        assertTrue(trailing < unknownType && unknownType < unterminated, message);
+        int malformed = message.indexOf("MalformedJsonException");
+        assertTrue(trailing < malformed && malformed < unknownType, message);
+        assertTrue(message.indexOf("End of input", unterminated) > unterminated, message);
+        assertEquals(RecipeSet.EMPTY, subscriber.current());
+        assertEquals(Map.of(), crafting.recipes().recipes());
+    }
 }

@@ -3,6 +3,7 @@ package io.ib67.yuanban.loot.testenv;
 import io.ib67.yuanban.loot.condition.LootCondition;
 import io.ib67.yuanban.loot.context.LootEnvironment;
 import io.ib67.yuanban.loot.context.ScoreboardView;
+import io.ib67.yuanban.loot.context.SmeltingView;
 import io.ib67.yuanban.loot.context.StorageView;
 import io.ib67.yuanban.loot.function.LootFunction;
 import net.kyori.adventure.key.Key;
@@ -11,6 +12,7 @@ import net.minestom.server.ServerProcess;
 import net.minestom.server.entity.Entity;
 import net.minestom.server.entity.Player;
 import net.minestom.server.item.ItemStack;
+import net.minestom.server.item.Material;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
@@ -18,12 +20,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 /**
- * 测试宿主：用内存中的记分板、命令存储、动态掉落与静态运气表来满足
+ * 测试宿主：用内存中的记分板、命令存储、熔炼配方、动态掉落与静态运气表来满足
  * {@link LootEnvironment} 的最小接口。宿主侧接入（server runtime）应当用真实的服务端数据
  * 替换这里的 Map 视图，本实现仅给求值器测试与集成测试使用。
  */
@@ -33,6 +34,7 @@ public final class InMemoryLootEnvironment implements LootEnvironment {
     private final Map<Key, LootCondition> conditions = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Integer>> scores = new ConcurrentHashMap<>();
     private final Map<Key, CompoundBinaryTag> storage = new ConcurrentHashMap<>();
+    private final Map<Material, ItemStack> smeltingResults = new ConcurrentHashMap<>();
     private final Map<Key, ItemStack[]> dynamicDrops = new ConcurrentHashMap<>();
     private final long worldSeed;
     private volatile float fixedLuck;
@@ -73,7 +75,15 @@ public final class InMemoryLootEnvironment implements LootEnvironment {
 
     @Override
     public StorageView storage() {
-        return (storageId, path) -> Optional.ofNullable(storage.get(storageId));
+        return storageId -> storage.getOrDefault(storageId, CompoundBinaryTag.empty());
+    }
+
+    /**
+     * 熔炼配方按输入的物品查表，每个物品最多一个配方，与原版熔炉配方以物品为输入的形式相同。
+     */
+    @Override
+    public SmeltingView smelting() {
+        return input -> Optional.ofNullable(smeltingResults.get(input.material()));
     }
 
     @Override
@@ -128,6 +138,13 @@ public final class InMemoryLootEnvironment implements LootEnvironment {
 
     public void putStorage(Key id, CompoundBinaryTag tag) {
         storage.put(id, tag);
+    }
+
+    /**
+     * 登记一个熔炼配方：输入 {@code input}，产出 {@code result}（含产出数量）。
+     */
+    public void putSmelting(Material input, ItemStack result) {
+        smeltingResults.put(input, result);
     }
 
     public void putDynamicLoot(Key name, ItemStack... stacks) {

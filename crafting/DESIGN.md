@@ -40,14 +40,14 @@ dependencies {
     implementation("org.apache.commons:commons-lang3:3.20.0")
     testImplementation("net.minestom:testing:2026.10.05-26.2")
     testImplementation(project(":item-recipe"))
-    testImplementation("com.mojang:datafixerupper:10.0.21")
+    testImplementation(project(":dfu-codecs"))
     testImplementation(testFixtures(project(":item-tag")))
 }
 ```
 
 - fastutil 与 Minestom 运行时使用的版本相同，用于移植原版 `StackedContents`。
 - commons-lang3 的版本取自原版 26.2 的 `META-INF/libraries.list`，用于原版计算收纳袋重量的 `Fraction`。
-- 测试依赖 `item-recipe`，配方经过真实的解码流程得到；测试直接调用 `item-recipe` 的解码器，所以同时依赖它使用的 DataFixerUpper。Gradle 中 `crafting:compileTestJava` 依赖 `item-recipe:compileJava`，后者依赖 `crafting:compileJava`，任务之间没有环。
+- 测试依赖 `item-recipe`，配方经过真实的解码流程得到；测试直接调用 `item-recipe` 的解码器，解码需要 `dfu-codecs` 的 `RegistryOps`，结果类型来自 DataFixerUpper，所以同时依赖 `dfu-codecs`，它以 `api` 依赖 DataFixerUpper。Gradle 中 `crafting:compileTestJava` 依赖 `item-recipe:compileJava`，后者依赖 `crafting:compileJava`，任务之间没有环。
 
 ## 4. 公开接口
 
@@ -283,7 +283,7 @@ public final class RecipeManager {
 
 ## 15. 测试
 
-测试使用 `net.minestom:testing` 的 `@EnvTest` 启动真实的 Minestom 进程。配方经过 `datapack-loader`、`item-tag`、`item-recipe` 的真实加载流程注册进 `Crafting`；多数测试使用原版 26.2 服务端 jar 中的数据（由 `item-recipe` 的下载任务准备，路径通过系统属性 `yuanban.vanilla-server` 传入）。玩家由 `TestConnection` 连接，通过 `player.addPacketToQueue` 发送真实的客户端数据包。每个测试类加 `@ExtendWith(ResetItemTags.class)`。测试代码作为宿主，用 testFixtures 中的 `InMemoryMaps`（`HashMap` 保存地图数据，`createScaledCopy` 按原版 `createFresh` 计算中心）提供地图数据。预期值按原版代码推算，测试注释写明对应的原版方法。
+测试使用 `net.minestom:testing` 的 `@EnvTest` 启动真实的 Minestom 进程。配方经过 `datapack-loader`、`item-tag`、`item-recipe` 的真实加载流程注册进 `Crafting`；多数测试使用原版 26.2 服务端 jar 中的数据（由根项目的 `extractVanillaServer` 任务准备，全部模块使用同一份，路径通过系统属性 `yuanban.vanilla-server` 传入）。玩家由 `TestConnection` 连接，通过 `player.addPacketToQueue` 发送真实的客户端数据包。每个测试类加 `@ExtendWith(ResetItemTags.class)`。测试代码作为宿主，用 testFixtures 中的 `InMemoryMaps`（`HashMap` 保存地图数据，`createScaledCopy` 按原版 `createFresh` 计算中心）提供地图数据。预期值按原版代码推算，测试注释写明对应的原版方法。
 
 - `RecipeManagerTest`：显示数据、配方书类别、分组、放置信息；`replaceRecipes` 之后的显示 ID、分组 ID、原料需求、物品属性、切石机列表，在线玩家收到的两个数据包能按协议编码；`getRecipeFor` 的顺序与配方提示。
 - `RecipeMatchingTest`：有序配方的平移与左右翻转，无序配方的原料分配，嬗变保留组件、结果与输入相同时不匹配、地图复制，结果模板中与原型相同的组件覆盖输入物品，结果超过最大堆叠数时为空，染色的混色公式，浸染、饰纹陶罐、成书复制与剩余物、地图放大与地图数据，烟花火箭、烟火之星、淡化，旗帜复制与剩余物、盾牌装饰，修复物品的耐久公式与诅咒魔咒，牛奶桶的剩余物，烧炼、切石、锻造升级与纹饰。

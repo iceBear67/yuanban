@@ -9,8 +9,9 @@ import java.util.Optional;
 /**
  * 战利品表：一段战利品配置，对应原版 {@code net.minecraft.world.level.storage.loot.LootTable}。
  * <p>
- * {@link #type()} 的取值来自原版 {@code LootContextParamSets} 注册的 20 种上下文类型
- * （{@code minecraft:generic}、{@code minecraft:chest} 等），未知取值由解析器在解析阶段拦截。
+ * {@link #type()} 的取值来自原版 {@code LootContextParamSets} 注册的 26 种上下文类型
+ * （{@code minecraft:generic}、{@code minecraft:chest} 等）。原版按 {@code lenientOptionalFieldOf} 解码这个字段，
+ * 无法识别的取值按缺省的 {@code minecraft:generic} 处理，不报错。
  * 本模块的 {@link LootManager} 只保管表本身；谓词和物品修饰器文件由其他订阅者加载，{@code reference} 类型只记 ID。
  *
  * @param randomSequence 稳定随机序列的 ID，对应原版字段 {@code random_sequence}
@@ -36,16 +37,18 @@ public record LootTable(Key type,
     }
 
     /**
-     * {@code type} 是原版 {@code LootContextParamSets} 注册的 20 种上下文类型之一。
+     * {@code type} 是原版 {@code LootContextParamSets} 注册的 26 种上下文类型之一。
      */
     public static boolean isKnownType(Key type) {
         return switch (type.asString()) {
-            case "minecraft:generic", "minecraft:chest", "minecraft:command", "minecraft:selector",
+            case "minecraft:empty", "minecraft:chest", "minecraft:command", "minecraft:selector",
                  "minecraft:villager_trade", "minecraft:fishing", "minecraft:entity", "minecraft:equipment",
                  "minecraft:archaeology", "minecraft:gift", "minecraft:barter", "minecraft:vault",
                  "minecraft:advancement_reward", "minecraft:advancement_entity", "minecraft:advancement_location",
-                 "minecraft:block_use", "minecraft:block", "minecraft:shearing",
-                 "minecraft:entity_interact", "minecraft:block_interact" -> true;
+                 "minecraft:block_use", "minecraft:generic", "minecraft:block", "minecraft:shearing",
+                 "minecraft:entity_interact", "minecraft:block_interact", "minecraft:enchanted_damage",
+                 "minecraft:enchanted_item", "minecraft:enchanted_location", "minecraft:enchanted_entity",
+                 "minecraft:hit_block" -> true;
             default -> false;
         };
     }

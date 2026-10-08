@@ -5,6 +5,7 @@ import io.ib67.yuanban.loot.entry.ItemEntry;
 import io.ib67.yuanban.loot.function.SetCountFunction;
 import io.ib67.yuanban.loot.number.ConstantValue;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.item.Material;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -19,7 +20,7 @@ class PoolAndTableTest {
     @Test
     void lootPoolNoBonusRolls() {
         var rolls = new ConstantValue(1.0f);
-        var entries = List.of((io.ib67.yuanban.loot.entry.LootEntry) new ItemEntry(Key.key("minecraft:stone")));
+        var entries = List.of((io.ib67.yuanban.loot.entry.LootEntry) new ItemEntry(Material.STONE));
         var pool = new LootPool(List.of(), List.of(), rolls, entries);
         assertEquals(rolls, pool.rolls());
         assertEquals(ConstantValue.ZERO, pool.bonusRolls());
@@ -30,7 +31,7 @@ class PoolAndTableTest {
     void lootPoolWithBonusRolls() {
         var rolls = new ConstantValue(1.0f);
         var bonus = new ConstantValue(2.0f);
-        var entries = List.of((io.ib67.yuanban.loot.entry.LootEntry) new ItemEntry(Key.key("minecraft:stone")));
+        var entries = List.of((io.ib67.yuanban.loot.entry.LootEntry) new ItemEntry(Material.STONE));
         var pool = new LootPool(List.of(), List.of(), rolls, bonus, entries);
         assertEquals(bonus, pool.bonusRolls());
     }
@@ -52,7 +53,9 @@ class PoolAndTableTest {
                 "minecraft:archaeology", "minecraft:gift", "minecraft:barter", "minecraft:vault",
                 "minecraft:advancement_reward", "minecraft:advancement_entity", "minecraft:advancement_location",
                 "minecraft:block_use", "minecraft:block", "minecraft:shearing",
-                "minecraft:entity_interact", "minecraft:block_interact"
+                "minecraft:entity_interact", "minecraft:block_interact", "minecraft:empty",
+                "minecraft:enchanted_damage", "minecraft:enchanted_item", "minecraft:enchanted_location",
+                "minecraft:enchanted_entity", "minecraft:hit_block"
         }) {
             assertTrue(LootTable.isKnownType(Key.key(known)), known);
         }

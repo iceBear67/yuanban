@@ -257,6 +257,6 @@ class RecipeManagerTest {
     }
 
     private static Recipe<?> recipe(Env env, String json) {
-        return new RecipeCodecs(TAGS, env.process()).decode(JsonParser.parseString(json)).getOrThrow();
+        return RecipeCodecs.CODEC.parse(RecipeCodecs.registryOps(env.process(), TAGS), JsonParser.parseString(json)).getOrThrow();
     }
 }

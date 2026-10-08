@@ -5,8 +5,8 @@ import io.ib67.yuanban.loot.condition.LootCondition;
 import java.util.List;
 
 /**
- * 原版 {@code set_attributes}：重写物品的属性修饰器列表。JSON 字段 {@code modifiers}、
- * {@code replace}（默认 {@code false}；为 {@code true} 时覆盖原列表而非追加）。
+ * 原版 {@code set_attributes}：向物品的属性修饰符组件加入修饰符。JSON 字段 {@code modifiers}、
+ * {@code replace}（默认 {@code true}；为 {@code true} 时从空列表开始，否则在物品现有的修饰符上追加）。
  */
 public record SetAttributesFunction(List<LootCondition> conditions,
                                     List<AttributeModifierRecord> modifiers,
@@ -17,6 +17,6 @@ public record SetAttributesFunction(List<LootCondition> conditions,
     }
 
     public SetAttributesFunction(List<LootCondition> conditions, List<AttributeModifierRecord> modifiers) {
-        this(conditions, modifiers, false);
+        this(conditions, modifiers, true);
     }
 }

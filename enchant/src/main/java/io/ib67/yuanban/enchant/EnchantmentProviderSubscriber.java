@@ -1,17 +1,22 @@
 package io.ib67.yuanban.enchant;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
+import com.mojang.serialization.JsonOps;
+import io.ib67.yuanban.codec.RegistryGetter;
+import io.ib67.yuanban.codec.RegistryIds;
+import io.ib67.yuanban.codec.RegistryLookup;
+import io.ib67.yuanban.codec.RegistryOps;
 import io.ib67.yuanban.datapack.subscribe.Lifecycle;
 import io.ib67.yuanban.datapack.subscribe.PrepareContext;
 import io.ib67.yuanban.datapack.subscribe.Subscriber;
 import io.ib67.yuanban.datapack.subscribe.SubscriberKey;
 import io.ib67.yuanban.datapack.subscribe.Subscription;
-import io.ib67.yuanban.datapack.topic.Resource;
 import io.ib67.yuanban.datapack.topic.Topic;
 import io.ib67.yuanban.enchant.internal.EnchantmentCodecs;
+import io.ib67.yuanban.enchant.internal.UnboundReferences;
 import net.kyori.adventure.key.Key;
 import net.minestom.server.ServerProcess;
-import net.minestom.server.codec.Result;
-import net.minestom.server.registry.Registries;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -54,54 +59,52 @@ public final class EnchantmentProviderSubscriber implements Subscriber<Enchantme
         return current;
     }
 
+    /**
+     * 按原版 {@code EnchantmentProvider.DIRECT_CODEC} 解码全部提供器文件。
+     * <p>
+     * 原版的附魔提供器和附魔在同一批注册表中加载，解码时附魔注册表用注册查找回答；全部文件解码之后，
+     * 再按本次加载的附魔和附魔标签检查引用，错误文本与原版冻结注册表时相同，放在各文件的错误之后。
+     */
     @Override
     public EnchantmentProviderData prepare(PrepareContext context) throws IOException {
-        var registries = process.registries();
         var enchantments = context.dependency(EnchantmentSubscriber.KEY);
         var tags = context.dependency(EnchantmentTagSubscriber.KEY);
+        var ops = RegistryOps.create(JsonOps.INSTANCE, RegistryLookup.builder(process.registries())
+                .put(RegistryIds.ENCHANTMENT, RegistryGetter.registration())
+                .build());
 
         var decoded = new TreeMap<Key, ProviderEntry>();
         var failures = new ArrayList<String>();
         for (var entry : context.contents(TOPIC).files().entrySet()) {
+            var id = entry.getKey();
             var resource = entry.getValue();
-            switch (decode(registries, enchantments, tags, resource)) {
-                case Result.Ok<ProviderEntry> ok -> decoded.put(entry.getKey(), ok.value());
-                case Result.Error<ProviderEntry> error -> failures.add("Couldn't parse data file '" + entry.getKey().asString()
-                        + "' from " + resource + ": " + error.message());
+            JsonElement json;
+            try {
+                json = resource.readJson();
+            } catch (JsonParseException e) {
+                failures.add(EnchantmentSubscriber.failure(id, resource, e.getMessage()));
+                continue;
             }
+            var result = EnchantmentCodecs.PROVIDER.parse(ops, json);
+            result.error().ifPresentOrElse(
+                    error -> failures.add(EnchantmentSubscriber.failure(id, resource, error.message())),
+                    () -> decoded.put(id, result.getOrThrow()));
         }
+
+        var unboundValues = decoded.values().stream()
+                .flatMap(provider -> provider.referencedEnchantments().stream())
+                .filter(reference -> !enchantments.enchantments().containsKey(reference))
+                .toList();
+        var unboundTags = decoded.values().stream()
+                .flatMap(provider -> provider.referencedEnchantmentTags().stream())
+                .filter(reference -> !tags.tags().containsKey(reference))
+                .toList();
+        UnboundReferences.message(RegistryIds.ENCHANTMENT, unboundValues, unboundTags).ifPresent(failures::add);
+
         if (!failures.isEmpty()) {
             throw new EnchantmentException(String.join("\n", failures));
         }
         return new EnchantmentProviderData(decoded);
-    }
-
-    private Result<ProviderEntry> decode(Registries registries, EnchantmentData enchantments, EnchantmentTags tags,
-                                         Resource resource) throws IOException {
-        var json = resource.readJson();
-        if (!(json instanceof com.google.gson.JsonObject object)) {
-            return error("Not an object: " + json);
-        }
-
-        var decoded = EnchantmentCodecs.decodeProvider(registries, object);
-        if (decoded instanceof Result.Error<ProviderEntry> decodeError) {
-            return error(decodeError.message());
-        }
-        var provider = ((Result.Ok<ProviderEntry>) decoded).value();
-
-        var enchantment = provider.referencedEnchantment();
-        if (enchantment != null && !enchantments.enchantments().containsKey(enchantment)) {
-            return error("Missing enchantment: '" + enchantment.asString() + "'");
-        }
-        var enchantmentTag = provider.referencedEnchantmentTag();
-        if (enchantmentTag != null && !tags.tags().containsKey(enchantmentTag)) {
-            return error("Missing enchantment tag: '" + enchantmentTag.asString() + "'");
-        }
-        return new Result.Ok<>(provider);
-    }
-
-    private static Result<ProviderEntry> error(String message) {
-        return new Result.Error<>(message);
     }
 
     @Override

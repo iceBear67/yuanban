@@ -25,6 +25,10 @@ import java.util.Random;
 final class SequenceRandom extends Random {
     private long stateLo;
     private long stateHi;
+    /**
+     * {@link Random} 的构造器会调用 {@link #setSeed(long)}，那时本类的构造器还没有执行，这个字段为 {@code false}。
+     */
+    private final boolean constructed;
 
     SequenceRandom(long worldSeed, Key sequenceId) {
         var digest = md5(sequenceId.asString().getBytes(StandardCharsets.UTF_8));
@@ -41,6 +45,7 @@ final class SequenceRandom extends Random {
         }
         this.stateLo = stateLo;
         this.stateHi = stateHi;
+        this.constructed = true;
     }
 
     /**
@@ -79,8 +84,10 @@ final class SequenceRandom extends Random {
 
     @Override
     public void setSeed(long seed) {
-        // {@code java.util.Random} 的保护性 setSeed 在稳定序列上不允许覆盖已派生的状态
-        throw new UnsupportedOperationException("SequenceRandom seed is derived at construction time");
+        // java.util.Random 的构造器调用这个方法时状态还没有派生，这次调用不改变任何状态；构造完成之后不允许覆盖已派生的状态
+        if (constructed) {
+            throw new UnsupportedOperationException("SequenceRandom seed is derived at construction time");
+        }
     }
 
     private static byte[] md5(byte[] input) {

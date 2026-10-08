@@ -1,15 +1,16 @@
 package io.ib67.yuanban.loot.referenced;
 
+import io.ib67.yuanban.codec.HolderSet;
+import io.ib67.yuanban.codec.MinMaxBounds;
 import io.ib67.yuanban.loot.condition.AllOfCondition;
+import io.ib67.yuanban.loot.condition.AnyOfCondition;
 import io.ib67.yuanban.loot.condition.BlockStatePropertyCondition;
-import io.ib67.yuanban.loot.condition.DamageSourcePredicate;
 import io.ib67.yuanban.loot.condition.DamageSourcePropertiesCondition;
 import io.ib67.yuanban.loot.condition.EnchantmentActiveCheckCondition;
-import io.ib67.yuanban.loot.condition.EntityPredicate;
 import io.ib67.yuanban.loot.condition.EntityPropertiesCondition;
 import io.ib67.yuanban.loot.condition.EntityScoresCondition;
 import io.ib67.yuanban.loot.condition.EnvironmentAttributeCheckCondition;
-import io.ib67.yuanban.loot.condition.ItemPredicate;
+import io.ib67.yuanban.loot.condition.InvertedCondition;
 import io.ib67.yuanban.loot.condition.KilledByPlayerCondition;
 import io.ib67.yuanban.loot.condition.LocationCheckCondition;
 import io.ib67.yuanban.loot.condition.MatchToolCondition;
@@ -17,28 +18,31 @@ import io.ib67.yuanban.loot.condition.RandomChanceCondition;
 import io.ib67.yuanban.loot.condition.RandomChanceWithEnchantedBonusCondition;
 import io.ib67.yuanban.loot.condition.SurvivesExplosionCondition;
 import io.ib67.yuanban.loot.condition.TableBonusCondition;
-import io.ib67.yuanban.loot.context.ContextKey;
 import io.ib67.yuanban.loot.number.ConstantValue;
 import io.ib67.yuanban.loot.number.EntityTarget;
 import io.ib67.yuanban.loot.number.IntRange;
+import io.ib67.yuanban.loot.number.LevelBasedValue;
+import io.ib67.yuanban.loot.predicate.ComponentMatchers;
+import io.ib67.yuanban.loot.predicate.ItemPredicate;
+import io.ib67.yuanban.loot.predicate.entity.EntityPredicate;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.instance.block.Block;
+import net.minestom.server.registry.RegistryKey;
+import net.minestom.server.world.attribute.EnvironmentAttribute;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
+import static io.ib67.yuanban.loot.referenced.ReferencedParamsFixture.ids;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * 条件 record 的 {@code referencedParams} 对照原版 {@code LootContextUser#getReferencedContextParams} 的抽样断言。
  */
 class ConditionReferencedParamsTest {
-
-    private static Set<String> ids(Set<ContextKey<?>> params) {
-        return params.stream().map(contextKey -> contextKey.id().toString()).collect(Collectors.toSet());
-    }
 
     @Test
     void killedByPlayer() {
@@ -48,8 +52,7 @@ class ConditionReferencedParamsTest {
     @Test
     void randomChanceWithEnchantedBonus() {
         var condition = new RandomChanceWithEnchantedBonusCondition(
-                0.05f, new io.ib67.yuanban.loot.number.LevelBasedValue.Linear(0.1f, 0.05f),
-                Key.key("minecraft:looting"));
+                0.05f, new LevelBasedValue.Linear(0.1f, 0.05f), RegistryKey.of(Key.key("minecraft:looting")));
         assertEquals(Set.of("minecraft:attacking_entity"), ids(condition.referencedParams()));
     }
 
@@ -66,29 +69,25 @@ class ConditionReferencedParamsTest {
 
     @Test
     void entityProperties() {
-        var predicate = new EntityPredicate(List.of(Key.key("minecraft:zombie")), null);
         assertEquals(Set.of("minecraft:origin", "minecraft:attacking_entity"),
-                ids(new EntityPropertiesCondition(predicate, EntityTarget.ATTACKER).referencedParams()));
+                ids(new EntityPropertiesCondition(Optional.of(new EntityPredicate(List.of())), EntityTarget.ATTACKER).referencedParams()));
     }
 
     @Test
     void locationCheck() {
-        var condition = new LocationCheckCondition(
-                new io.ib67.yuanban.loot.condition.LocationPredicate(Key.key("minecraft:village"), null, null, null, null));
-        assertEquals(Set.of("minecraft:origin"), ids(condition.referencedParams()));
+        assertEquals(Set.of("minecraft:origin"), ids(new LocationCheckCondition(Optional.empty(), 0, 0, 0).referencedParams()));
     }
 
     @Test
     void blockStateProperty() {
-        var condition = new BlockStatePropertyCondition(Key.key("minecraft:stone"), (io.ib67.yuanban.loot.condition.BlockPredicate) null);
-        assertEquals(Set.of("minecraft:block_state"), ids(condition.referencedParams()));
+        assertEquals(Set.of("minecraft:block_state"),
+                ids(new BlockStatePropertyCondition(Block.STONE, Optional.empty()).referencedParams()));
     }
 
     @Test
     void damageSourceProperties() {
-        var condition = new DamageSourcePropertiesCondition(
-                new DamageSourcePredicate(Key.key("minecraft:is_projectile"), null, null));
-        assertEquals(Set.of("minecraft:origin", "minecraft:damage_source"), ids(condition.referencedParams()));
+        assertEquals(Set.of("minecraft:origin", "minecraft:damage_source"),
+                ids(new DamageSourcePropertiesCondition(Optional.empty()).referencedParams()));
     }
 
     @Test
@@ -100,19 +99,19 @@ class ConditionReferencedParamsTest {
     @Test
     void environmentAttributeCheck() {
         assertEquals(Set.of("minecraft:origin"),
-                ids(new EnvironmentAttributeCheckCondition(Key.key("minecraft:daytime"), "true").referencedParams()));
+                ids(new EnvironmentAttributeCheckCondition<>(EnvironmentAttribute.MUSIC_VOLUME, 1.0F).referencedParams()));
     }
 
     @Test
     void matchTool() {
-        assertEquals(Set.of("minecraft:tool"),
-                ids(new MatchToolCondition(new ItemPredicate(List.of(Key.key("minecraft:shears")), null)).referencedParams()));
+        var predicate = new ItemPredicate(Optional.of(HolderSet.named(Key.key("swords"))), MinMaxBounds.ANY_INT, ComponentMatchers.ANY);
+        assertEquals(Set.of("minecraft:tool"), ids(new MatchToolCondition(Optional.of(predicate)).referencedParams()));
     }
 
     @Test
     void tableBonus() {
         assertEquals(Set.of("minecraft:tool"),
-                ids(new TableBonusCondition(Key.key("minecraft:fortune"), List.of(0.1f)).referencedParams()));
+                ids(new TableBonusCondition(RegistryKey.of(Key.key("minecraft:fortune")), List.of(0.1f)).referencedParams()));
     }
 
     @Test
@@ -143,9 +142,7 @@ class ConditionReferencedParamsTest {
     @Test
     void compositeConditionsReturnEmptySet() {
         // 原版 AnyOfCondition、InvertedLootItemCondition 均继承/直接返回空集，不合并子条件。
-        assertEquals(Set.of(), ids(new io.ib67.yuanban.loot.condition.AnyOfCondition(
-                List.of(KilledByPlayerCondition.INSTANCE)).referencedParams()));
-        assertEquals(Set.of(), ids(new io.ib67.yuanban.loot.condition.InvertedCondition(
-                KilledByPlayerCondition.INSTANCE).referencedParams()));
+        assertEquals(Set.of(), ids(new AnyOfCondition(List.of(KilledByPlayerCondition.INSTANCE)).referencedParams()));
+        assertEquals(Set.of(), ids(new InvertedCondition(KilledByPlayerCondition.INSTANCE).referencedParams()));
     }
 }

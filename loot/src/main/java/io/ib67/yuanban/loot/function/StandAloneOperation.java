@@ -1,13 +1,15 @@
 package io.ib67.yuanban.loot.function;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
- * "一组值跟一个列表操作"的组合：原版 {@code ListOperation$StandAlone}，JSON 字段 {@code values}、
- * {@code operation}（拆开后在 loot-table-parser 里组装）。本模块在 record 上把它们并列。
+ * 一组值加一个列表操作：原版 {@code ListOperation$StandAlone}。JSON 是对象，{@code values} 是值的列表，
+ * 列表操作的 {@code mode} 等字段内联在同一个对象中。
  */
 public record StandAloneOperation<T>(List<T> values, ListOperation operation) {
     public StandAloneOperation {
         values = List.copyOf(values);
+        Objects.requireNonNull(operation, "operation");
     }
 }

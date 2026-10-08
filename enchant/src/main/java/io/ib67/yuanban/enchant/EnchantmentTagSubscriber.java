@@ -45,18 +45,20 @@ public final class EnchantmentTagSubscriber implements Subscriber<EnchantmentTag
     }
 
     /**
-     * 生命周期为 {@link Lifecycle#RELOADABLE}、读取 {@link #TOPIC} 的订阅。
+     * 生命周期为 {@link Lifecycle#RELOADABLE}、读取 {@link #TOPIC} 和 {@link EnchantmentSubscriber#TOPIC} 的订阅。
+     * 读取附魔文件的列表是因为原版展开标签时，可选的元素只在附魔已经注册时放入标签，必需的元素没有注册时报错。
      */
     public Subscription<EnchantmentTags> subscription() {
         return Subscription.builder(KEY, this)
                 .lifecycle(Lifecycle.RELOADABLE)
                 .topic(TOPIC)
+                .topic(EnchantmentSubscriber.TOPIC)
                 .build();
     }
 
     @Override
     public EnchantmentTags prepare(PrepareContext context) {
-        return EnchantmentTagExpander.expand(context.contents(TOPIC));
+        return EnchantmentTagExpander.expand(context.contents(TOPIC), context.contents(EnchantmentSubscriber.TOPIC).files().keySet());
     }
 
     @Override

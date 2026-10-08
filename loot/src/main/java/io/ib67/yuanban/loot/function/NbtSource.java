@@ -1,23 +1,48 @@
 package io.ib67.yuanban.loot.function;
 
-import io.ib67.yuanban.loot.number.EntityTarget;
+import io.ib67.yuanban.loot.context.ContextKey;
+import io.ib67.yuanban.loot.context.LootContextArg;
 import net.kyori.adventure.key.Key;
 
+import java.util.Objects;
+import java.util.Set;
+
 /**
- * NBT 来源：原版 {@code providers.nbt} 下的两种。JSON 形态由解析器拆开后填进对应的 record。
+ * NBT 来源：原版 {@code providers.nbt} 下的两种。JSON 是实体目标名或 {@code block_entity}（上下文来源），
+ * 或者 {@code {type: "context", target}}、{@code {type: "storage", source}}。
  */
 public sealed interface NbtSource {
 
     /**
-     * 原版 {@code ContextNbtProvider}，从上下文实体或方块实体取 NBT。原版 JSON 用
-     * {@code type: "context", target}，其中 target 是实体目标或字面量 {@code block_entity}。
+     * 求值时要求上下文提供的参数，对应原版 {@code NbtProvider#getReferencedContextParams}。
      */
-    record Context(EntityTarget target, boolean blockEntity) implements NbtSource {
+    Set<ContextKey<?>> referencedParams();
+
+    /**
+     * 原版 {@code ContextNbtProvider}：从上下文实体或方块实体取 NBT，{@code target} 只会是实体或方块实体。
+     */
+    record Context(LootContextArg target) implements NbtSource {
+        public Context {
+            Objects.requireNonNull(target, "target");
+        }
+
+        @Override
+        public Set<ContextKey<?>> referencedParams() {
+            return Set.of(target.contextParam());
+        }
     }
 
     /**
-     * 原版 {@code StorageNbtProvider}，从命令存储取 NBT。JSON 字段 {@code source}（命名空间 ID）。
+     * 原版 {@code StorageNbtProvider}：从命令存储取整个根标签。JSON 字段 {@code source}（命名空间 ID）。
      */
     record Storage(Key storage) implements NbtSource {
+        public Storage {
+            Objects.requireNonNull(storage, "storage");
+        }
+
+        @Override
+        public Set<ContextKey<?>> referencedParams() {
+            return Set.of();
+        }
     }
 }

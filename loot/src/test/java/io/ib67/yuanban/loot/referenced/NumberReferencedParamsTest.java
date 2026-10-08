@@ -9,7 +9,9 @@ import io.ib67.yuanban.loot.number.ScoreboardValue;
 import io.ib67.yuanban.loot.number.StorageValue;
 import io.ib67.yuanban.loot.number.SumValue;
 import io.ib67.yuanban.loot.number.UniformValue;
+import io.ib67.yuanban.codec.NbtPath;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.world.attribute.EnvironmentAttribute;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -57,13 +59,13 @@ class NumberReferencedParamsTest {
     @Test
     void environmentAttribute() {
         assertEquals(Set.of("minecraft:origin"),
-                ids(new EnvironmentAttributeValue(Key.key("minecraft:daytime")).referencedParams()));
+                ids(new EnvironmentAttributeValue(EnvironmentAttribute.MUSIC_VOLUME).referencedParams()));
     }
 
     @Test
     void sumMergesTerms() {
         var value = new SumValue(List.of(
-                new EnvironmentAttributeValue(Key.key("minecraft:daytime")),
+                new EnvironmentAttributeValue(EnvironmentAttribute.MUSIC_VOLUME),
                 new ScoreboardValue(new ScoreboardName.Context(EntityTarget.THIS), "kills"),
                 new ConstantValue(1)));
         assertEquals(Set.of(), ids(value.referencedParams()));
@@ -81,8 +83,8 @@ class NumberReferencedParamsTest {
     }
 
     @Test
-    void storage() {
+    void storage() throws Exception {
         assertEquals(Set.of(),
-                ids(new StorageValue(Key.key("minecraft:some_storage"), "path").referencedParams()));
+                ids(new StorageValue(Key.key("minecraft:some_storage"), NbtPath.of("path")).referencedParams()));
     }
 }

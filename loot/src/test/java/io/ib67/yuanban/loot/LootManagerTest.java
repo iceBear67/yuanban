@@ -1,7 +1,10 @@
 package io.ib67.yuanban.loot;
 
-import io.ib67.yuanban.loot.condition.ItemPredicate;
+import io.ib67.yuanban.codec.HolderSet;
+import io.ib67.yuanban.codec.MinMaxBounds;
 import io.ib67.yuanban.loot.condition.MatchToolCondition;
+import io.ib67.yuanban.loot.predicate.ComponentMatchers;
+import io.ib67.yuanban.loot.predicate.ItemPredicate;
 import io.ib67.yuanban.loot.entry.GroupEntry;
 import io.ib67.yuanban.loot.entry.ItemEntry;
 import io.ib67.yuanban.loot.entry.LootEntry;
@@ -10,6 +13,8 @@ import io.ib67.yuanban.loot.entry.TagEntry;
 import io.ib67.yuanban.loot.function.SetContainerLootTableFunction;
 import io.ib67.yuanban.loot.number.ConstantValue;
 import net.kyori.adventure.key.Key;
+import net.minestom.server.instance.block.BlockEntityType;
+import net.minestom.server.item.Material;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -31,10 +36,17 @@ class LootManagerTest {
     private static final Key TABLE_B = Key.key("test", "b");
     private static final Key TABLE_C = Key.key("test", "c");
     private static final Key TABLE_MISSING = Key.key("test", "missing");
-    private static final Key BLOCK_ENTITY_CHEST = Key.key("minecraft", "chest");
+    private static final BlockEntityType BLOCK_ENTITY_CHEST = BlockEntityType.CHEST;
 
     private static ItemEntry item(int weight) {
-        return new ItemEntry(List.of(), List.of(), weight, 0, Key.key("minecraft", "stone"));
+        return new ItemEntry(List.of(), List.of(), weight, 0, Material.STONE);
+    }
+
+    /**
+     * 物品集合为标签 {@code tag} 的物品谓词。
+     */
+    private static ItemPredicate taggedItems(Key tag) {
+        return new ItemPredicate(Optional.of(HolderSet.named(tag)), MinMaxBounds.ANY_INT, ComponentMatchers.ANY);
     }
 
     private static LootPool pool(ConstantValue rolls, LootEntry... entries) {
@@ -147,7 +159,7 @@ class LootManagerTest {
     @Test
     void 复合条目展开后的总权重越过Int上限会失败并指明表ID() {
         var manager = newManager();
-        var group = new GroupEntry(List.of(), List.of(),
+        var group = new GroupEntry(List.of(),
                 List.of(item(Integer.MAX_VALUE), item(Integer.MAX_VALUE)));
         var table = tableWith(pool(new ConstantValue(1), group));
         var tables = new TreeMap<Key, LootTable>();
@@ -181,7 +193,7 @@ class LootManagerTest {
 
     @Test
     void inspect收集match_tool里的物品标签() {
-        var condition = new MatchToolCondition(new ItemPredicate(null, Key.key("minecraft", "foo")));
+        var condition = new MatchToolCondition(Optional.of(taggedItems(Key.key("minecraft", "foo"))));
         var pool = new LootPool(List.of(condition), List.of(), new ConstantValue(1),
                 ConstantValue.ZERO, List.of(item(1)));
         var table = tableWith(pool);
@@ -219,7 +231,7 @@ class LootManagerTest {
         var tag = new TagEntry(List.of(), List.of(), 1, 0, Key.key("minecraft", "ores"), true);
         var function = new SetContainerLootTableFunction(List.of(), TABLE_C, BLOCK_ENTITY_CHEST);
         var pool = new LootPool(
-                List.of(new MatchToolCondition(new ItemPredicate(null, Key.key("minecraft", "foo")))),
+                List.of(new MatchToolCondition(Optional.of(taggedItems(Key.key("minecraft", "foo"))))),
                 List.of(function), new ConstantValue(1), ConstantValue.ZERO, List.of(tag));
         var table = tableWith(pool);
 

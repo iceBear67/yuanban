@@ -8,6 +8,8 @@ import io.ib67.yuanban.datapack.provider.FolderPackProvider;
 import io.ib67.yuanban.datapack.selection.DataPackConfig;
 import io.ib67.yuanban.datapack.selection.SelectionMode;
 import io.ib67.yuanban.datapack.selection.SelectionRequest;
+import io.ib67.yuanban.enchant.EnchantmentSubscriber;
+import io.ib67.yuanban.enchant.EnchantmentTagSubscriber;
 import io.ib67.yuanban.itemtag.ItemTagSubscriber;
 import net.minestom.server.ServerProcess;
 
@@ -60,11 +62,27 @@ final class LootTestWorld {
         return this;
     }
 
+    /**
+     * 在原版数据中写入一个附魔 {@code minecraft:<name>}：只能附在钻石镐和钻石剑上、最高 {@code maxLevel} 级。
+     */
+    LootTestWorld enchantment(String name, int maxLevel) {
+        return vanilla("enchantment/" + name + ".json", """
+                {"description": "%s", "supported_items": ["minecraft:diamond_pickaxe", "minecraft:diamond_sword"],
+                 "weight": 2, "max_level": %d, "min_cost": {"base": 15, "per_level_above_first": 9},
+                 "max_cost": {"base": 65, "per_level_above_first": 9}, "anvil_cost": 4, "slots": ["mainhand"]}
+                """.formatted(name, maxLevel));
+    }
+
+    /**
+     * 订阅物品标签、附魔标签、附魔与战利品表；战利品表的解码依赖前三者。
+     */
     DataPackLoader loader(ServerProcess process, LootTableSubscriber subscriber) {
         return DataPackLoader.builder(LoaderSettings.MINECRAFT_26_2)
                 .provider(new BuiltInPackProvider(vanillaRoot, "26.2"))
                 .provider(new FolderPackProvider(datapacks, PackOrigin.WORLD, path -> false))
                 .subscribe(ItemTagSubscriber.subscription(process))
+                .subscribe(new EnchantmentTagSubscriber(process).subscription())
+                .subscribe(new EnchantmentSubscriber(process).subscription())
                 .subscribe(subscriber.subscription())
                 .executor(ForkJoinPool.commonPool())
                 .build();

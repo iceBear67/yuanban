@@ -1,6 +1,7 @@
 package io.ib67.yuanban.loot.context;
 
 import net.minestom.server.ServerProcess;
+import net.minestom.server.instance.Instance;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Random;
@@ -46,8 +47,14 @@ public sealed interface LootContext permits LootContextImpl {
     ServerProcess process();
 
     /**
+     * 本次取用所在的世界，对应原版 {@code LootContext#getLevel}。原版的上下文总有世界；本模块允许宿主不给出世界，
+     * 这时需要世界的求值（位置、天气、时间条件等）抛出 {@link io.ib67.yuanban.loot.LootException}。
+     */
+    @Nullable Instance level();
+
+    /**
      * 本次取用的默认随机数源；表声明了 {@code random_sequence} 时求值器会改用按
-     * {@link LootEnvironment#worldSeed()} 派生的稳定序列替换它（见 DESIGN 8.3 第 1 条）。
+     * {@link LootEnvironment#worldSeed()} 派生的稳定序列替换它（见 DESIGN 8.3 第 2 步）。
      */
     Random random();
 }

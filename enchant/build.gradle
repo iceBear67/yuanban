@@ -1,45 +1,18 @@
-plugins {
-    id("de.undercouch.download") version "5.7.0"
-}
-
 dependencies {
     api(project(":datapack-loader"))
     api(project(":item-tag"))
     api("net.minestom:minestom:2026.10.05-26.2")
+    // EnchantmentMut、ProviderEntry 的公开字段使用 dfu-codecs 的 HolderSet
+    api(project(":dfu-codecs"))
     implementation("com.google.guava:guava:33.6.0-jre")
     testImplementation("net.minestom:testing:2026.10.05-26.2")
     testImplementation(testFixtures(project(":item-tag")))
 }
 
-def vanillaBundle = layout.buildDirectory.file("vanilla/server-26.2-bundle.jar")
-def vanillaServer = layout.buildDirectory.dir("vanilla/server")
-
-tasks.register("downloadVanillaServer", de.undercouch.gradle.tasks.download.Download) {
-    src("https://piston-data.mojang.com/v1/objects/823e2250d24b3ddac457a60c92a6a941943fcd6a/server.jar")
-    dest(vanillaBundle)
-    overwrite(false)
-}
-
-tasks.register("verifyVanillaServer", de.undercouch.gradle.tasks.download.Verify) {
-    dependsOn("downloadVanillaServer")
-    src(vanillaBundle)
-    algorithm("SHA-1")
-    checksum("823e2250d24b3ddac457a60c92a6a941943fcd6a")
-}
-
-tasks.register("extractVanillaServer", Copy) {
-    dependsOn("verifyVanillaServer")
-    from(zipTree(vanillaBundle)) {
-        include("META-INF/versions/26.2/server-26.2.jar")
-        eachFile { it.path = it.name }
-        includeEmptyDirs = false
-    }
-    into(vanillaServer)
-}
-
 tasks.test {
-    dependsOn("extractVanillaServer")
+    // 原版 26.2 服务端由根项目下载和取出
+    dependsOn(":extractVanillaServer")
     // net.minestom:testing 在平台线程上创建玩家，需要关闭 Minestom 的虚拟线程断言
     systemProperty("minestom.inside-test", "true")
-    systemProperty("yuanban.vanilla-server", vanillaServer.get().file("server-26.2.jar").asFile.absolutePath)
+    systemProperty("yuanban.vanilla-server", rootProject.ext.vanillaServerJar)
 }

@@ -1,5 +1,7 @@
 package io.ib67.yuanban.recipe;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 import io.ib67.yuanban.crafting.recipe.Recipe;
 import io.ib67.yuanban.crafting.recipe.RecipeManager;
 import io.ib67.yuanban.datapack.subscribe.Lifecycle;
@@ -7,6 +9,7 @@ import io.ib67.yuanban.datapack.subscribe.PrepareContext;
 import io.ib67.yuanban.datapack.subscribe.Subscriber;
 import io.ib67.yuanban.datapack.subscribe.SubscriberKey;
 import io.ib67.yuanban.datapack.subscribe.Subscription;
+import io.ib67.yuanban.datapack.topic.Resource;
 import io.ib67.yuanban.datapack.topic.Topic;
 import io.ib67.yuanban.itemtag.ItemTagSubscriber;
 import io.ib67.yuanban.recipe.internal.RecipeCodecs;
@@ -30,7 +33,7 @@ public final class RecipeSubscriber implements Subscriber<RecipeSet> {
     private volatile RecipeSet current = RecipeSet.EMPTY;
 
     /**
-     * @param process 解码物品组件和纹饰样式时使用它的注册表
+     * @param process 解码时按它的注册表及其标签检查引用，并用它的注册表解码物品组件和内联纹饰样式；物品标签换成本次加载的结果
      * @param recipes 提交阶段把配方交给它，通常是 {@code Crafting.recipes()}
      */
     public RecipeSubscriber(ServerProcess process, RecipeManager recipes) {
@@ -57,22 +60,35 @@ public final class RecipeSubscriber implements Subscriber<RecipeSet> {
         return current;
     }
 
+    /**
+     * 按配方 ID 的顺序解码全部文件，JSON 语法错误和解码错误都按文件记入错误汇总。
+     */
     @Override
     public RecipeSet prepare(PrepareContext context) throws IOException {
-        var codecs = new RecipeCodecs(context.dependency(ItemTagSubscriber.KEY), process);
+        var ops = RecipeCodecs.registryOps(process, context.dependency(ItemTagSubscriber.KEY));
         var decoded = new TreeMap<Key, Recipe<?>>();
         var failures = new ArrayList<String>();
         for (var entry : context.contents(TOPIC).files().entrySet()) {
             var resource = entry.getValue();
-            var result = codecs.decode(resource.readJson());
-            result.error().ifPresent(error -> failures.add("Couldn't parse data file '" + entry.getKey().asString()
-                    + "' from " + resource + ": " + error.message()));
+            JsonElement json;
+            try {
+                json = resource.readJson();
+            } catch (JsonParseException e) {
+                failures.add(failure(entry.getKey(), resource, e.getMessage()));
+                continue;
+            }
+            var result = RecipeCodecs.CODEC.parse(ops, json);
+            result.error().ifPresent(error -> failures.add(failure(entry.getKey(), resource, error.message())));
             result.result().ifPresent(recipe -> decoded.put(entry.getKey(), recipe));
         }
         if (!failures.isEmpty()) {
             throw new RecipeException(String.join("\n", failures));
         }
         return new RecipeSet(decoded);
+    }
+
+    private static String failure(Key id, Resource resource, String message) {
+        return "Couldn't parse data file '" + id.asString() + "' from " + resource + ": " + message;
     }
 
     /**

@@ -1,204 +1,172 @@
 package io.ib67.yuanban.datapack.internal;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
+import com.mojang.serialization.JsonOps;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import io.ib67.yuanban.codec.ComponentSerialization;
+import io.ib67.yuanban.codec.ExtraCodecs;
+import io.ib67.yuanban.codec.Identifiers;
 import io.ib67.yuanban.datapack.LoaderSettings;
 import io.ib67.yuanban.datapack.PackMetadataException;
+import io.ib67.yuanban.datapack.internal.PackFormatCodecs.IntermediaryFormat;
+import io.ib67.yuanban.datapack.internal.PackFormatCodecs.IntermediaryFormatHolder;
 import io.ib67.yuanban.datapack.pack.FilterRule;
 import io.ib67.yuanban.datapack.pack.FormatRange;
 import io.ib67.yuanban.datapack.pack.OverlayEntry;
-import io.ib67.yuanban.datapack.pack.PackFormat;
 import io.ib67.yuanban.datapack.pack.PackMetadata;
 import io.ib67.yuanban.datapack.pack.ResourceFilter;
-import net.kyori.adventure.key.InvalidKeyException;
 import net.kyori.adventure.key.Key;
+import net.kyori.adventure.text.Component;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
- * 解析 {@code pack.mcmeta}。只读取 26.2 起的字段，{@code pack_format}、{@code supported_formats}
- * 以及 overlay 条目中的 {@code formats} 忽略。
+ * 解析 {@code pack.mcmeta}，移植原版 26.2 读取数据包元数据所用的编解码器：{@code PackMetadataSection}、
+ * {@code FeatureFlagsMetadataSection}、{@code OverlayMetadataSection}、{@code ResourceFilterSection}。
+ * 和原版 {@code ResourceMetadata.getSection} 相同，每个段落存在时单独用 {@link JsonOps#INSTANCE} 解码。
+ * 原版遇到错误时改用只读取描述的编解码器、跳过数据包或者忽略 {@code filter}；这里任何错误都抛出 {@link PackMetadataException}，
+ * 原因是编解码器给出的错误文本。
  */
 @ApiStatus.Internal
 public final class PackMetadataParser {
-    private static final Pattern OVERLAY_DIRECTORY = Pattern.compile("[-_a-zA-Z0-9.]+");
-    private static final int MAX_FORMAT_ARRAY_LENGTH = 256;
+    /**
+     * 原版 {@code OverlayMetadataSection.DIR_VALIDATOR}。
+     */
+    private static final Pattern DIR_VALIDATOR = Pattern.compile("[-_a-zA-Z0-9.]+");
+    /**
+     * 原版 {@code PackMetadataSection.codecForPackType(PackType.SERVER_DATA)}。
+     */
+    private static final Codec<PackSection> PACK_CODEC = RecordCodecBuilder.create(i -> i.group(
+            ComponentSerialization.CODEC.fieldOf("description").forGetter(PackSection::description),
+            PackFormatCodecs.packCodec().forGetter(PackSection::formats)
+    ).apply(i, PackSection::new));
+    /**
+     * 原版 {@code OverlayMetadataSection.OverlayEntry.IntermediateEntry.CODEC}。
+     */
+    private static final Codec<IntermediateEntry> INTERMEDIATE_ENTRY_CODEC = RecordCodecBuilder.create(i -> i.group(
+            IntermediaryFormat.OVERLAY_CODEC.forGetter(IntermediateEntry::format),
+            Codec.STRING.validate(PackMetadataParser::validateOverlayDir).fieldOf("directory").forGetter(IntermediateEntry::overlay)
+    ).apply(i, IntermediateEntry::new));
+    /**
+     * 原版 {@code OverlayMetadataSection.OverlayEntry.listCodecForPackType(PackType.SERVER_DATA)}。
+     */
+    private static final Codec<List<OverlayEntry>> OVERLAY_LIST_CODEC = INTERMEDIATE_ENTRY_CODEC.listOf().flatXmap(
+            list -> PackFormatCodecs.validateHolderList(list, PackFormatCodecs.LAST_PRE_MINOR_VERSION,
+                    (entry, formats) -> new OverlayEntry(entry.overlay(), formats)),
+            list -> DataResult.success(list.stream()
+                    .map(entry -> new IntermediateEntry(
+                            IntermediaryFormat.fromRange(entry.formats(), PackFormatCodecs.LAST_PRE_MINOR_VERSION), entry.directory()))
+                    .toList()));
+    /**
+     * 原版 {@code IdentifierPattern.CODEC}：两项都可以省略，省略的一项匹配任何字符串。
+     */
+    private static final Codec<FilterRule> IDENTIFIER_PATTERN_CODEC = RecordCodecBuilder.create(i -> i.group(
+            ExtraCodecs.PATTERN.optionalFieldOf("namespace").forGetter(rule -> Optional.ofNullable(rule.namespace())),
+            ExtraCodecs.PATTERN.optionalFieldOf("path").forGetter(rule -> Optional.ofNullable(rule.path()))
+    ).apply(i, (namespace, path) -> new FilterRule(namespace.orElse(null), path.orElse(null))));
+    /**
+     * 原版 {@code PackMetadataSection.SERVER_TYPE}。
+     */
+    private static final SectionType<PackSection> PACK = new SectionType<>("pack", PACK_CODEC);
+    /**
+     * 原版 {@code OverlayMetadataSection.SERVER_TYPE}。
+     */
+    private static final SectionType<List<OverlayEntry>> OVERLAYS = new SectionType<>("overlays",
+            OVERLAY_LIST_CODEC.fieldOf("entries").codec());
+    /**
+     * 原版 {@code ResourceFilterSection.TYPE}。
+     */
+    private static final SectionType<ResourceFilter> FILTER = new SectionType<>("filter",
+            Codec.list(IDENTIFIER_PATTERN_CODEC).fieldOf("block").xmap(ResourceFilter::new, ResourceFilter::block).codec());
 
-    private final String packId;
-    private final LoaderSettings settings;
-
-    private PackMetadataParser(String packId, LoaderSettings settings) {
-        this.packId = packId;
-        this.settings = settings;
-    }
-
-    public static PackMetadata parse(String packId, JsonElement root, LoaderSettings settings) {
-        return new PackMetadataParser(packId, settings).parseRoot(root);
-    }
-
-    private PackMetadata parseRoot(JsonElement root) {
-        var rootObject = object(root, "");
-        var pack = object(required(rootObject, "pack", ""), "pack");
-        var description = required(pack, "description", "pack");
-        if (!(description.isJsonObject() || description.isJsonArray()
-                || description.isJsonPrimitive() && description.getAsJsonPrimitive().isString())) {
-            throw error("pack.description", "必须是字符串、对象或数组");
-        }
-        var formats = formatRange(pack, "pack");
-        var features = rootObject.has("features") ? features(object(rootObject.get("features"), "features")) : Set.<Key>of();
-        var filter = rootObject.has("filter") ? filter(object(rootObject.get("filter"), "filter")) : ResourceFilter.NONE;
-        var overlays = rootObject.has("overlays") ? overlays(object(rootObject.get("overlays"), "overlays")) : List.<OverlayEntry>of();
-        return new PackMetadata(description.deepCopy(), formats, features, filter, overlays);
-    }
-
-    private FormatRange formatRange(JsonObject owner, String path) {
-        var min = format(required(owner, "min_format", path), join(path, "min_format"), 0);
-        var max = format(required(owner, "max_format", path), join(path, "max_format"), PackFormat.ANY_MINOR);
-        if (min.compareTo(max) > 0) {
-            throw error(join(path, "min_format"), "min_format (" + min + ") 大于 max_format (" + max + ")");
-        }
-        return new FormatRange(min, max);
-    }
-
-    private PackFormat format(JsonElement element, String path, int defaultMinor) {
-        if (element.isJsonArray()) {
-            var array = element.getAsJsonArray();
-            if (array.isEmpty() || array.size() > MAX_FORMAT_ARRAY_LENGTH) {
-                throw error(path, "数组长度必须在 1 到 " + MAX_FORMAT_ARRAY_LENGTH + " 之间");
-            }
-            var major = nonNegativeInt(array.get(0), path + "[0]");
-            var minor = array.size() > 1 ? nonNegativeInt(array.get(1), path + "[1]") : defaultMinor;
-            for (int i = 2; i < array.size(); i++) {
-                nonNegativeInt(array.get(i), path + "[" + i + "]");
-            }
-            return PackFormat.of(major, minor);
-        }
-        return PackFormat.of(nonNegativeInt(element, path), defaultMinor);
+    private PackMetadataParser() {
     }
 
     /**
-     * 和原版 {@code Codec.INT} 相同，数字用 {@link Number#intValue()} 转换：小数截断取整。
+     * 按原版 {@code Pack.readPackMetadata} 的顺序读取 {@code pack}、{@code features}、{@code overlays}，最后读取 {@code filter}。
+     *
+     * @param metadata {@code pack.mcmeta} 的根对象
      */
-    private int nonNegativeInt(JsonElement element, String path) {
-        if (!(element instanceof JsonPrimitive primitive) || !primitive.isNumber()) {
-            throw error(path, "必须是非负整数");
-        }
-        var value = primitive.getAsNumber().intValue();
-        if (value < 0) {
-            throw error(path, "必须是非负整数");
-        }
-        return value;
+    public static PackMetadata parse(String packId, JsonObject metadata, LoaderSettings settings) {
+        var pack = PACK.read(packId, metadata)
+                .orElseThrow(() -> new PackMetadataException(packId, "Missing metadata in pack " + packId));
+        var features = featureFlagsSection(settings.featureFlags()).read(packId, metadata).orElse(Set.of());
+        var overlays = OVERLAYS.read(packId, metadata).orElse(List.of());
+        var filter = FILTER.read(packId, metadata).orElse(ResourceFilter.NONE);
+        // 文本组件只做校验，记录中保存 JSON 原文，由宿主转换
+        var description = metadata.getAsJsonObject(PACK.name()).get("description").deepCopy();
+        return new PackMetadata(description, pack.formats(), features, filter, overlays);
     }
 
-    private Set<Key> features(JsonObject features) {
-        var enabled = array(required(features, "enabled", "features"), "features.enabled");
-        var result = new HashSet<Key>();
-        for (int i = 0; i < enabled.size(); i++) {
-            var path = "features.enabled[" + i + "]";
-            var flag = key(string(enabled.get(i), path), path);
-            if (!settings.featureFlags().contains(flag)) {
-                throw error(path, "未知的特性开关 " + flag.asString());
+    /**
+     * 原版 {@code FeatureFlagsMetadataSection.TYPE}，{@code enabled} 使用原版 {@code FeatureFlagRegistry.codec()} 的规则：
+     * 未知的 ID 收集到 {@link HashSet} 中一次报出，集合的顺序与原版相同，因为 {@link Key} 和原版 {@code Identifier} 的散列值相同。
+     *
+     * @param known 当前游戏已知的全部特性开关
+     */
+    private static SectionType<Set<Key>> featureFlagsSection(Set<Key> known) {
+        Codec<Set<Key>> flags = Identifiers.CODEC.listOf().comapFlatMap(ids -> {
+            var unknownIds = new HashSet<Key>();
+            var result = new HashSet<Key>();
+            for (var id : ids) {
+                if (known.contains(id)) {
+                    result.add(id);
+                } else {
+                    unknownIds.add(id);
+                }
             }
-            result.add(flag);
-        }
-        return result;
+            var flagSet = Set.copyOf(result);
+            return !unknownIds.isEmpty()
+                    ? DataResult.error(() -> "Unknown feature ids: " + unknownIds, flagSet)
+                    : DataResult.success(flagSet);
+        }, List::copyOf);
+        return new SectionType<>("features", flags.fieldOf("enabled").codec());
     }
 
-    private ResourceFilter filter(JsonObject filter) {
-        var block = array(required(filter, "block", "filter"), "filter.block");
-        var rules = new ArrayList<FilterRule>(block.size());
-        for (int i = 0; i < block.size(); i++) {
-            var path = "filter.block[" + i + "]";
-            var rule = object(block.get(i), path);
-            rules.add(new FilterRule(pattern(rule, "namespace", path), pattern(rule, "path", path)));
-        }
-        return new ResourceFilter(rules);
+    /**
+     * 原版 {@code OverlayMetadataSection.validateOverlayDir}。
+     */
+    private static DataResult<String> validateOverlayDir(String path) {
+        return !DIR_VALIDATOR.matcher(path).matches()
+                ? DataResult.error(() -> path + " is not accepted directory name")
+                : DataResult.success(path);
     }
 
-    private @Nullable Pattern pattern(JsonObject owner, String field, String ownerPath) {
-        if (!owner.has(field)) {
-            return null;
-        }
-        var path = join(ownerPath, field);
-        var regex = string(owner.get(field), path);
-        try {
-            return Pattern.compile(regex);
-        } catch (PatternSyntaxException e) {
-            throw error(path, "正则表达式无法编译：" + e.getDescription(), e);
-        }
-    }
-
-    private List<OverlayEntry> overlays(JsonObject overlays) {
-        var entries = array(required(overlays, "entries", "overlays"), "overlays.entries");
-        var result = new ArrayList<OverlayEntry>(entries.size());
-        for (int i = 0; i < entries.size(); i++) {
-            var path = "overlays.entries[" + i + "]";
-            var entry = object(entries.get(i), path);
-            var directoryPath = join(path, "directory");
-            var directory = string(required(entry, "directory", path), directoryPath);
-            if (!OVERLAY_DIRECTORY.matcher(directory).matches()) {
-                throw error(directoryPath, "目录名 \"" + directory + "\" 必须匹配 " + OVERLAY_DIRECTORY.pattern());
+    /**
+     * 原版 {@code MetadataSectionType} 和 {@code ResourceMetadata.getSection}：根对象中有这个段落的时候用编解码器解码，
+     * 段落的值是 {@code null} 也交给编解码器。
+     */
+    private record SectionType<T>(String name, Codec<T> codec) {
+        Optional<T> read(String packId, JsonObject metadata) {
+            var rawSection = metadata.get(name);
+            if (rawSection == null) {
+                return Optional.empty();
             }
-            result.add(new OverlayEntry(directory, formatRange(entry, path)));
-        }
-        return result;
-    }
-
-    private Key key(String value, String path) {
-        try {
-            return Key.key(value);
-        } catch (InvalidKeyException e) {
-            throw error(path, "\"" + value + "\" 不是合法的命名空间 ID", e);
+            return Optional.of(codec.parse(JsonOps.INSTANCE, rawSection)
+                    .getOrThrow(message -> new PackMetadataException(packId, message)));
         }
     }
 
-    private JsonElement required(JsonObject owner, String field, String ownerPath) {
-        var element = owner.get(field);
-        if (element == null) {
-            throw error(join(ownerPath, field), "缺少必需字段");
+    /**
+     * 原版 {@code PackMetadataSection}。
+     */
+    private record PackSection(Component description, FormatRange formats) {
+    }
+
+    /**
+     * 原版 {@code OverlayMetadataSection.OverlayEntry.IntermediateEntry}。{@link #toString()} 返回目录名，用在错误文本中。
+     */
+    private record IntermediateEntry(IntermediaryFormat format, String overlay) implements IntermediaryFormatHolder {
+        @Override
+        public String toString() {
+            return overlay;
         }
-        return element;
-    }
-
-    private JsonObject object(JsonElement element, String path) {
-        if (!element.isJsonObject()) {
-            throw error(path, "必须是对象");
-        }
-        return element.getAsJsonObject();
-    }
-
-    private JsonArray array(JsonElement element, String path) {
-        if (!element.isJsonArray()) {
-            throw error(path, "必须是数组");
-        }
-        return element.getAsJsonArray();
-    }
-
-    private String string(JsonElement element, String path) {
-        if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
-            throw error(path, "必须是字符串");
-        }
-        return primitive.getAsString();
-    }
-
-    private static String join(String owner, String field) {
-        return owner.isEmpty() ? field : owner + "." + field;
-    }
-
-    private PackMetadataException error(String path, String message) {
-        return new PackMetadataException(packId, path, message);
-    }
-
-    private PackMetadataException error(String path, String message, Throwable cause) {
-        return new PackMetadataException(packId, path, message, cause);
     }
 }

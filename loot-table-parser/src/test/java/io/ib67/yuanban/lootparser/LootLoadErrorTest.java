@@ -37,7 +37,8 @@ class LootLoadErrorTest {
                         {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stone"}]}]}
                         """)
                 .pack("broken", "example", "loot_table/missing_tag.json", """
-                        {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:tag", "name": "minecraft:logs", "expand": true}]}]}
+                        {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stone",
+                          "conditions": [{"condition": "minecraft:match_tool", "predicate": {"items": "#minecraft:logs"}}]}]}]}
                         """)
                 .pack("broken", "example", "loot_table/unknown_type.json", """
                         {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:no_such_entry", "name": "minecraft:stone"}]}]}

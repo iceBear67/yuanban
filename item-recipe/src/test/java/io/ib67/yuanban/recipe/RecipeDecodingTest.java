@@ -1,6 +1,7 @@
 package io.ib67.yuanban.recipe;
 
 import com.google.gson.JsonParser;
+import com.mojang.serialization.DataResult;
 import io.ib67.yuanban.crafting.recipe.ItemIngredient;
 import io.ib67.yuanban.crafting.recipe.Recipe;
 import io.ib67.yuanban.crafting.recipe.kind.cooking.CookingCategory;
@@ -31,11 +32,14 @@ import io.ib67.yuanban.itemtag.ItemTags;
 import io.ib67.yuanban.itemtag.testing.ResetItemTags;
 import io.ib67.yuanban.recipe.internal.RecipeCodecs;
 import net.kyori.adventure.key.Key;
+import net.kyori.adventure.text.Component;
 import net.minestom.server.component.DataComponentMap;
 import net.minestom.server.component.DataComponents;
 import net.minestom.server.item.Material;
+import net.minestom.server.item.armor.TrimPattern;
 import net.minestom.server.item.component.FireworkExplosion;
 import net.minestom.server.registry.RegistryKey;
+import net.minestom.server.registry.TagKey;
 import net.minestom.testing.Env;
 import net.minestom.testing.EnvTest;
 import org.junit.jupiter.api.Test;
@@ -48,6 +52,7 @@ import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -257,30 +262,76 @@ class RecipeDecodingTest {
         assertError(env, shaped("[\"#\"]", "{\"##\": \"minecraft:stone\"}"), "is an invalid symbol (must be 1 character only).");
         assertError(env, shaped("[\"#\"]", "{\" \": \"minecraft:stone\"}"), "Invalid key entry: ' ' is a reserved symbol.");
         assertError(env, shaped("[\"#x\"]", "{\"#\": \"minecraft:stone\"}"), "Pattern references symbol 'x' but it's not defined in the key");
-        assertError(env, shaped("[\"#\"]", "{\"#\": \"minecraft:stone\", \"y\": \"minecraft:dirt\"}"), "Key defines symbols that aren't used in pattern: [y]");
+        // 原版把未使用的符号收集在 fastutil 的 CharArraySet 中，按它的 toString() 打印
+        assertError(env, shaped("[\"#\"]", "{\"#\": \"minecraft:stone\", \"y\": \"minecraft:dirt\"}"), "Key defines symbols that aren't used in pattern: {y}");
         assertError(env, shaped("[\"  \",\"  \"]", "{}"), "Invalid pattern: pattern contains only spaces");
         assertError(env, """
                 {"type": "crafting_shapeless", "result": "minecraft:stone", "ingredients": ["stone","stone","stone","stone","stone","stone","stone","stone","stone","stone"]}
                 """, "List is too long: 10, expected range [1-9]");
         assertError(env, """
                 {"type": "crafting_transmute", "input": "stone", "material": "stone", "result": "stone", "material_count": 9}
-                """, "Range must be within [1..8], but was 9..9");
+                """, "Range must be within [1..8], but was [9..9]");
         assertError(env, """
                 {"type": "crafting_transmute", "input": "stone", "material": "stone", "result": "stone", "material_count": {"min": 2}}
-                """, "Range must be within [1..8], but was 2..+∞");
+                """, "Range must be within [1..8], but was [2..+∞)");
         assertError(env, """
                 {"type": "crafting_transmute", "input": "stone", "material": "stone", "result": "stone", "material_count": {"min": 3, "max": 2}}
                 """, "Swapped bounds in range");
         assertError(env, """
                 {"type": "crafting_special_bookcloning", "source": "stone", "material": "stone", "result": "stone", "allowed_generations": {"min": 0, "max": 3}}
-                """, "Range must be within [0..2], but was 0..3");
+                """, "Range must be within [0..2], but was [0..3]");
         assertError(env, """
                 {"type": "crafting_special_firework_star", "shapes": {"square": "stone"}, "trail": "stone", "twinkle": "stone",
                  "fuel": "stone", "dye": "stone", "result": "stone"}
                 """, "Unknown element name:square");
         assertError(env, """
                 {"type": "smithing_trim", "addition": "stone", "base": "stone", "pattern": "minecraft:unknown_pattern", "template": "stone"}
-                """, "Unknown key minecraft:unknown_pattern");
+                """, "Failed to get element ResourceKey[minecraft:trim_pattern / minecraft:unknown_pattern]");
+    }
+
+    /**
+     * 原版 {@code ExtraCodecs.strictUnboundedMap} 保持 {@code key} 中键的顺序，未使用的符号按这个顺序列出。
+     */
+    @Test
+    void unusedSymbolsKeepKeyOrder(Env env) {
+        assertError(env, shaped("[\"#\"]", "{\"z\": \"minecraft:dirt\", \"#\": \"minecraft:stone\", \"a\": \"minecraft:dirt\", \"m\": \"minecraft:dirt\"}"),
+                "Key defines symbols that aren't used in pattern: {z, a, m}");
+    }
+
+    /**
+     * 原版 {@code RegistryFileCodec}：纹饰样式也可以是内联的对象。
+     */
+    @Test
+    void smithingTrimInlinePattern(Env env) {
+        var trim = assertInstanceOf(SmithingTrimRecipe.class, decode(env, """
+                {"type": "smithing_trim", "addition": "minecraft:iron_ingot", "base": "#planks", "template": "minecraft:sentry_armor_trim_smithing_template",
+                 "pattern": {"asset_id": "example:stripes", "description": "Stripes", "decal": true}}
+                """));
+        assertEquals(TrimPattern.create(Key.key("example:stripes"), Component.text("Stripes"), true), trim.pattern());
+
+        // 原版 TrimPattern.DIRECT_CODEC 的 decal 缺省为 false
+        var withoutDecal = assertInstanceOf(SmithingTrimRecipe.class, decode(env, """
+                {"type": "smithing_trim", "addition": "minecraft:iron_ingot", "base": "#planks", "template": "minecraft:sentry_armor_trim_smithing_template",
+                 "pattern": {"asset_id": "example:stripes", "description": "Stripes"}}
+                """));
+        assertEquals(TrimPattern.create(Key.key("example:stripes"), Component.text("Stripes"), false), withoutDecal.pattern());
+    }
+
+    /**
+     * 标签原料取本次加载的物品标签：只在本次加载中定义的标签可以使用，Minestom 自带而本次加载没有的标签报错。
+     */
+    @Test
+    void tagIngredientUsesThisLoadsTags(Env env) {
+        var tags = new ItemTags(new TreeMap<>(Map.of(Key.key("example:shiny"), List.of(Material.DIAMOND, Material.EMERALD))));
+        var recipe = assertInstanceOf(StonecutterRecipe.class, decode(env, tags, """
+                {"type": "stonecutting", "ingredient": "#example:shiny", "result": "minecraft:stone"}
+                """).getOrThrow());
+        assertEquals(new ItemIngredient.OfTag(Key.key("example:shiny"), List.of(Material.DIAMOND, Material.EMERALD)), recipe.ingredient());
+
+        assertNotNull(Material.staticRegistry().getTag(TagKey.of("minecraft:planks")));
+        assertError(env, tags, """
+                {"type": "stonecutting", "ingredient": "#minecraft:planks", "result": "minecraft:stone"}
+                """, "Missing tag: 'minecraft:planks' in 'minecraft:item'");
     }
 
     private static String shaped(String pattern, String key) {
@@ -288,11 +339,19 @@ class RecipeDecodingTest {
     }
 
     private static Recipe<?> decode(Env env, String json) {
-        return new RecipeCodecs(TAGS, env.process()).decode(JsonParser.parseString(json)).getOrThrow();
+        return decode(env, TAGS, json).getOrThrow();
+    }
+
+    private static DataResult<Recipe<?>> decode(Env env, ItemTags tags, String json) {
+        return RecipeCodecs.CODEC.parse(RecipeCodecs.registryOps(env.process(), tags), JsonParser.parseString(json));
     }
 
     private static void assertError(Env env, String json, String expected) {
-        var result = new RecipeCodecs(TAGS, env.process()).decode(JsonParser.parseString(json));
+        assertError(env, TAGS, json, expected);
+    }
+
+    private static void assertError(Env env, ItemTags tags, String json, String expected) {
+        var result = decode(env, tags, json);
         var error = result.error().orElseThrow(() -> new AssertionError("decoded successfully: " + json)).message();
         assertTrue(error.contains(expected), () -> "expected '" + expected + "' in: " + error);
     }

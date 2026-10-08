@@ -8,16 +8,18 @@ import io.ib67.yuanban.loot.context.ContextKey;
  * {@code target_entity}、{@code interacting_entity}。
  */
 public enum EntityTarget {
-    THIS(ContextKey.THIS_ENTITY),
-    ATTACKER(ContextKey.ATTACKING_ENTITY),
-    DIRECT_ATTACKER(ContextKey.DIRECT_ATTACKING_ENTITY),
-    ATTACKING_PLAYER(ContextKey.LAST_DAMAGE_PLAYER),
-    TARGET_ENTITY(ContextKey.TARGET_ENTITY),
-    INTERACTING_ENTITY(ContextKey.INTERACTING_ENTITY);
+    THIS("this", ContextKey.THIS_ENTITY),
+    ATTACKER("attacker", ContextKey.ATTACKING_ENTITY),
+    DIRECT_ATTACKER("direct_attacker", ContextKey.DIRECT_ATTACKING_ENTITY),
+    ATTACKING_PLAYER("attacking_player", ContextKey.LAST_DAMAGE_PLAYER),
+    TARGET_ENTITY("target_entity", ContextKey.TARGET_ENTITY),
+    INTERACTING_ENTITY("interacting_entity", ContextKey.INTERACTING_ENTITY);
 
+    private final String serializedName;
     private final ContextKey<?> param;
 
-    EntityTarget(ContextKey<?> param) {
+    EntityTarget(String serializedName, ContextKey<?> param) {
+        this.serializedName = serializedName;
         this.param = param;
     }
 
@@ -26,5 +28,12 @@ public enum EntityTarget {
      */
     public ContextKey<?> contextParam() {
         return param;
+    }
+
+    /**
+     * 对应原版 {@code EntityTarget#getSerializedName}：JSON 中的名字。
+     */
+    public String serializedName() {
+        return serializedName;
     }
 }

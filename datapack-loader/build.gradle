@@ -1,4 +1,11 @@
 dependencies {
     api("net.kyori:adventure-key:5.2.0")
     api("com.google.code.gson:gson:2.14.0")
+    implementation(project(":dfu-codecs"))
+}
+
+tasks.test {
+    // 原版 26.2 服务端由根项目下载和取出
+    dependsOn(":extractVanillaServer")
+    systemProperty("yuanban.vanilla-server", rootProject.ext.vanillaServerJar)
 }

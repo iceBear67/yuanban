@@ -12,11 +12,11 @@
 
 框架不解释游戏内容。配方、战利品表、世界生成等文件的含义由订阅者决定，订阅者也负责把结果填入 Minestom。框架自己只解析 `pack.mcmeta` 和标签文件这两类文件，因为叠加规则直接取决于它们的内容。
 
-本文描述的原版行为都对照了 26.2 服务端的反编译代码（26.1 起官方发布的 jar 不再混淆），涉及的类有 `PackRepository`、`Pack`、`FolderRepositorySource`、`ServerPacksSource`、`PackFormat`、`OverlayMetadataSection`、`CompositePackResources`、`MultiPackResourceManager`、`FallbackResourceManager`、`IdentifierPattern`、`TagLoader`、`MinecraftServer.configurePackRepository`、`ReloadCommand`、`DataPackCommand`。
+本文描述的原版行为都对照了 26.2 服务端的反编译代码（26.1 起官方发布的 jar 不再混淆），涉及的类有 `PackRepository`、`Pack`、`FolderRepositorySource`、`ServerPacksSource`、`ResourceMetadata`、`GsonHelper`、`PackMetadataSection`、`PackFormat`、`FeatureFlagsMetadataSection`、`FeatureFlagRegistry`、`OverlayMetadataSection`、`ResourceFilterSection`、`IdentifierPattern`、`CompositePackResources`、`MultiPackResourceManager`、`FallbackResourceManager`、`TagLoader`、`TagFile`、`TagEntry`、`MinecraftServer.configurePackRepository`、`ReloadCommand`、`DataPackCommand`。
 
 ## 2. 支持的版本
 
-支持 Java 版 26.2 及以上，26.2 的数据包格式是 107.1。格式版本只按 `min_format` / `max_format` 读取（25w31a 引入的规则）。为旧版游戏准备的 `pack_format`、`supported_formats` 以及 overlay 条目里的 `formats` 不读取。
+支持 Java 版 26.2 及以上，26.2 的数据包格式是 107.1。`pack.mcmeta` 的格式字段按原版 26.2 的规则读取，包括为旧版游戏准备的 `pack_format`、`supported_formats` 以及 overlay 条目里的 `formats`，规则见 6.2。
 
 当前游戏的数据包格式和已知特性开关由宿主通过 `LoaderSettings` 传入。`LoaderSettings` 构造的时候检查格式不低于 107.1，低于这个值抛出异常。`LoaderSettings.MINECRAFT_26_2` 给出 26.2 的取值：
 
@@ -47,11 +47,16 @@
 dependencies {
     api("net.kyori:adventure-key:5.2.0")
     api("com.google.code.gson:gson:2.14.0")
+    implementation(project(":dfu-codecs"))
 }
 ```
 
+测试读取的原版服务端由根项目下载，见第 13 节。
+
 - `adventure-key` 提供 `net.kyori.adventure.key.Key`，作为全部命名空间 ID 的类型。它的字符规则（命名空间 `[a-z0-9_.-]`，路径 `[a-z0-9_.-/]`）和排序规则（先比较路径，再比较命名空间）都和原版 `Identifier` 相同。Minestom 的注册表也使用这个类型，订阅者拿到的 ID 可以直接交给 Minestom。版本取 Minestom `2026.10.05-26.2` 所用的 Adventure 5.2.0。
 - Gson 解析 JSON，版本取 Minestom 所用的 2.14.0。
+- `dfu-codecs` 提供原版编解码器在 DataFixerUpper（下文简称 DFU）上的移植，`pack.mcmeta` 和标签文件都用它解码，用到的有 `Identifiers`、`ExtraCodecs`、`InclusiveRange` 和文本组件编解码器 `ComponentSerialization`。`dfu-codecs` 以 `api` 依赖 DFU 10.0.21 和 Minestom，所以本模块传递依赖这两个库。公开 API 中不出现 DFU 和 `dfu-codecs` 的类型，所以使用 `implementation`。
+- DFU 只发布在 Mojang 的仓库 `https://libraries.minecraft.net`，根项目的 `build.gradle.kts` 在 `allprojects.repositories` 中为全部模块声明了这个仓库。
 - zip 数据包用 JDK 自带的 zip 文件系统（`jdk.zipfs`）打开。目录数据包、zip 数据包、jar 内部的目录在框架内部都表示为 `java.nio.file.Path`，读取逻辑只有一套。
 - JetBrains annotations 和 Lombok 由根项目提供。公开 API 用 `@NotNull` / `@Nullable` 标注；内部实现放在 `internal` 包，标注 `@ApiStatus.Internal`。数据类型使用 record。
 - 框架不输出日志。需要告知宿主的信息（例如自动启用了哪些数据包）放在返回值中，由宿主决定如何记录。
@@ -67,7 +72,7 @@ dependencies {
 | `datapack.topic` | `Topic`、`TopicFiles`、`TopicLayers`、`Resource` |
 | `datapack.tag` | `TagEntry`、`TagValue`、`TagDeclaration`、`TagDeclarations` |
 | `datapack.subscribe` | `Subscriber`、`SubscriberKey`、`Subscription`、`Lifecycle`、`PrepareContext`、`LoadKind` |
-| `datapack.internal` | `pack.mcmeta` 解析、索引、视图构建、选择算法、调度器 |
+| `datapack.internal` | `pack.mcmeta` 和标签文件的编解码器、索引、视图构建、选择算法、调度器 |
 
 ## 5. 数据包的发现
 
@@ -154,16 +159,50 @@ public sealed interface PackRoot {
 
 ## 6. pack.mcmeta
 
-框架中所有 JSON（`pack.mcmeta`、标签文件、`Resource.readJson()`）都用 Gson 的 `Strictness.STRICT` 解析，并且要求读完整个文档，规则和原版 `StrictJsonParser` 相同。框架读取下表中的字段，其他字段和其他顶层段落忽略。
+### 6.1 段落
 
-| 字段 | 规则 |
+框架中所有 JSON（`pack.mcmeta`、标签文件、`Resource.readJson()`）都用 Gson 的 `Strictness.STRICT` 解析，并且要求读完整个文档，规则和原版 `StrictJsonParser` 相同。原版读取 `pack.mcmeta` 所用的 `GsonHelper.parse` 不检查文档末尾的多余内容，这里和其他 JSON 文件一样拒绝多余内容。和 `GsonHelper.parse` 相同，根元素用 Gson 的 `JsonObject` 适配器读取，根元素不是对象的时候得到 Gson 的语法错误，例如 `Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $`。
+
+每个段落的读取方式和原版 `ResourceMetadata.getSection` 相同：根对象中有这个键（值是 `null` 也算）的时候，用这个段落的编解码器以 DFU 的 `JsonOps.INSTANCE` 单独解码；没有这个键的时候段落缺失。编解码器移植自原版，字段是否必需、缺省值、校验规则和错误文本都与原版相同。`JsonOps` 把值是 `null` 的字段当作缺失。其他字段和其他顶层段落忽略。读取顺序和原版 `Pack.readPackMetadata` 相同，依次是 `pack`、`features`、`overlays`，最后读取原版在加载资源时才读取的 `filter`。
+
+| 段落 | 规则 |
 |---|---|
-| `pack` | 必需，对象。 |
-| `pack.description` | 必需，文本组件（字符串、对象或数组）。以 `JsonElement` 原样保存，由宿主转换，例如交给 Adventure 的 Gson 序列化器。 |
-| `pack.min_format`、`pack.max_format` | 两个都必需。取值是非负整数 `N`，或者长度 1 到 256 的非负整数数组（只使用前两个元素，和原版编解码器相同）。数字和原版 `Codec.INT` 一样用 `Number.intValue()` 转换，小数截断取整，例如 `107.9` 读作 `107`。`min_format` 中 `N` 和 `[N]` 表示 `N.0`；`max_format` 中 `N` 和 `[N]` 表示主版本 `N` 下的任意次版本；`[N, M]` 表示 `N.M`。`min` 大于 `max` 的时候抛出异常。 |
-| `features.enabled` | `features` 存在的时候必需，命名空间 ID 列表。每一项都必须是 `LoaderSettings.featureFlags` 中登记过的特性开关，否则抛出异常。 |
-| `filter.block` | `filter` 存在的时候必需，列表。每一项是对象，可以有 `namespace`、`path` 两个字段，值是 Java 正则表达式；编译失败抛出异常。 |
-| `overlays.entries` | `overlays` 存在的时候必需，列表。每一项必需 `directory`（匹配 `[-_a-zA-Z0-9.]+`，和原版代码相同）、`min_format`、`max_format`（规则同上）。 |
+| `pack` | 必需，缺少的时候错误文本为 `Missing metadata in pack <数据包 ID>`。移植原版 `PackMetadataSection.codecForPackType(SERVER_DATA)`。`description` 必需，用 `dfu-codecs` 的 `ComponentSerialization.CODEC` 校验，接受字符串、非空列表和对象，数字、空列表等取值得到原版的错误文本。记录中以 `JsonElement` 保存 `description` 的原文，由宿主转换，例如交给 Adventure 的 Gson 序列化器。格式字段见 6.2。 |
+| `features` | 移植原版 `FeatureFlagsMetadataSection`。`enabled` 必需，命名空间 ID 列表。不在 `LoaderSettings.featureFlags` 中的 ID 全部收集起来一次报出：`Unknown feature ids: [..]`。原版把未知 ID 收集在 `HashSet` 中，`Key` 和原版 `Identifier` 的散列值相同，所以列出的顺序也和原版相同。 |
+| `overlays` | 移植原版 `OverlayMetadataSection`。`entries` 必需，列表。每一项有必需的 `directory`，必须匹配 `[-_a-zA-Z0-9.]+`，否则错误文本为 `<目录名> is not accepted directory name`；格式字段 `min_format`、`max_format`、`formats` 的规则见 6.2。 |
+| `filter` | 移植原版 `ResourceFilterSection` 和 `IdentifierPattern`。`block` 必需，列表。每一项可以有 `namespace`、`path` 两个字段，值是 Java 正则表达式，编译失败的错误文本为 `Invalid regex pattern '<正则>': <原因>`。 |
+
+任何段落解码失败都抛出 `PackMetadataException`，信息是 `数据包 <数据包 ID> 的 pack.mcmeta 不合法：<错误文本>`，错误文本就是 DFU 给出的文本。一个字段解码失败的时候，DFU 带着这个字段的部分结果继续执行后面的校验，多条错误用 `; ` 连接，和原版相同。例如 `"min_format": -1, "max_format": 107` 的错误文本为 `Failed to parse either. First: Not a json array: -1; Second: Value must be non-negative: -1; Pack missing field, must declare both min_format and max_format`。
+
+### 6.2 格式字段
+
+`min_format`、`max_format` 移植原版 `PackFormat.BOTTOM_CODEC` 和 `TOP_CODEC`：取值是非负整数 `N`，或者长度 1 到 256 的非负整数列表（只使用前两个元素）。数字和原版 `Codec.INT` 一样用 `Number.intValue()` 转换，小数截断取整，例如 `107.9` 读作 `107`。`min_format` 中 `N` 和 `[N]` 表示 `N.0`；`max_format` 中 `N` 和 `[N]` 表示主版本 `N` 下的任意次版本；`[N, M]` 表示 `N.M`。
+
+旧字段：`pack` 段落中的 `pack_format` 是整数；`pack` 段落中的 `supported_formats` 和 overlay 条目中的 `formats` 是整数范围（原版 `InclusiveRange.codec(Codec.INT)`），写作整数 `N`、`[下端, 上端]` 或者 `{"min_inclusive": 下端, "max_inclusive": 上端}`。
+
+校验移植原版 `PackFormat.IntermediaryFormat.validate`。下文的 81 是数据包格式中最后一个没有次版本的主版本（原版 `PackFormat.lastPreMinorVersion(SERVER_DATA)`）；`<上下文>` 在 `pack` 段落中是 `Pack`，在 overlay 条目中是 `Overlay "<目录名>"`；`<旧字段>` 在 `pack` 段落中是 `supported_formats`，在 overlay 条目中是 `formats`。`pack_format` 只在 `pack` 段落中检查。规则按顺序判断：
+
+1. `min_format` 和 `max_format` 只有一个：`<上下文> missing field, must declare both min_format and max_format`。
+2. 要求旧字段（只在 overlay 条目中出现，见下文）但是缺少 `<旧字段>`：`<上下文> missing required field <旧字段>, must be present in all overlays for any overlays to work across game versions`。
+3. 有 `min_format` 和 `max_format`：
+   - `min` 大于 `max`：`<上下文> min_format (<min>) is greater than max_format (<max>)`。
+   - `min` 的主版本大于 81 并且不要求旧字段：有 `<旧字段>` 的时候错误文本为 `<上下文> key <旧字段> is deprecated starting from pack format 82. Remove <旧字段> from your pack.mcmeta.`；有 `pack_format` 的时候按第 6 条检查它。
+   - 其他情况：必须有 `<旧字段>`，否则错误文本为 `<上下文> declares support for format <min 的主版本>, but game versions supporting formats 17 to 81 require a <旧字段> field. Add "<旧字段>": [<min 的主版本>, 81] or require a version greater or equal to 82.0.`；`<旧字段>` 的下端必须等于 `min` 的主版本，否则错误文本为 `<上下文> version declaration mismatch between <旧字段> (from <下端>) and min_format (<min>)`；上端必须等于 `max` 的主版本或者 81，否则错误文本为 `<上下文> version declaration mismatch between <旧字段> (up to <上端>) and max_format (<max>)`；`pack` 段落还必须有 `pack_format`，否则错误文本为 `Pack declares support for formats up to 81, but game versions supporting formats 17 to 81 require a pack_format field. Add "pack_format": <min 的主版本> or require a version greater or equal to 82.0.`，并按第 6 条检查它。
+   - 结果是 `[min, max]`。
+4. 只有 `<旧字段>`：上端大于 81 的时候错误文本为 `<上下文> declares support for version newer than 81, but is missing mandatory fields min_format and max_format`；`pack` 段落必须有 `pack_format`（缺少时的错误文本同上，其中是 `Add "pack_format": <下端>`），并按第 6 条检查它。结果是 `[<下端>.0, <上端>.0]`。
+5. 只有 `pack_format`：大于 81 的时候错误文本为 `Pack declares support for version newer than 81, but is missing mandatory fields min_format and max_format`；否则结果是 `[N.0, N.0]`。例如只写了 `"pack_format": 48` 的旧数据包得到 `[48.0, 48.0]`，兼容性是 `TOO_OLD`。
+6. `pack_format` 必须在给定的主版本范围之内，否则错误文本为 `Pack declared support for versions <下端> to <上端> but declared main format is <pack_format>`；在范围之内但是小于 15 的时候错误文本为 `Multi-version packs cannot support minimum version of less than 15, since this will leave versions in range unable to load pack.`。
+7. 没有任何格式信息：`<上下文> could not be parsed, missing format version information`。
+
+第 4、5 条的结果中出现负数的时候，错误文本为 `Value must be non-negative: <N>`，这是和原版的差异，见第 12 节。
+
+overlay 条目移植原版 `PackFormat.validateHolderList`：
+
+- 先计算全部条目的最低主版本：条目有 `min_format` 的时候使用它的主版本，有 `formats` 的时候使用它的下端，两者都有的时候使用较小的一个。只要有一个条目的最低主版本不超过 81，所有参与校验的条目都要求旧字段（第 2 条），这时第 3 条按"其他情况"判断，不会出现 `formats` 已经废弃的错误。
+- `min_format`、`max_format`、`formats` 都没有的条目跳过，不参与校验，也不出现在结果中，但是它的 `directory` 仍然必须合法。原版在这里记录日志，框架不输出日志。
+- 按文件中的顺序校验，遇到第一个不合法的条目就给出它的错误。
+
+### 6.3 结果与兼容性
 
 ```java
 public record PackFormat(int major, int minor) implements Comparable<PackFormat> {}
@@ -357,9 +396,12 @@ Topic.Tags functionTags = Topic.tags("function");       // data/<ns>/tags/functi
 }
 ```
 
-- `values` 必需。每一项是字符串或对象。字符串以 `#` 开头表示引用同一注册表的另一个标签，`#` 之后的部分按命名空间 ID 解析，省略命名空间的时候是 `minecraft`。对象有必需的 `id`（字符串，规则同上）和可选的 `required`（默认 `true`）。字符串写法的 `required` 是 `true`。
-- `replace` 可选，默认 `false`。
-- 未知字段忽略，和原版编解码器相同。格式错误抛出 `TagFileException`，异常信息包含所属数据包和文件位置。
+解码移植原版 `TagFile.CODEC` 和 `TagEntry.CODEC`，和原版 `TagLoader` 相同，用 DFU 的 `JsonOps.INSTANCE` 解码：
+
+- `values` 必需，列表。每一项先按字符串写法解码，失败再按对象写法解码（原版的 `Codec.either`）。字符串以 `#` 开头表示引用同一注册表的另一个标签，`#` 之后的部分按原版 `Identifier` 的规则解析，省略命名空间的时候是 `minecraft`。对象有必需的 `id`（字符串，规则同上）和可选的 `required`（布尔值，默认 `true`）。字符串写法的 `required` 是 `true`。
+- `replace` 可选，布尔值，默认 `false`。
+- 未知字段忽略；值是 `null` 的字段按缺失处理，这是 `JsonOps` 的规则。
+- 格式错误抛出 `TagFileException`，信息是 `标签文件 <文件> 不合法：<错误文本>`，`<文件>` 包含所属数据包和文件位置，错误文本是 DFU 给出的文本，与原版相同，例如 `No key values in MapLike[{}]`、`Not a boolean: 1`。JSON 语法错误的信息是 `标签文件 <文件> 的 JSON 语法错误：<Gson 的信息>`。
 
 合并在 8.3 分层视图的基础上进行。对每个标签 ID，按优先级从低到高处理它的每个版本：`replace` 为 `true` 的时候先清空已经累积的条目，然后把这个版本的条目依次追加到末尾，每个条目记录所属的数据包。同一个数据包内部，overlay 中的标签文件替换根目录中的同名文件，两者不合并（这是 8.1 索引规则的直接结果，和原版 `CompositePackResources` 相同）。
 
@@ -545,10 +587,10 @@ public record ReloadResult(Selection selection, Optional<UncheckedIOException> c
 | zip 数据包缺少 `pack.mcmeta` | 抛出 `PackStructureException` |
 | 原版数据根目录位于非默认文件系统中，内置特性数据包是 zip 文件 | 抛出 `PackStructureException` |
 | `ZipPackProvider` 的文件不存在、不是普通文件或者位于非默认文件系统中 | 抛出 `PackStructureException` |
-| `pack.mcmeta` 语法错误、缺少必需字段、取值不合法、特性开关未登记、正则无法编译 | 抛出 `PackMetadataException`，包含数据包 ID 和字段路径 |
+| `pack.mcmeta` 语法错误、根元素不是对象、缺少 `pack` 段落、任何段落解码失败（缺少必需字段、取值不合法、格式字段的校验不通过、特性开关未登记、正则无法编译等） | 抛出 `PackMetadataException`，信息包含数据包 ID 和原版编解码器的错误文本 |
 | `data/` 下出现普通文件或者不合法的命名空间目录名 | 抛出 `PackStructureException` |
 | 属于某个 topic 的文件不能构成合法的资源 ID | 抛出 `PackStructureException` |
-| 标签文件格式错误 | 抛出 `TagFileException` |
+| 标签文件格式错误 | 抛出 `TagFileException`，信息包含文件和原版编解码器的错误文本 |
 | 订阅关系错误：key 重复、依赖未注册、依赖有环、topic 不合法 | `build()` 抛出 `SubscriptionException` |
 | 默认数据包不可用 | 抛出 `SelectionException` |
 | `SelectionEditor` 或 `ReloadRequest.Select` 的规则不满足 | 抛出 `SelectionException` |
@@ -558,11 +600,11 @@ public record ReloadResult(Selection selection, Optional<UncheckedIOException> c
 
 ## 12. 与原版行为的差异
 
-第 1 到 4 条来自"数据有错误就抛出异常"和"不读取旧版本字段"这两项决定。第 5、6 条是原版命令实现中的缺陷，这里按启动流程的规则处理。
+第 1、2、4 条来自"数据有错误就抛出异常"这项决定，第 3 条来自 `PackFormat` 不允许负数。第 5、6 条是原版命令实现中的缺陷，这里按启动流程的规则处理。
 
 1. 原版遇到格式错误的 `pack.mcmeta`、不合法的命名空间目录、不合法的文件名、格式错误的标签文件、`data/` 下的普通文件、不在白名单中的符号链接，都会记录日志并跳过对应的数据包或文件；这里抛出异常。原版解析 `pack.mcmeta` 不检查文档末尾的多余内容；这里要求读完整个文档。
-2. 原版接受只写了 `pack_format` 的旧数据包（标记为不兼容，仍然可以加载），也接受 `min_format` / `max_format` 解析失败但有描述的数据包（兼容性记为未知）；这里要求 `min_format` 和 `max_format`，缺少就抛出异常。
-3. 原版对缺少格式范围的 overlay 条目记录日志并跳过；这里抛出异常。
+2. 原版 `pack` 段落解码失败的时候，改用只读取 `description` 的编解码器，兼容性记为 `UNKNOWN`，数据包仍然可以加载；原版读取 `filter` 段落失败的时候忽略这个段落。这里都抛出 `PackMetadataException`。
+3. 原版把 `pack_format`、`supported_formats`、`formats` 中的整数直接转换成格式版本，负数得到负数的格式版本；`PackFormat` 不允许负数，这里对 6.2 第 4、5 条结果中的负数报错，错误文本为 `Value must be non-negative: <N>`。
 4. 原版遇到重复的数据包 ID，以后发现的数据包为准；这里抛出异常。
 5. 原版 `/reload` 把新出现的、没有被禁用的数据包全部追加到启用列表，不检查类别和特性，可能加载特性没有启用的数据包；这里使用和启动相同的选择算法，只追加可以自动启用并且特性满足的数据包。
 6. 原版 `/datapack enable <name> before|after <existing>` 对 `existing` 套用了禁用检查，以声明了特性的特性数据包作为参照位置的时候会报错；这里只要求 `existing` 已经启用。原版 `/datapack disable` 允许禁用 `required` 数据包，重载之后它又被加回列表，加载的内容和列表不符；这里不允许禁用。原版 26.2 中没有 `required` 数据包，所以这一点对原版内容没有影响。
@@ -572,10 +614,10 @@ public record ReloadResult(Selection selection, Optional<UncheckedIOException> c
 测试使用根项目配置好的 JUnit。测试数据是在 `@TempDir` 中实际创建的目录和 zip 文件，经过真实的加载流程读取，不使用 mock。
 
 - 格式版本：整数和数组写法、`min` / `max` 的次版本缺省值、三种兼容性结果、overlay 的选择。
-- `pack.mcmeta`：第 6 节每一条错误规则各一个用例，检查异常中的数据包 ID 和字段路径。
+- `pack.mcmeta`：6.1、6.2 的每一条规则各一个用例，覆盖接受的写法和原版的错误文本，检查异常中的数据包 ID 和完整信息。其中包括只有 `pack_format` 的旧数据包、`supported_formats` 的三种写法、`min_format` 高于 81 时的旧字段废弃错误、旧字段与新字段不一致的错误、没有格式信息的 overlay 条目被跳过、有条目的最低主版本不超过 81 时所有 overlay 条目都要求 `formats`、目录名错误、多个未知特性开关在同一条错误中列出、正则编译失败、`description` 的各种写法。
 - 发现：目录数据包、zip 数据包、没有 `pack.mcmeta` 的目录被跳过（其中的符号链接不检查）、符号链接白名单、白名单允许的符号链接能正常加载、链接目标不存在、ID 重复、内置特性数据包、原版数据只读取 `minecraft` 命名空间（含 `data/.mcassetsroot` 的 jar 能正常加载）、`ZipPackProvider` 的正常加载和各种错误。
 - 选择算法：7.3 的每一步至少一个用例，覆盖新建世界、安全模式、缺失的数据包、特性不满足、`required` 数据包插入到固定位置的数据包旁边、强制启用特性数据包、`Rescan` 和 `Select`，以及 `SelectionEditor` 的每条校验规则。
 - 叠加：同名文件覆盖、overlay 的顺序、`entries` 列出但不存在的 overlay 目录、overlay 不影响其他数据包、`filter` 只作用于低优先级数据包、`filter` 的两条原版规则（不同规则分别满足命名空间和路径、部分匹配）、分层视图被 `filter` 清空。同一组用例用目录数据包和 zip 数据包各运行一次，结果必须相同。
-- 标签：`replace` 和追加的顺序、overlay 中的标签文件替换根目录中的同名文件、各种条目写法、格式错误。
+- 标签：`replace` 和追加的顺序、overlay 中的标签文件替换根目录中的同名文件、各种条目写法、值是 `null` 的字段按缺失处理、格式错误的原版错误文本、JSON 语法错误。
 - 调度：提交顺序符合依赖关系、多个订阅者共用 topic 视图、准备失败的时候没有调用任何 `apply` 并且新批次已关闭、依赖环检测、`RELOADABLE` 订阅者在重载期间读到保留的 `STARTUP` 准备结果、重载失败之后旧批次仍然可以读取、存在 `STARTUP` 订阅者的时候初始批次保持打开到会话关闭、没有的时候在第一次重载之后关闭。
-- 原版数据：测试源集使用 `de.undercouch.download` 插件（5.7.0）从 Mojang 下载 26.2 服务端，按 SHA-1 `823e2250d24b3ddac457a60c92a6a941943fcd6a` 校验，取出其中的 `META-INF/versions/26.2/server-26.2.jar`。测试用 zip 文件系统打开它，构造 `BuiltInPackProvider`，以 `CREATE_WORLD` 模式启动一次，检查发现了 `vanilla` 和三个特性数据包；`recipe`、`loot_table`、`tags/block`、`worldgen/biome` 这几个 topic 的资源数量和直接用 `java.util.zip` 列出 jar 条目得到的数量相同。
+- 原版数据：根项目的 `extractVanillaServer` 任务从 Mojang 下载 26.2 服务端，按 SHA-1 `823e2250d24b3ddac457a60c92a6a941943fcd6a` 校验，取出其中的 `META-INF/versions/26.2/server-26.2.jar`，全部模块使用这同一份；本模块的 `test` 任务依赖它，路径通过系统属性 `yuanban.vanilla-server` 交给测试。测试用 zip 文件系统打开它，构造 `BuiltInPackProvider`，以 `CREATE_WORLD` 模式启动一次，检查发现了 `vanilla` 和三个特性数据包；`recipe`、`loot_table`、`tags/block`、`worldgen/biome` 这几个 topic 的资源数量和直接用 `java.util.zip` 列出 jar 条目得到的数量相同。

@@ -24,9 +24,14 @@ public interface LootEnvironment {
     ScoreboardView scoreboards();
 
     /**
-     * 命令存储的只读视图，{@code storage} 数字提供器使用。
+     * 命令存储的只读视图，{@code storage} 数字提供器与 {@code copy_custom_data} 的 {@code storage} 来源使用。
      */
     StorageView storage();
+
+    /**
+     * 熔炼配方的只读视图，{@code furnace_smelt} 修饰器使用。
+     */
+    SmeltingView smelting();
 
     /**
      * 按原版 {@code LootParams$Builder#getLuck} 的规则计算一次取用的运气值：玩家运气属性
@@ -37,8 +42,8 @@ public interface LootEnvironment {
     float luckOf(@Nullable Player player, @Nullable ItemStack tool, Key contextType);
 
     /**
-     * 动态掉落（{@code dynamic} 条目）的取用来源：原版把 {@code contents} / {@code sherds}
-     * 委托给 {@code LootParams$DynamicDrop}，本模块由宿主直接产出物品流。
+     * 动态掉落（{@code dynamic} 条目）的取用来源：原版按条目的 {@code name}（任意命名空间 ID，原版方块使用
+     * {@code contents}、{@code sherds}）查找 {@code LootParams} 中登记的动态掉落，本模块由宿主直接产出物品流。
      */
     Stream<ItemStack> dynamicLoot(Key name);
 

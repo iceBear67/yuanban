@@ -57,8 +57,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 读取原版 26.2 服务端 jar 中的全部物品标签和配方。jar 由 {@code build.gradle} 的下载任务准备，路径通过系统属性
- * {@code yuanban.vanilla-server} 传入。
+ * 读取原版 26.2 服务端 jar 中的全部物品标签和配方。jar 由根项目的 {@code extractVanillaServer} 任务准备，
+ * 路径通过系统属性 {@code yuanban.vanilla-server} 传入。
  */
 @EnvTest
 @ExtendWith(ResetItemTags.class)

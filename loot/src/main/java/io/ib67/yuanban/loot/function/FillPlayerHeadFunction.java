@@ -5,21 +5,17 @@ import io.ib67.yuanban.loot.context.ContextKey;
 import io.ib67.yuanban.loot.number.EntityTarget;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
- * 原版 {@code fill_player_head}：写入玩家的皮肤数据到玩家头颅。JSON 字段 {@code entity}
- * （默认 {@code this}）。
+ * 原版 {@code fill_player_head}：把玩家的档案写入玩家头颅。JSON 字段 {@code entity}（必填）。
  */
 public record FillPlayerHeadFunction(List<LootCondition> conditions,
                                      EntityTarget entity) implements LootFunction {
     public FillPlayerHeadFunction {
         conditions = conditions == null ? List.of() : List.copyOf(conditions);
-        entity = entity == null ? EntityTarget.THIS : entity;
-    }
-
-    public FillPlayerHeadFunction(List<LootCondition> conditions) {
-        this(conditions, EntityTarget.THIS);
+        Objects.requireNonNull(entity, "entity");
     }
 
     /**
