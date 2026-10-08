@@ -2,11 +2,11 @@ package io.ib67.yuanban.bot.observe.builtin;
 
 import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.Bot;
-import io.ib67.yuanban.bot.observe.ActionCompleted;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
+import io.ib67.yuanban.bot.observe.Observation.PlayerMoved;
+import io.ib67.yuanban.bot.observe.Observation.PlayerTeleported;
 import io.ib67.yuanban.bot.observe.ObserverContext;
-import io.ib67.yuanban.bot.observe.PlayerMoved;
-import io.ib67.yuanban.bot.observe.PlayerTeleported;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.dispatch.RegistrationCheck;
 import io.ib67.yuanban.bot.scheduler.ActionImpl;

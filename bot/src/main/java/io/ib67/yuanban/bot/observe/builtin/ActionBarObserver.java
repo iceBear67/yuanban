@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
-import io.ib67.yuanban.bot.observe.ActionBarShown;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.ActionBarShown;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.Subscription;
 import net.kyori.adventure.text.Component;

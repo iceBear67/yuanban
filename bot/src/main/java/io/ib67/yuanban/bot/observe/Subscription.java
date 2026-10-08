@@ -1,5 +1,7 @@
 package io.ib67.yuanban.bot.observe;
 
+import io.ib67.yuanban.bot.observe.Observation.PacketReceived;
+import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 import io.ib67.yuanban.bot.protocol.PacketDirection;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 

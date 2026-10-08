@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
-import io.ib67.yuanban.bot.observe.EntityDamaged;
-import io.ib67.yuanban.bot.observe.HealthChanged;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.EntityDamaged;
+import io.ib67.yuanban.bot.observe.Observation.HealthChanged;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.Subscription;
 

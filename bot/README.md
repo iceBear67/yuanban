@@ -76,7 +76,7 @@ bot.await(state -> state.player().onGround(), Duration.ofSeconds(5));
 
 ### 观察
 
-`bot.observe(observer)` 注册 observer，返回 `ObserverHandle`。observer 订阅观察记录（`observe` 包中的 record，例如 `BlockChanged`、`ChatReceived`、`HealthChanged`）或数据包，在调度线程上更新自己的状态。通常的顺序是：先注册 observer，再提交动作，等动作结束之后检查 observer 的状态。
+`bot.observe(observer)` 注册 observer，返回 `ObserverHandle`。observer 订阅观察记录（`Observation` 中的嵌套 record，例如 `BlockChanged`、`ChatReceived`、`HealthChanged`）或数据包，在调度线程上更新自己的状态。通常的顺序是：先注册 observer，再提交动作，等动作结束之后检查 observer 的状态。
 
 ```java
 Point trap = new Vec(10, 64, 10);
@@ -101,7 +101,7 @@ assertTrue(damage.observer().damages().isEmpty());
 - `Observers` 提供内置 observer：
   - 只做记录：`particlesWithin`、`sounds`、`blockChanges`、`blockAt`、`movementOf`、`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations`；除 `blockAt`、`movementOf` 以外都可以用 `limit(n)` 限制保存的记录数，必须在注册之前调用，注册之后调用抛出 `IllegalStateException`；
   - 得出结论时关闭自己：带关闭条件的 `movementOf` 与 `blockAt`，以及 `blockBroken`、`first`、`firstPacket`、`firstChat`、`firstTranslatedChat`、`condition`；
-  - `first`、`observations`、`listener` 接收 `observe` 包中的观察记录类型，传入 `PacketReceived` 或 `PacketSent` 时立即抛出 `IllegalArgumentException`，数据包使用 `firstPacket`、`packets`、`sentPackets`、`packetListener`；
+  - `first`、`observations`、`listener` 接收 `Observation` 中的观察记录类型，传入 `PacketReceived` 或 `PacketSent` 时立即抛出 `IllegalArgumentException`，数据包使用 `firstPacket`、`packets`、`sentPackets`、`packetListener`；
   - `ChatLine.plainText()` 不翻译翻译组件（翻译组件与它的参数都不出现在文本中），加入消息、死亡消息等由翻译键组成的消息用 `firstTranslatedChat(翻译键)` 匹配：消息的组件中（包括子组件与翻译参数）有这个翻译键的翻译组件即为匹配；
   - `distanceWithIn`、`distanceOutOf`：玩家进入或离开目标的指定距离时取消传入的动作并关闭，在提交动作之后构造并注册；
   - `listener`、`packetListener`：只执行回调，不保存状态。

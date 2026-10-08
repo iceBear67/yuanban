@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.StateUpdated;
 import io.ib67.yuanban.bot.observe.ObserverContext;
-import io.ib67.yuanban.bot.observe.StateUpdated;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.view.StateReader;
 

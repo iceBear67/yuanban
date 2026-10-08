@@ -1,9 +1,9 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
-import io.ib67.yuanban.bot.observe.EntityMoved;
-import io.ib67.yuanban.bot.observe.EntityRemoved;
-import io.ib67.yuanban.bot.observe.EntitySpawned;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.EntityMoved;
+import io.ib67.yuanban.bot.observe.Observation.EntityRemoved;
+import io.ib67.yuanban.bot.observe.Observation.EntitySpawned;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.observe.WorldBoundObserver;

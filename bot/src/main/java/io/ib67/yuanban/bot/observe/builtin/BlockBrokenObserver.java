@@ -1,11 +1,11 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
-import io.ib67.yuanban.bot.observe.BlockChanged;
-import io.ib67.yuanban.bot.observe.ChunkLoaded;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.BlockChanged;
+import io.ib67.yuanban.bot.observe.Observation.ChunkLoaded;
+import io.ib67.yuanban.bot.observe.Observation.WorldEntered;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.Subscription;
-import io.ib67.yuanban.bot.observe.WorldEntered;
 import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Vec;

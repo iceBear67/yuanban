@@ -2,8 +2,8 @@ package io.ib67.yuanban.bot.inventory;
 
 import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.InventoryActions;
-import io.ib67.yuanban.bot.observe.CursorChanged;
-import io.ib67.yuanban.bot.observe.WindowClosed;
+import io.ib67.yuanban.bot.observe.Observation.CursorChanged;
+import io.ib67.yuanban.bot.observe.Observation.WindowClosed;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction;

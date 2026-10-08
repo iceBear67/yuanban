@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.observe;
 
+import io.ib67.yuanban.bot.observe.Observation.WorldEntered;
 import io.ib67.yuanban.bot.observe.dispatch.ObserverContextImpl;
 import org.jetbrains.annotations.Nullable;
 

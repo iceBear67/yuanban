@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 import io.ib67.yuanban.bot.observe.ObserverContext;
-import io.ib67.yuanban.bot.observe.PacketSent;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.protocol.PacketDirection;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;

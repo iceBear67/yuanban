@@ -1,8 +1,8 @@
 package io.ib67.yuanban.bot.observe.dispatch;
 
 import io.ib67.yuanban.bot.observe.Observation;
-import io.ib67.yuanban.bot.observe.PacketReceived;
-import io.ib67.yuanban.bot.observe.PacketSent;
+import io.ib67.yuanban.bot.observe.Observation.PacketReceived;
+import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 
 import java.util.ArrayList;
 import java.util.HashMap;

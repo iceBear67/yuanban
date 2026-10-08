@@ -1,7 +1,7 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
-import io.ib67.yuanban.bot.observe.EntityDamaged;
-import io.ib67.yuanban.bot.observe.HealthChanged;
+import io.ib67.yuanban.bot.observe.Observation.EntityDamaged;
+import io.ib67.yuanban.bot.observe.Observation.HealthChanged;
 
 /**
  * 本地玩家受到伤害的一条记录。

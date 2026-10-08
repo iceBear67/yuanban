@@ -1,6 +1,6 @@
 package io.ib67.yuanban.bot.scheduler;
 
-import io.ib67.yuanban.bot.observe.BotTicked;
+import io.ib67.yuanban.bot.observe.Observation.BotTicked;
 import net.minestom.server.coordinate.CoordConversion;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;

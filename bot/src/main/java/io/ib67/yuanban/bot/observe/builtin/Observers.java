@@ -2,10 +2,10 @@ package io.ib67.yuanban.bot.observe.builtin;
 
 import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.PacketReceived;
+import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 import io.ib67.yuanban.bot.observe.Observer;
 import io.ib67.yuanban.bot.observe.ObserverContext;
-import io.ib67.yuanban.bot.observe.PacketReceived;
-import io.ib67.yuanban.bot.observe.PacketSent;
 import io.ib67.yuanban.bot.observe.Region;
 import io.ib67.yuanban.bot.observe.Subscription;
 import io.ib67.yuanban.bot.view.ChatLine;

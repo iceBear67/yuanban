@@ -57,7 +57,7 @@ public interface Bot {
 
     /**
      * 在调度线程上的同一个任务中依次完成：注册 observer（调用 onStart）、调用 submit 提交一个动作。
-     * observer 最晚在这个动作的 {@link io.ib67.yuanban.bot.observe.ActionCompleted} 投递之后关闭，
+     * observer 最晚在这个动作的 {@link io.ib67.yuanban.bot.observe.Observation.ActionCompleted} 投递之后关闭，
      * 关闭原因为 {@link io.ib67.yuanban.bot.observe.CloseReason#ACTION_COMPLETED}。
      *
      * @param submit 在调度线程上执行，必须返回它执行期间由这个 bot 提交的一个动作

@@ -1134,7 +1134,7 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 
 #### 11.2 观察记录
 
-`Observation` 是 sealed 接口，全部子类型为不可变 record。
+`Observation` 是 sealed 接口，全部子类型为不可变 record，声明为 `Observation` 的嵌套类型。
 
 | 类别 | 观察记录 | 产生时机 |
 |---|---|---|

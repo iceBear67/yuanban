@@ -1,12 +1,12 @@
 package io.ib67.yuanban.bot.observe.dispatch;
 
 import io.ib67.yuanban.bot.Action;
-import io.ib67.yuanban.bot.observe.ActionCompleted;
 import io.ib67.yuanban.bot.observe.CloseReason;
 import io.ib67.yuanban.bot.observe.Observation;
+import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
+import io.ib67.yuanban.bot.observe.Observation.PacketReceived;
+import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 import io.ib67.yuanban.bot.observe.Observer;
-import io.ib67.yuanban.bot.observe.PacketReceived;
-import io.ib67.yuanban.bot.observe.PacketSent;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.ArrayDeque;

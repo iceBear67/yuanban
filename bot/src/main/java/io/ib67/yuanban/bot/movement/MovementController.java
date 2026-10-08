@@ -4,7 +4,7 @@ import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.ChunkNotLoadedException;
 import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.entity.ClientEntity;
-import io.ib67.yuanban.bot.observe.PlayerMoved;
+import io.ib67.yuanban.bot.observe.Observation.PlayerMoved;
 import io.ib67.yuanban.bot.player.AttributeMap;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.protocol.Vectors;
