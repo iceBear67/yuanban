@@ -30,7 +30,7 @@
   - [tick 状态](#tick-状态)
   - [世界边框](#世界边框)
   - [天气](#天气)
-- [模型中有、查询接口没有的内容](#模型中有查询接口没有的内容)
+  - [难度、默认出生点与距离](#难度默认出生点与距离)
 
 相关源码：[`scheduler/BotState.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotState.java)、[`world`](../../bot/src/main/java/io/ib67/yuanban/bot/world)、[`entity`](../../bot/src/main/java/io/ib67/yuanban/bot/entity)、[`player`](../../bot/src/main/java/io/ib67/yuanban/bot/player)、[`inventory`](../../bot/src/main/java/io/ib67/yuanban/bot/inventory)、[`chat`](../../bot/src/main/java/io/ib67/yuanban/bot/chat)、[`hud`](../../bot/src/main/java/io/ib67/yuanban/bot/hud)。
 
@@ -52,7 +52,7 @@
 - **加载区域**：以中心区块为中心、半径为 `max(2, 服务端视距) + 3` 的正方形（原版 `ClientChunkCache.calculateStorageRange`）。服务端视距取自 Login (play) 与 Set Render Distance。wiki Set Center Chunk 写的宽度为 `2 × 服务端视距 + 7`，服务端视距小于 2 时与原版不同，本库按原版。
 - **改变方块**（Block Update、Update Section Blocks；后者由 MCProtocolLib 解码为绝对坐标）：所在区块没有加载或者超出维度高度时什么都不做；否则先读取旧方块再写入，新方块的方块实体类型与旧方块不同时删除这个位置的方块实体数据（原版客户端行为）。产生 `BlockChanged(位置, 旧方块, 新方块)`，并通知当前的移动动作（`moveTo` 据此判断是否重新寻路）。
 - **Chunk Biomes**：对区块列中的每个区段依次用 `MinecraftTypes.readDataPalette(数据, PaletteType.BIOME, 生物群系数量)` 读出生物群系调色板，替换这个区段的生物群系；区块没有加载时忽略。
-- **生物群系的读取**（`ClientWorld.biome`）：照常用 `DataPalette.get` 读取。MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标，一个区段中不止一种生物群系时读出的结果错误（待办 T1）。
+- **生物群系的读取**（`ClientWorld.biome`）：照常用 `DataPalette.get` 读取。MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标，一个区段中不止一种生物群系时读出的结果错误（待办 T1）。模型中保存生物群系的编号，`StateReader.biome` 按同步的 `worldgen/biome` 注册表换成名称。
 - **Block Entity Data**：只在所在区块已加载、位置在维度高度范围之内、并且该位置的方块有同一类型的方块实体时（`Block.blockEntityType().id()` 等于数据包中类型的序号），替换这个位置的 NBT（数据包中没有 NBT 时为空的 `NbtMap`），产生 `BlockEntityChanged`；其余情况忽略（原版 `handleBlockEntityData` 只应用到 `level.getBlockEntity(pos, type)` 存在的方块实体）。
 - **读取方块**（`getBlock(x, y, z, condition)`）：返回 `Block.fromStateId(...)`，不带 NBT，`condition` 不影响结果；维度高度范围之外返回空气；未加载的区块抛出 `ChunkNotLoadedException`。
 - **读取方块实体**（`blockEntity(x, y, z)`）：返回 `BlockEntityStore` 中的 `NbtMap`，没有时为 null；未加载的区块抛出 `ChunkNotLoadedException`。方块实体的 NBT 单独保存，不附加到 `Block` 上。
@@ -181,7 +181,7 @@
 
 - 眼睛高度：站立 1.62、潜行 1.27，乘以 `minecraft:scale` 属性。
 - 包围盒：宽 0.6，高 1.8（潜行时 1.5），乘以 `minecraft:scale` 属性。
-- `snapshot()` 生成 `PlayerSnapshot`：实体编号、UUID、名称、位置、速度、着地、生命值、饥饿值、饱和度、死亡、游戏模式、能力（`AbilitiesSnapshot`）、经验进度、等级、总经验、属性取值、药水效果（`duration` 为剩余 tick 数）、快捷栏槽位。
+- `snapshot()` 生成 `PlayerSnapshot`：实体编号、UUID、名称、位置、速度、着地、生命值、饥饿值、饱和度、死亡、游戏模式、能力（`AbilitiesSnapshot`）、经验进度、等级、总经验、属性取值、药水效果（`duration` 为剩余 tick 数）、快捷栏槽位、物品冷却、元数据。
 
 ### 新的本地玩家
 
@@ -344,6 +344,8 @@ Synchronize Vehicle Position 指向本地玩家自己时（原版本地玩家也
 
 ## 时间与世界边框
 
+本节各项由 `StateReader.worldState()` 读取（`WorldStateSnapshot`），时钟由 `StateReader.clocks()` 读取，见[查询与观察 · 查询](observation.md#查询)。
+
 ### World Age 与时钟
 
 - **World Age** 属于世界（原版 `ClientLevelData.gameTime`）：新的世界从 0 开始；Update Time 把它设为数据包的值；每个正常运行的 tick 在实体与移动步骤之后加一。
@@ -369,20 +371,19 @@ Synchronize Vehicle Position 指向本地玩家自己时（原版本地玩家也
 - 插值时间以 tick 计：原版客户端与 Minestom 都以 tick 计，wiki 写的毫秒数与它们不同，本库按原版。
 - 每次推进（原版 `MovingBorderExtent.update`）：剩余时间减一，记下推进之前的大小，再算出新的大小；剩余时间不大于 0 时静止在目标大小。插值时间小于等于 0 时同样开始插值，第一次推进之后静止在目标大小。
 - 范围判断（`withinBounds`：挖掘与使用物品的检查）与碰撞（`toWorldBorder` 交给 `PhysicsUtils`；`collides` 用于位置插值）使用的大小，在插值期间为推进之前的大小，即上一 tick 的大小（原版 `MovingBorderExtent` 取 `previousSize`），静止时为当前大小。
+- `snapshot()` 生成 `WorldStateSnapshot.Border`：`size` 为当前大小，`boundsSize` 为范围判断与碰撞使用的大小；不在插值中时 `lerpTarget` 等于 `size`，`lerpRemainingTicks` 为 0。
 
 ### 天气
 
 `Weather` 使用 Game Event 7（雨量）与 8（雷暴强度），MCProtocolLib 解码时限制到 [0, 1]。事件 1、2 的效果与名称相反，原版服务端紧接着会发送事件 7，所以忽略。
 
-## 模型中有、查询接口没有的内容
+### 难度、默认出生点与距离
 
-`StateReader` 只提供状态、加载、暂停、tick 数、当前世界、本地玩家、方块、方块实体、区块是否加载、实体、物品栏、光标、身体护甲与鞍、聊天日志、界面状态。以下内容保存在模型中，供本库内部使用，查询接口没有读取它们的方法，需要时通过观察记录或数据包观察：
+以下各项属于世界：
 
-- 服务端 brand、Server Links、Feature Flags；
-- 难度、默认出生点、服务端视距与模拟距离；
-- World Age、时钟、tick 状态、世界边框、天气；
-- 生物群系；
-- 物品冷却；
-- 本地玩家的元数据。
+- 难度：Change Difficulty 给出的 MCProtocolLib `Difficulty`，不保存是否锁定；新的世界中为 null，直到收到 Change Difficulty。
+- 默认出生点：Set Default Spawn Position 给出的方块坐标，不保存维度与朝向；新的世界中为 null，直到收到 Set Default Spawn Position。
+- 服务端视距：取自 Login (play) 与 Set Render Distance，决定加载区域（见[区块](#区块)）；维度名称改变的 Respawn 创建的新世界沿用之前的值。
+- 模拟距离：取自 Login (play) 与 Set Simulation Distance，只保存，不影响 bot 的行为；维度名称改变的 Respawn 创建的新世界沿用之前的值。
 
 [目录](README.md) · 上一篇：[注册表与静态数据](registries-and-data.md) · 下一篇：[动作](actions.md)

@@ -297,6 +297,6 @@ public final class LocalPlayer {
     public PlayerSnapshot snapshot() {
         return new PlayerSnapshot(entityId, uuid, username, position, velocity, onGround, health, food, saturation, dead,
                 gameMode, abilities.snapshot(), experienceProgress, level, totalExperience, attributes.values(),
-                effects.all(), heldSlot);
+                effects.all(), heldSlot, cooldowns, metadata);
     }
 }

@@ -111,6 +111,7 @@ void chatIsSent() {
 | `player.AttributeMapTest` | 默认值与取值范围；三种修饰符的顺序；Respawn 时的复制 |
 | `player.PlayerLoadTrackerTest` | 收到 Game Event 13 之前不发送也不超时；条件满足或超过 30 秒时发送；不在世界中时的 Game Event 13 被忽略 |
 | `view.EntityMetaIndexTest` | 各常量的下标、掩码与默认值与 Minestom 的 `MetadataDef` 相同；没有收到的条目读出默认值 |
+| `view.StateReaderTest` | 配置阶段的 brand、Server Links、Feature Flags；不在世界中时 `worldState()` 与 `biome` 抛出异常；`worldState()` 与 `clocks()` 在冻结与步进时的取值，世界边框插值中与静止时的各项；生物群系按名称读取；本地玩家的物品冷却与元数据 |
 | `world.ClientWorldTest` | 写入时复制；快照不受之后写入的影响；高度范围之外与未加载区块；加载区域的移动与半径；Chunk Biomes；世界边框插值期间使用上一 tick 的大小；方块实体单独读取 |
 | `movement.KinematicsTest` | wiki 的移动数值；飞行；使用物品时的减速；缓降、飘浮与 NoGravity；移动相关属性与起跳规则；`movement_efficiency`；支撑方块决定脚下方块 |
 | `movement.MovementBotTest` | `rotate` 与 `lookAt`；服务端设置的朝向；指向本地玩家的 Synchronize Vehicle Position 插值；`moveTo` 的平地、台阶、半砖与楼梯、高度比较、跳下、找不到路径、未加载区块、重新寻路、寻路期间的传送与方块改变；`moveForward` 被阻挡；`jumpTo`；着地停止飞行；疾跑条件；暂停移动；骑乘船、矿车、马与骆驼；马的人立动画；手部动作的朝向优先 |

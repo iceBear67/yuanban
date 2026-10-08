@@ -1123,7 +1123,10 @@ wiki 记录了服务端对攻击、交互（4 格）与挖掘（6 格）的距�
 #### 11.1 查询
 
 - `Bot.view()` 返回 `BotView`，方法返回不可变快照：
-  - `PlayerSnapshot`（位置、朝向、速度、生命、饥饿、游戏模式为 MCProtocolLib 的 `GameMode`、属性为 `Map<AttributeType, Double>`、效果为 `Map<Effect, ActiveEffect>`）
+  - `PlayerSnapshot`（位置、朝向、速度、生命、饥饿、游戏模式为 MCProtocolLib 的 `GameMode`、属性为 `Map<AttributeType, Double>`、效果为 `Map<Effect, ActiveEffect>`、物品冷却为 `Map<Key, Integer>`、元数据为 `Map<Integer, EntityMetadata<?, ?>>`，命名的元数据条目用 `meta(EntityMeta<T>)` 读取）
+  - `WorldStateSnapshot`（World Age、难度为 MCProtocolLib 的 `Difficulty`、默认出生点、服务端视距与模拟距离、tick 状态、世界边框、雨量与雷暴强度）；不在任何世界中时 `worldState()` 抛出 `IllegalStateException`
+  - 生物群系：`biome(x, y, z)` 或 `biome(Point)` 返回 `worldgen/biome` 注册表中的名称（`Key`），受待办 T1 影响
+  - 连接的信息：`serverBrand()`（没有收到时为 null）、`serverLinks()`（MCProtocolLib 的 `ServerLink`）、`featureFlags()`（`List<Key>`），以及 `clocks()`（时钟名称到含小数部分的 tick 数）
   - `Block`（Minestom 的方块对象本身不可变，不带 NBT）；方块实体的 NBT 由 `blockEntity(x, y, z)` 或 `blockEntity(Point)` 读取（`NbtMap`，没有时为 null，7.1）
   - `EntitySnapshot`（MCProtocolLib 的 `EntityType`、`ObjectData`、元数据 `Map<Integer, EntityMetadata<?, ?>>`、装备 `Map<EquipmentSlot, ItemStack>`（没有空装备）、属性 `Map<AttributeType, Double>`、效果 `Map<Effect, ActiveEffect>`；命名的元数据条目用 `meta(EntityMeta<T>)` 读取，7.4）
   - `WindowSnapshot`（窗口类型为 `@Nullable ContainerType`，窗口 0 与马、鹦鹉螺的物品栏为 null；槽位为 MCProtocolLib 的 `ItemStack`，空槽位为 null；`trades` 为 `@Nullable ClientboundMerchantOffersPacket`）

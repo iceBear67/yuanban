@@ -37,10 +37,16 @@
 | `loaded()` | 自上次 Login (play) 或 Respawn 以来是否已经发送 Player Loaded |
 | `movementSuspended()` | 实际的暂停状态 |
 | `ticks()` | bot 已经执行的 tick 数 |
+| `serverBrand()` | 最近一次收到的服务端 brand；没有收到时为 null |
+| `serverLinks()` | 最近一次收到的 Server Links，`List<ServerLink>`；没有收到时为空列表 |
+| `featureFlags()` | 最近一次收到的 Feature Flags，`List<Key>`；没有收到时为空列表 |
+| `clocks()` | 各时钟当前的 tick 数（含小数部分），`Map<Key, Double>`；时钟属于连接，见[世界模型 · World Age 与时钟](world-model.md#world-age-与时钟) |
 | `world()` | 当前世界的 `WorldInfo`；不在任何世界中时为 null |
+| `worldState()` | `WorldStateSnapshot`；不在任何世界中时抛出 `IllegalStateException` |
 | `player()` | `PlayerSnapshot`；不在任何世界中时抛出 `IllegalStateException` |
 | `block(x, y, z)`、`block(Point)` | Minestom 的 `Block`，不带 NBT；维度高度范围之外为空气；区块没有加载时抛出 `ChunkNotLoadedException`；不在任何世界中时抛出 `IllegalStateException` |
 | `blockEntity(x, y, z)`、`blockEntity(Point)` | 方块实体发给客户端的 `NbtMap`，没有时为 null；异常同上 |
+| `biome(x, y, z)`、`biome(Point)` | 生物群系的名称：模型中的编号按同步的 `worldgen/biome` 注册表换成 `Key`；超出维度高度范围时抛出 `IllegalArgumentException`；区块没有加载时抛出 `ChunkNotLoadedException`；不在任何世界中时抛出 `IllegalStateException`。一个区段中不止一种生物群系时结果错误（[待办 T1](limitations.md#待办)） |
 | `chunkLoaded(x, z)` | 区块是否已经加载；不在任何世界中时为 false |
 | `entity(id)` | `EntitySnapshot`；不在模型中时为 null |
 | `entities()` | 当前世界中的全部实体，按编号排列；不在任何世界中时为空列表 |
@@ -53,7 +59,8 @@
 
 快照：
 
-- `PlayerSnapshot`：见[世界模型 · 本地玩家](world-model.md#本地玩家)。速度为每 tick 的速度；属性为 `Map<AttributeType, Double>`（只包含收到过或者本地修改过的属性）；效果为 `Map<Effect, ActiveEffect>`，`duration` 为剩余 tick 数。
+- `PlayerSnapshot`：见[世界模型 · 本地玩家](world-model.md#本地玩家)。速度为每 tick 的速度；属性为 `Map<AttributeType, Double>`（只包含收到过或者本地修改过的属性）；效果为 `Map<Effect, ActiveEffect>`，`duration` 为剩余 tick 数；物品冷却为 `Map<Key, Integer>`（冷却组到剩余 tick 数）；元数据为按索引的 `Map<Integer, EntityMetadata<?, ?>>`，`meta(EntityMeta)` 读取命名条目，与 `EntitySnapshot` 相同。
+- `WorldStateSnapshot`：World Age、难度（没有收到时为 null）、默认出生点的方块坐标（没有收到时为 null）、服务端视距、模拟距离、tick 状态（`Ticking`：tick 速率、是否冻结、还要步进的 tick 数、最近一个 tick 是否正常运行）、世界边框（`Border`：中心、当前大小、范围判断与碰撞使用的大小、是否正在插值、插值的目标大小与剩余 tick 数、Portal Teleport Boundary、警告时间、警告距离）、雨量、雷暴强度。各项的含义见[世界模型 · 时间与世界边框](world-model.md#时间与世界边框)。
 - `EntitySnapshot`：编号、UUID、`EntityType`、`ObjectData`、位置与朝向、头部朝向、速度、着地、元数据（`meta(EntityMeta)` 读取命名条目）、装备（没有空装备）、属性、效果（`duration` 为收到时的值）、乘坐的实体、乘客、拴住它的实体、包围盒；`center()` 为包围盒中心。位置为服务端最后给出的值，不插值。
 - `WindowSnapshot`：窗口编号、类型（窗口 0 与马、鹦鹉螺的窗口为 null）、标题、状态编号、槽位（空槽位为 null）、属性、交易（`ClientboundMerchantOffersPacket`）。
 - `HudSnapshot`：Boss Bar、标题、副标题、标题时间、动作栏、玩家列表、页眉、页脚、计分板目标、显示位置、队伍、服务器描述。

@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.world;
 
+import io.ib67.yuanban.bot.view.WorldStateSnapshot;
 import net.minestom.server.instance.WorldBorder;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundInitializeBorderPacket;
 
@@ -150,5 +151,10 @@ public final class WorldBorderState {
      */
     public WorldBorder toWorldBorder() {
         return new WorldBorder(boundsSize, centerX, centerZ, warningBlocks, warningTime, portalBoundary);
+    }
+
+    public WorldStateSnapshot.Border snapshot() {
+        return new WorldStateSnapshot.Border(centerX, centerZ, size, boundsSize, moving,
+                moving ? lerpTo : size, moving ? lerpProgress : 0, portalBoundary, warningTime, warningBlocks);
     }
 }

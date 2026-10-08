@@ -19,7 +19,7 @@
 | 下载资源包 | 按 `ResourcePackPolicy` 回应接受或拒绝，不下载 |
 | SRV 解析 | `TcpTransport` 直接连接给出的地址与端口 |
 | 进程内连接 | 由外部模块实现 `Transport` |
-| 按键输入、客户端时钟 | 公开接口不提供；Player Input 由移动状态派生，tick 时钟只在调度器内部 |
+| 按键输入、tick 的计时 | 公开接口不提供；Player Input 由移动状态派生，tick 的计时只在调度器内部 |
 | 客户端的距离检查 | 攻击、交互、挖掘的距离由服务端检查 |
 | 预测交互结果 | 物品栏点击的结果、物品能否使用、放置是否成功都不预测，模型只由服务端数据更新 |
 
@@ -64,7 +64,7 @@
 
 | 编号 | 位置 | 问题 | 现在的处理 |
 |---|---|---|---|
-| T1 | [`world/SectionRef.java`](../../bot/src/main/java/io/ib67/yuanban/bot/world/SectionRef.java) 的 `biome` | MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标：用 `y << 3 \| z << 1 \| x`，应为 `y << 4 \| z << 2 \| x` | 不处理，生物群系照常用 `DataPalette.get` 读取。一个区段中只有一种生物群系时结果正确 |
+| T1 | [`world/SectionRef.java`](../../bot/src/main/java/io/ib67/yuanban/bot/world/SectionRef.java) 的 `biome` | MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标：用 `y << 3 \| z << 1 \| x`，应为 `y << 4 \| z << 2 \| x` | 不处理，生物群系照常用 `DataPalette.get` 读取，`StateReader.biome` 的结果同样受影响。一个区段中只有一种生物群系时结果正确 |
 | T2 | [`protocol/ProtocolMachine.java`](../../bot/src/main/java/io/ib67/yuanban/bot/protocol/ProtocolMachine.java) 的 `playerChat` | MCProtocolLib 的 `ClientboundPlayerChatPacket` 在过滤类型为 PARTIALLY_FILTERED 时不读取过滤标记的 BitSet，之后的聊天类型、发送者名称与目标名称都从错误的位置读出 | 不支持。收到部分过滤的玩家聊天时抛出 `UnsupportedOperationException`，bot 以这个异常结束 |
 | T3 | [`data/Items.java`](../../bot/src/main/java/io/ib67/yuanban/bot/data/Items.java) 的 `sameItemSameComponents` | 原版解码物品时去掉补丁中与默认组件相同的条目，MCProtocolLib 保留原始补丁 | 物品按原始补丁比较，null 补丁与空补丁视为相同；服务端发来与默认值相同的补丁条目时，比较结果与原版不同。影响挖掘中判断主手物品是否改变，以及物品栏判断槽位是否改变 |
 | T4 | [`interaction/BlockPredicates.java`](../../bot/src/main/java/io/ib67/yuanban/bot/interaction/BlockPredicates.java) | `can_break` 中针对方块实体组件的条件（exact components 与 component predicates） | 不支持。该位置有方块实体时，遇到带有组件条件的谓词抛出 `UnsupportedOperationException`；没有方块实体时与原版相同，直接不匹配 |

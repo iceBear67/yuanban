@@ -2,14 +2,17 @@ package io.ib67.yuanban.bot.view;
 
 import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.observe.WorldInfo;
+import net.kyori.adventure.key.Key;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.instance.block.Block;
 import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.data.game.ServerLink;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 只读地访问 bot 在某一时刻的模型。方法在调度线程上执行，返回不可变的值。
@@ -33,9 +36,37 @@ public interface StateReader {
     long ticks();
 
     /**
+     * 最近一次收到的服务端 brand（频道 {@code minecraft:brand} 的 Custom Payload）；没有收到时为 null
+     */
+    @Nullable String serverBrand();
+
+    /**
+     * 最近一次收到的 Server Links；没有收到时为空
+     */
+    List<ServerLink> serverLinks();
+
+    /**
+     * 最近一次收到的 Feature Flags；没有收到时为空
+     */
+    List<Key> featureFlags();
+
+    /**
+     * Update Time 给出的各时钟：时钟名称 → 当前的 tick 数（含小数部分）。
+     * 时钟属于连接的游戏阶段，换维度之后仍然保留，每次 Finish Configuration 时清空
+     */
+    Map<Key, Double> clocks();
+
+    /**
      * 当前世界；不在任何世界中时（进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）为 null
      */
     @Nullable WorldInfo world();
+
+    /**
+     * 当前世界的状态：World Age、难度、默认出生点、服务端视距与模拟距离、tick 状态、世界边框、天气
+     *
+     * @throws IllegalStateException 不在任何世界中
+     */
+    WorldStateSnapshot worldState();
 
     /**
      * 本地玩家
@@ -66,6 +97,20 @@ public interface StateReader {
 
     default @Nullable NbtMap blockEntity(Point pos) {
         return blockEntity(pos.blockX(), pos.blockY(), pos.blockZ());
+    }
+
+    /**
+     * 方块所在的生物群系（生物群系按 4 × 4 × 4 的格子保存）。
+     * 一个区段中不止一种生物群系时读出的结果错误：MCProtocolLib 的 {@code DataPalette.index} 对生物群系调色板算错下标（待办 T1）
+     *
+     * @throws io.ib67.yuanban.bot.ChunkNotLoadedException 所在区块没有加载
+     * @throws IllegalArgumentException                    超出维度高度范围
+     * @throws IllegalStateException                       不在任何世界中
+     */
+    Key biome(int x, int y, int z);
+
+    default Key biome(Point pos) {
+        return biome(pos.blockX(), pos.blockY(), pos.blockZ());
     }
 
     /**

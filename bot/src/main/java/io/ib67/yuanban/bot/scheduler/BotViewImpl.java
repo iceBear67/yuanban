@@ -8,13 +8,17 @@ import io.ib67.yuanban.bot.view.EntitySnapshot;
 import io.ib67.yuanban.bot.view.HudSnapshot;
 import io.ib67.yuanban.bot.view.PlayerSnapshot;
 import io.ib67.yuanban.bot.view.WindowSnapshot;
+import io.ib67.yuanban.bot.view.WorldStateSnapshot;
+import net.kyori.adventure.key.Key;
 import net.minestom.server.instance.block.Block;
 import org.cloudburstmc.nbt.NbtMap;
+import org.geysermc.mcprotocollib.protocol.data.game.ServerLink;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 每个方法作为查询任务交给调度线程。
@@ -47,8 +51,33 @@ final class BotViewImpl implements BotView {
     }
 
     @Override
+    public @Nullable String serverBrand() {
+        return bot.query(() -> bot.reader().serverBrand());
+    }
+
+    @Override
+    public List<ServerLink> serverLinks() {
+        return bot.query(() -> bot.reader().serverLinks());
+    }
+
+    @Override
+    public List<Key> featureFlags() {
+        return bot.query(() -> bot.reader().featureFlags());
+    }
+
+    @Override
+    public Map<Key, Double> clocks() {
+        return bot.query(() -> bot.reader().clocks());
+    }
+
+    @Override
     public @Nullable WorldInfo world() {
         return bot.query(() -> bot.reader().world());
+    }
+
+    @Override
+    public WorldStateSnapshot worldState() {
+        return bot.query(() -> bot.reader().worldState());
     }
 
     @Override
@@ -64,6 +93,11 @@ final class BotViewImpl implements BotView {
     @Override
     public @Nullable NbtMap blockEntity(int x, int y, int z) {
         return bot.query(() -> bot.reader().blockEntity(x, y, z));
+    }
+
+    @Override
+    public Key biome(int x, int y, int z) {
+        return bot.query(() -> bot.reader().biome(x, y, z));
     }
 
     @Override
