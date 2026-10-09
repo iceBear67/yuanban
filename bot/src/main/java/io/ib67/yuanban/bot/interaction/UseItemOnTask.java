@@ -20,7 +20,8 @@ import java.util.Objects;
 /**
  * {@code useItemOn} 与 {@code placeBlock}：先看向光标位置，服务端收到这个朝向之后（{@link HandController#aimed}）
  * 发送 Use Item On（带序号；World Border Hit 为 false），然后发送 Swing Arm（本库不预测交互结果，所以总是发送）。收到确认即执行完毕。
- * 目标方块在世界边框之外时什么都不发送，直接执行完毕。
+ * 目标方块在世界边框之外时什么都不发送，直接执行完毕。目标所在区块未加载时，计算 Inside block 读取方块抛出的
+ * {@link io.ib67.yuanban.bot.ChunkNotLoadedException} 由 {@link HandController#tick} 处理，什么都不发送。
  */
 public final class UseItemOnTask extends HandAction {
     private static final BoundingBox POINT = new BoundingBox(1.0E-7, 1.0E-7, 1.0E-7);

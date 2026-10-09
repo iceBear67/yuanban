@@ -21,7 +21,7 @@ public enum CloseReason {
      */
     DISCONNECTED,
     /**
-     * observer 的回调抛出了异常
+     * observer 的回调抛出了异常，异常见 {@link ObserverHandle#failure()}；bot 不受影响
      */
     FAILED
 }

@@ -40,6 +40,9 @@ import java.util.OptionalInt;
  * 挖掘延迟大于 0 时减一并发送 Swing Arm，不累加进度；能力中有瞬间破坏并且目标在世界边框之内时，挖掘延迟设为 5，
  * 以新的序号发送 Started digging 与 Swing Arm，收到确认即执行完毕；主手物品与开始挖掘时不同时重新开始挖掘（{@link #restart}）；
  * 否则累加进度，达到 1 时先发送 Finished digging（带序号），挖掘延迟设为 5，再发送 Swing Arm，收到确认即执行完毕；未达到时只发送 Swing Arm。
+ * <p>
+ * 读取的方块（目标，以及计算进度时眼睛所在的方块）所在区块未加载时抛出的 {@link io.ib67.yuanban.bot.ChunkNotLoadedException}
+ * 由 {@link HandController#tick} 处理：开始的 tick 中这些读取都在发送数据包之前，取消时什么都不发送；挖掘中取消时由 {@link #cleanup} 发送 Cancelled digging。
  */
 public final class DigTask extends HandAction {
     private final Point position;
@@ -97,15 +100,18 @@ public final class DigTask extends HandAction {
             return;
         }
         face = requestedFace != null ? requestedFace : faceTowards(player.eyePosition());
+        // 原版 startDestroyBlock 在 startPrediction 中先判断本 tick 的进度，再发出 Started digging；能力中有瞬间建造时不判断进度
+        var instantBreak = player.abilities().instantBreak();
+        var finishedThisTick = !instantBreak && progressThisTick(controller) >= 1;
         var sequence = controller.sequence().next();
         state.outbox().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, blockPosition, face, sequence));
-        if (player.abilities().instantBreak()) {
+        if (instantBreak) {
             swing(state);
             controller.destroyDelay(HandController.DESTROY_DELAY_TICKS);
             awaitAcknowledgement(controller, sequence);
             return;
         }
-        if (progressThisTick(controller) >= 1) {
+        if (finishedThisTick) {
             swing(state);
             awaitAcknowledgement(controller, sequence);
             return;

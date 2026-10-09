@@ -26,8 +26,7 @@ public interface Bot {
     BotStatus status();
 
     /**
-     * 连接结束的原因（服务端给出的断开原因，或者本地断开、连接关闭的说明）；连接没有结束，或者 bot 在连接结束之前因异常结束时为 null。
-     * 连接结束时 observer 的 {@code onClose} 抛出异常的，{@link #failure()} 为这个异常，这里仍为断开原因
+     * 连接结束的原因（服务端给出的断开原因，或者本地断开、连接关闭的说明）；连接没有结束，或者 bot 在连接结束之前因异常结束时为 null
      */
     @Nullable Component disconnectReason();
 
@@ -50,6 +49,7 @@ public interface Bot {
      * 在调度线程上调用时立即注册，在 observer 的回调中调用时，从这个回调返回之后产生的观察记录开始投递。
      *
      * @throws IllegalStateException    observer 已经注册过
+     * @throws ObserverFailureException observer 的 {@code subscription()} 或 {@code onStart} 抛出异常，observer 以 FAILED 关闭，bot 不受影响
      * @throws BotDisconnectedException bot 已经断开；这时 observer 不算注册过
      * @throws BotFailureException      bot 因异常结束；在注册之前已经结束的，observer 不算注册过
      */
@@ -61,6 +61,7 @@ public interface Bot {
      * 关闭原因为 {@link io.ib67.yuanban.bot.observe.CloseReason#ACTION_COMPLETED}。
      *
      * @param submit 在调度线程上执行，必须返回它执行期间由这个 bot 提交的一个动作
+     * @throws ObserverFailureException 注册时 observer 的 {@code subscription()} 或 {@code onStart} 抛出异常；这时不调用 submit
      */
     <O extends Observer> ObservedAction<O> observeDuring(O observer, Function<Bot, Action> submit);
 
@@ -77,7 +78,8 @@ public interface Bot {
     /**
      * 注册一个 {@code Observers.condition(condition)} 并等它关闭。等待期间执行推进函数。
      *
-     * @throws BotTimeoutException 超时；这时关闭这个 observer
+     * @throws ObserverFailureException condition 抛出异常；bot 不受影响
+     * @throws BotTimeoutException      超时；这时关闭这个 observer
      */
     void await(Predicate<StateReader> condition, Duration timeout);
 

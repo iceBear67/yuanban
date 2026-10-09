@@ -21,7 +21,7 @@ public final class ActionCancelledException extends RuntimeException {
      */
     public static final String NO_ENTITY = "实体不存在";
     /**
-     * 移动范围涉及未加载的区块
+     * 移动范围涉及未加载的区块，或者手部交互动作（挖掘、对方块使用物品）读取的方块所在区块未加载
      */
     public static final String CHUNK_NOT_LOADED = "区块未加载";
     /**

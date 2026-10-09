@@ -18,7 +18,7 @@ import java.util.Objects;
  * （原版每个 {@code AbstractContainerMenu} 各有 {@code stateId} 与 {@code carried}），当前的光标为当前窗口的光标。空物品为 null。
  * <p>
  * 打开的窗口中玩家物品栏部分与窗口 0 对应同一份物品（原版客户端的容器共用玩家的 Inventory）：
- * 服务端对其中一边的修改同时写入另一边（wiki Set Container Slot：服务端不会针对窗口 0 重发）。
+ * 打开时取窗口 0 的物品，之后服务端对其中一边的修改同时写入另一边（wiki Set Container Slot：服务端不会针对窗口 0 重发）。
  * <p>
  * 当前的光标（{@link #cursor()}）改变时通知 {@link CursorSink}，包括打开与关闭窗口使当前窗口改变的情况。
  * 物品是否改变按 {@link Items#sameStack} 判断。
@@ -103,8 +103,26 @@ public final class InventoryModel {
 
     private void switchTo(@Nullable Window window, CursorSink sink) {
         var old = cursor();
+        if (window != null) {
+            sharePlayerInventory(window);
+        }
         open = window;
         cursorChanged(old, sink);
+    }
+
+    /**
+     * 新打开的窗口中主物品栏与快捷栏取窗口 0 的物品：原版客户端的容器菜单直接使用玩家的 Inventory，打开时就有这些物品。
+     * 服务端打开窗口时不一定发送这一部分（Minestom 的 {@code AbstractInventory.update} 只发送容器自己的槽位），
+     * 之后两边的修改由 {@link #setAndPropagate} 同步。窗口刚刚建立，物品没有改变，所以不产生槽位变化
+     */
+    private void sharePlayerInventory(Window window) {
+        for (int index = 0; index < 36; index++) {
+            var slot = window.fromPlayerInventory(index);
+            if (slot < 0) {
+                return;
+            }
+            window.set(slot, player.get(player.fromPlayerInventory(index)));
+        }
     }
 
     private void cursorChanged(@Nullable ItemStack old, CursorSink sink) {

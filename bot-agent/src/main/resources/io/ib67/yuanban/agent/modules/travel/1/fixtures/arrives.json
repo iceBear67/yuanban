@@ -1,0 +1,16 @@
+{
+  "name": "arrives",
+  "description": "寻路一次完成，movementReached 确认到达",
+  "input": {"target": {"x": 10.5, "y": 64, "z": 0.5}},
+  "actions": [
+    {"tool": "locomotion.moveTo", "outcome": "completed"}
+  ],
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"kind": "arrived"},
+    "events": [{"type": "progress", "payload": {"step": "arrived"}}],
+    "toolCalls": ["locomotion.moveTo"],
+    "maxToolCalls": 1,
+    "noEvents": ["fault", "attention"]
+  }
+}

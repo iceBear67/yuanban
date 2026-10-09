@@ -1,10 +1,13 @@
 package io.ib67.yuanban.bot.interaction;
 
+import io.ib67.yuanban.bot.ActionCancelledException;
+import io.ib67.yuanban.bot.ChunkNotLoadedException;
 import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.movement.MovementController;
 import io.ib67.yuanban.bot.movement.Rotation;
 import io.ib67.yuanban.bot.data.Items;
 import io.ib67.yuanban.bot.scheduler.BotState;
+import net.minestom.server.coordinate.Pos;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.UseEffects;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
@@ -87,12 +90,18 @@ public final class HandController {
     }
 
     /**
-     * 推进一步
+     * 推进一步。当前动作读取的方块所在区块未加载时，以 {@link ActionCancelledException#CHUNK_NOT_LOADED} 取消它
+     * （取消时照常执行 {@link HandAction#cleanup}）
      */
     public void tick() {
         state.checkThread();
         if (current != null && !current.handle().isDone()) {
-            current.tick(this);
+            var action = current;
+            try {
+                action.tick(this);
+            } catch (ChunkNotLoadedException e) {
+                action.handle().requestCancel(ActionCancelledException.CHUNK_NOT_LOADED);
+            }
             return;
         }
         current = null;
@@ -102,18 +111,24 @@ public final class HandController {
                 continue;
             }
             current = next;
-            current.start(this);
+            try {
+                next.start(this);
+            } catch (ChunkNotLoadedException e) {
+                next.handle().requestCancel(ActionCancelledException.CHUNK_NOT_LOADED);
+            }
             return;
         }
     }
 
     /**
      * 本地玩家的朝向是否已经是 rotation。手部步骤在移动步骤之前（原版 {@code handleKeybinds} 在 {@code tickEntities} 之前），
-     * 这时本地玩家的朝向是之前的移动步骤（或者服务端的传送）确定并已经发出的朝向，所以为 true 时服务端已经收到这个朝向
+     * 这时本地玩家的朝向是之前的移动步骤（或者服务端的传送）确定并已经发出的朝向，所以为 true 时服务端已经收到这个朝向。
+     * 本地玩家的位置经 {@link Pos} 规范朝向（偏航角在 (-180, 180] 之内，俯仰角在 [-90, 90] 之内），所以先对 rotation 做同样的规范：
+     * 目标正好在正北时 {@link Rotation#lookAt} 的偏航角为 -180，位置中为 180
      */
     boolean aimed(Rotation rotation) {
         var position = state.player().position();
-        return position.yaw() == rotation.yaw() && position.pitch() == rotation.pitch();
+        return position.yaw() == Pos.fixYaw(rotation.yaw()) && position.pitch() == Pos.fixPitch(rotation.pitch());
     }
 
     /**

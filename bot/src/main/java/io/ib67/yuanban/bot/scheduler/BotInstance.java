@@ -13,6 +13,7 @@ import io.ib67.yuanban.bot.BotTimeoutException;
 import io.ib67.yuanban.bot.InventoryActions;
 import io.ib67.yuanban.bot.MoveOptions;
 import io.ib67.yuanban.bot.ObservedAction;
+import io.ib67.yuanban.bot.ObserverFailureException;
 import io.ib67.yuanban.bot.decode.DecodeContext;
 import io.ib67.yuanban.bot.decode.SectionPool;
 import io.ib67.yuanban.bot.interaction.AttackTask;
@@ -44,7 +45,6 @@ import io.ib67.yuanban.bot.observe.builtin.Observers;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationDispatcher;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationHost;
 import io.ib67.yuanban.bot.observe.dispatch.ObserverEntry;
-import io.ib67.yuanban.bot.observe.dispatch.ObserverFailure;
 import io.ib67.yuanban.bot.observe.dispatch.RegistrationCheck;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.protocol.BundleBuffer;
@@ -61,6 +61,7 @@ import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Point;
 import org.cloudburstmc.math.vector.Vector3i;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
 import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.object.Direction;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
@@ -224,8 +225,39 @@ public final class BotInstance implements Bot, ObservationHost {
 
     // 协议状态机使用
 
+    /**
+     * 协议状态机改变连接状态：Login Finished、Finish Configuration、Start Configuration
+     *
+     * @throws IllegalStateException 不允许的转移（{@link #allowedTransition}）
+     */
     public void status(BotStatus status) {
-        this.status = status;
+        transition(status);
+    }
+
+    /**
+     * 改变连接状态，只允许 {@link #allowedTransition} 中的转移
+     *
+     * @throws IllegalStateException 不允许的转移
+     */
+    private void transition(BotStatus next) {
+        if (!allowedTransition(status, next)) {
+            throw new IllegalStateException("illegal status transition " + status + " -> " + next);
+        }
+        status = next;
+    }
+
+    /**
+     * 允许的连接状态转移：Login Finished（LOGIN → CONFIGURATION）、Finish Configuration（CONFIGURATION → PLAY）、
+     * Start Configuration（PLAY → CONFIGURATION）、Transfer（CONFIGURATION 或 PLAY → LOGIN）、
+     * 连接结束或 bot 因异常结束（DISCONNECTED 以外的状态 → DISCONNECTED）。初始状态为 LOGIN
+     */
+    static boolean allowedTransition(BotStatus from, BotStatus to) {
+        return switch (to) {
+            case LOGIN -> from == BotStatus.CONFIGURATION || from == BotStatus.PLAY;
+            case CONFIGURATION -> from == BotStatus.LOGIN || from == BotStatus.PLAY;
+            case PLAY -> from == BotStatus.CONFIGURATION;
+            case DISCONNECTED -> from != BotStatus.DISCONNECTED;
+        };
     }
 
     /**
@@ -265,7 +297,7 @@ public final class BotInstance implements Bot, ObservationHost {
             return;
         }
         disconnectReason = reason;
-        status = BotStatus.DISCONNECTED;
+        transition(BotStatus.DISCONNECTED);
         closeConnection();
         end(new BotDisconnectedException(reason));
     }
@@ -283,7 +315,7 @@ public final class BotInstance implements Bot, ObservationHost {
         var old = Objects.requireNonNull(connection, "transfer without a connection");
         handOver(old, state.outbox().drain());
         closeConnection();
-        status = BotStatus.LOGIN;
+        transition(BotStatus.LOGIN);
         protocol.leaveWorld();
         var transport = options.transportResolver().resolve(host, port);
         Thread.ofVirtual().name("yuanban-bot-transfer").start(() -> {
@@ -381,6 +413,7 @@ public final class BotInstance implements Bot, ObservationHost {
                     if (target != generation || ended()) {
                         continue;
                     }
+                    checkInbound(packet.packet());
                     var batch = bundles.accept(packet);
                     if (batch == null) {
                         continue;
@@ -408,6 +441,37 @@ public final class BotInstance implements Bot, ObservationHost {
                 default -> throw new IllegalStateException("unknown inbound item " + item);
             }
         }
+    }
+
+    /**
+     * 当前连接交来的数据包必须在这条连接的握手发出之后到达，并且属于当前状态对应的协议阶段。TCP 连接只在收到 Login Start
+     * 之后收到数据，并且按当前阶段解码，总是满足；直接交出数据包对象的 Transport（进程内连接）不满足时，按 12 结束 bot。
+     * 在到达时检查：改变阶段的数据包不在 bundle 中，按到达顺序应用，所以此刻的状态就是 TCP 连接解码这个数据包时的阶段
+     *
+     * @throws IllegalStateException 握手还没有发出（{@link #attach} 还没有执行），或者数据包不属于当前状态对应的协议阶段
+     */
+    private void checkInbound(MinecraftPacket packet) {
+        if (connection == null) {
+            throw new IllegalStateException("received " + packet.getClass().getSimpleName()
+                    + " before the handshake was sent on this connection");
+        }
+        if (!PacketDirection.clientboundIn(protocolState(status), packet.getClass())) {
+            throw new IllegalStateException("received " + packet.getClass().getSimpleName() + " in " + status);
+        }
+    }
+
+    /**
+     * 连接状态对应的协议阶段
+     *
+     * @throws IllegalStateException 连接已经结束
+     */
+    private static ProtocolState protocolState(BotStatus status) {
+        return switch (status) {
+            case LOGIN -> ProtocolState.LOGIN;
+            case CONFIGURATION -> ProtocolState.CONFIGURATION;
+            case PLAY -> ProtocolState.GAME;
+            case DISCONNECTED -> throw new IllegalStateException("the connection has ended");
+        };
     }
 
     /**
@@ -552,40 +616,33 @@ public final class BotInstance implements Bot, ObservationHost {
 
     /**
      * 调度线程上的异常结束这个 bot：关闭连接，未结束的动作以 {@link BotFailureException} 结束，
-     * 其余 observer 以 DISCONNECTED 关闭，之后的调用立即抛出 {@link BotFailureException}
+     * 仍在观察的 observer 以 DISCONNECTED 关闭，之后的调用立即抛出 {@link BotFailureException}
      */
     void fail(Throwable t) {
-        var cause = t instanceof ObserverFailure observerFailure ? observerFailure.getCause() : t;
         if (failure != null) {
             return;
         }
-        failure = cause;
+        failure = t;
         var wasEnded = status == BotStatus.DISCONNECTED;
-        status = BotStatus.DISCONNECTED;
+        if (!wasEnded) {
+            transition(BotStatus.DISCONNECTED);
+        }
         closeConnection();
         if (!wasEnded) {
-            end(new BotFailureException(cause));
+            end(new BotFailureException(t));
         }
     }
 
     /**
-     * 先关闭全部 observer，再结束未结束的动作。连接结束时某个 observer 的 {@code onClose} 抛出的异常记录为 bot 的失败原因，
-     * 未结束的动作与之后的调用一样得到 {@link BotFailureException}；断开原因仍然保留在 {@link #disconnectReason()} 中
+     * 先关闭全部 observer，再结束未结束的动作。某个 observer 的 {@code onClose} 抛出异常时只有它以 FAILED 关闭，
+     * 异常记在它的句柄上（{@link io.ib67.yuanban.bot.observe.ObserverHandle#failure()}），结束动作的异常不变
      */
     private void end(RuntimeException exception) {
         oneShots.clear();
         nextTickNanos = 0;
-        var ending = exception;
-        try {
-            dispatcher.closeAll(CloseReason.DISCONNECTED);
-        } catch (ObserverFailure e) {
-            if (failure == null) {
-                failure = e.getCause();
-                ending = new BotFailureException(failure);
-            }
-        }
+        dispatcher.closeAll(CloseReason.DISCONNECTED);
         for (var action : List.copyOf(unfinished)) {
-            action.terminate(ending);
+            action.terminate(exception);
         }
     }
 
@@ -801,7 +858,8 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     /**
-     * bot 已经结束时抛出 {@link BotDisconnectedException} 或 {@link BotFailureException}，这时 observer 不算注册过
+     * bot 已经结束时抛出 {@link BotDisconnectedException} 或 {@link BotFailureException}，这时 observer 不算注册过；
+     * 注册时 observer 的回调抛出异常时抛出 {@link ObserverFailureException}，这时 observer 算作注册过
      */
     @Override
     public <O extends Observer> ObserverHandle<O> observe(O observer) {
@@ -819,9 +877,12 @@ public final class BotInstance implements Bot, ObservationHost {
             }
             try {
                 result.complete(new ObserverHandleImpl<>(this, dispatcher.register(observer), observer));
+            } catch (ObserverFailureException e) {
+                // subscription() 或 onStart 抛出异常：这个 observer 以 FAILED 关闭，observe 抛出 ObserverFailureException
+                result.completeExceptionally(e);
             } catch (Throwable t) {
-                // subscription() 或 onStart 抛出的异常结束 bot（由调度循环的处理入口完成），observe 抛出 BotFailureException
-                result.completeExceptionally(new BotFailureException(t instanceof ObserverFailure e ? e.getCause() : t));
+                // 其它异常结束 bot（由调度循环的处理入口完成），observe 抛出 BotFailureException
+                result.completeExceptionally(new BotFailureException(t));
                 throw t;
             }
         });
@@ -829,7 +890,8 @@ public final class BotInstance implements Bot, ObservationHost {
     }
 
     /**
-     * 在调度线程上立即注册；{@code subscription()} 与 {@code onStart} 抛出的异常结束 bot，调用方收到 {@link BotFailureException}
+     * 在调度线程上立即注册；{@code subscription()} 与 {@code onStart} 抛出异常时调用方收到 {@link ObserverFailureException}，
+     * 其它异常结束 bot，调用方收到 {@link BotFailureException}
      */
     private ObserverEntry registerNow(Observer observer) {
         if (ended()) {
@@ -837,9 +899,11 @@ public final class BotInstance implements Bot, ObservationHost {
         }
         try {
             return dispatcher.register(observer);
+        } catch (ObserverFailureException e) {
+            throw e;
         } catch (Throwable t) {
             fail(t);
-            throw new BotFailureException(t instanceof ObserverFailure e ? e.getCause() : t);
+            throw new BotFailureException(t);
         }
     }
 

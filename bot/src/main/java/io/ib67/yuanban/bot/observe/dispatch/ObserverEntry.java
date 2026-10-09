@@ -25,6 +25,10 @@ public final class ObserverEntry {
     int startDepth;
     final CompletableFuture<CloseReason> closed = new CompletableFuture<>();
     /**
+     * 以 FAILED 关闭时回调抛出的异常；在完成 {@link #closed} 之前写入
+     */
+    private @Nullable Throwable failure;
+    /**
      * {@code observeDuring} 绑定的动作；它的 ActionCompleted 投递之后 observer 以 ACTION_COMPLETED 关闭
      */
     @Nullable Action boundAction;
@@ -56,5 +60,20 @@ public final class ObserverEntry {
 
     public @Nullable CloseReason closeReason() {
         return closed.isDone() ? closed.join() : null;
+    }
+
+    /**
+     * 以 FAILED 关闭时回调抛出的异常；没有关闭或者因其它原因关闭时为 null
+     */
+    public @Nullable Throwable failure() {
+        return closed.isDone() ? failure : null;
+    }
+
+    /**
+     * 回调抛出异常：记下异常，以 FAILED 关闭
+     */
+    void fail(Throwable failure) {
+        this.failure = failure;
+        closed.complete(CloseReason.FAILED);
     }
 }

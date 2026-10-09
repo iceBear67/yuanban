@@ -1,0 +1,13 @@
+{
+  "name": "lava",
+  "description": "目标旁边有熔岩：列为危险",
+  "input": {"target": {"x": 10.5, "y": 64, "z": 0.5}},
+  "world": {
+    "ground": {"y": 63, "name": "minecraft:stone"},
+    "blocks": [{"x": 11, "y": 63, "z": 0, "name": "minecraft:lava"}]
+  },
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"safe": false}
+  }
+}

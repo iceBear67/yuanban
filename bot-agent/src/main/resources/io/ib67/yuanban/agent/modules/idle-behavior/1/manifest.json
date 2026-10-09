@@ -1,0 +1,13 @@
+{
+  "entry": "main",
+  "description": "background：每 intervalMs（默认 5000）查找 16 格内的玩家，申请 locomotion.lookAt 的短期 lease，得到授权后看向这名玩家。只在调度器授予的空闲窗口中改变朝向。rounds 给出时执行这么多轮后结束。",
+  "inputSchema": {
+    "type": ["object", "null"],
+    "properties": {"intervalMs": {"type": "integer", "minimum": 200}, "rounds": {"type": "integer", "minimum": 1}}
+  },
+  "roles": ["background"],
+  "messagesIn": ["stop", "lease"],
+  "messagesOut": ["action_request", "observation"],
+  "capabilities": ["observe.*", "locomotion.lookAt"],
+  "fallback": "continue"
+}

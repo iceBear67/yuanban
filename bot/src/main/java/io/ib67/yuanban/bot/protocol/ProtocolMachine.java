@@ -253,14 +253,17 @@ public final class ProtocolMachine {
     }
 
     /**
-     * 新连接建立：发送 Handshake 与 Login Start
+     * 新连接建立：发送 Handshake 与 Login Start。这时连接状态已经是 LOGIN（初始状态，或者 Transfer 设置的）
      *
      * @param transfer 是否为 Transfer 之后的连接（握手意图为 TRANSFER）
+     * @throws IllegalStateException 连接状态不是 LOGIN
      */
     public void startLogin(String serverAddress, int serverPort, boolean transfer) {
         state.checkThread();
+        if (bot.status() != BotStatus.LOGIN) {
+            throw new IllegalStateException("a new connection starts in " + bot.status() + ", expected LOGIN");
+        }
         nextJoinCause = transfer ? WorldEntryCause.TRANSFER : WorldEntryCause.JOIN;
-        bot.status(BotStatus.LOGIN);
         outbox.send(new ClientIntentionPacket(MinecraftCodec.CODEC.getProtocolVersion(), serverAddress, serverPort,
                 transfer ? HandshakeIntent.TRANSFER : HandshakeIntent.LOGIN));
         outbox.send(new ServerboundHelloPacket(bot.username(), offlineUuid(bot.username())));

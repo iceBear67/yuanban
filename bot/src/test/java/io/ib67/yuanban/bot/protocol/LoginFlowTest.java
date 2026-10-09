@@ -1,11 +1,13 @@
 package io.ib67.yuanban.bot.protocol;
 
 import io.ib67.yuanban.bot.BotDisconnectedException;
+import io.ib67.yuanban.bot.BotFailureException;
 import io.ib67.yuanban.bot.BotOptions;
 import io.ib67.yuanban.bot.BotRuntime;
 import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
+import io.ib67.yuanban.bot.transport.Transport;
 import io.netty.buffer.Unpooled;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
@@ -21,6 +23,7 @@ import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.Clie
 import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundFinishConfigurationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.configuration.serverbound.ServerboundSelectKnownPacks;
 import org.geysermc.mcprotocollib.protocol.packet.handshake.serverbound.ClientIntentionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
@@ -104,6 +107,50 @@ class LoginFlowTest {
                     MINECRAFT_CORE)));
             var answer = peer.awaitSent(mark, ServerboundSelectKnownPacks.class, TestServer.TIMEOUT);
             assertEquals(List.of(MINECRAFT_CORE), answer.getKnownPacks());
+        }
+    }
+
+    @Test
+    void packetsBeforeTheHandshakeEndTheBot() {
+        var peer = new TestPeer();
+        try (var runtime = BotRuntime.create()) {
+            // 不按顺序交出数据包的进程内连接：打开连接时就交出 Login Finished，这时 bot 还没有发出握手
+            Transport early = (username, inbound) -> {
+                var connection = peer.open(username, inbound);
+                peer.push(new ClientboundLoginFinishedPacket(TestServer.profile("eager"), new UUID(0, 0)));
+                return connection;
+            };
+            var bot = runtime.connect(BotOptions.builder().username("eager").transport(early).build());
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
+            var failure = assertInstanceOf(IllegalStateException.class, bot.failure());
+            assertEquals("received ClientboundLoginFinishedPacket before the handshake was sent on this connection",
+                    failure.getMessage());
+            assertEquals(BotStatus.DISCONNECTED, bot.status());
+            assertTrue(peer.sent().isEmpty());
+        }
+        // 排队中的握手在 bot 结束之后不再执行，这条连接被关闭
+        assertTrue(peer.closedByBot());
+    }
+
+    @Test
+    void packetsOfAnotherStageEndTheBot() {
+        // 配置阶段收到游戏阶段的数据包
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = runtime.connect(BotOptions.builder().username("early").transport(peer).build());
+            peer.awaitSent(0, ServerboundHelloPacket.class, TestServer.TIMEOUT);
+            peer.push(new ClientboundLoginFinishedPacket(TestServer.profile("early"), new UUID(0, 0)));
+            peer.push(new ClientboundSystemChatPacket(Component.text("too early"), false));
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
+            assertEquals("received ClientboundSystemChatPacket in CONFIGURATION", bot.failure().getMessage());
+        }
+        // 游戏阶段收到登录阶段的数据包：状态不会退回配置阶段
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "late", new Pos(0.5, 0, 0.5));
+            peer.push(new ClientboundLoginFinishedPacket(TestServer.profile("late"), new UUID(0, 0)));
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TestServer.TIMEOUT));
+            assertEquals("received ClientboundLoginFinishedPacket in PLAY", bot.failure().getMessage());
         }
     }
 

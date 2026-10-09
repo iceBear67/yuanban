@@ -132,7 +132,8 @@ io.ib67.yuanban.bot
 ├── InventoryActions                    物品栏操作（8.6）
 ├── MoveOptions, MovementMode           移动动作的参数
 ├── 异常                                ActionCancelledException（含各取消原因的常量）、BotFailureException、
-│                                       BotDisconnectedException、BotTimeoutException、ChunkNotLoadedException
+│                                       BotDisconnectedException、BotTimeoutException、ChunkNotLoadedException、
+│                                       ObserverFailureException
 ├── view/        BotView、StateReader、各类快照 record、ActiveEffect、EntityMeta、EntityMetaIndex（7.4）
 ├── observe/     Observation（sealed）及其子类型、Observer、Subscription、ObserverContext、
 │                ObserverHandle、CloseReason、WorldBoundObserver、WorldInfo、WorldEntryCause、
@@ -141,7 +142,7 @@ io.ib67.yuanban.bot
 │                Observers（内置 observer 的工厂方法）、各内置 observer、MovementCriteria 及各记录 record
 ├── observe/dispatch/
 │                ObservationDispatcher、SubscriptionIndex、ObserverEntry、ObserverContextImpl、
-│                ObservationHost、RegistrationCheck、ObserverFailure
+│                ObservationHost、RegistrationCheck
 ├── transport/   Transport、ClientConnection、InboundSink、TransportResolver、TcpTransport、TcpConnection；
 │                包内可见的 BotClientSession、LastReadHandler、NettyGroup（4.2）
 ├── scheduler/   Scheduler、BotInstance（Bot 的实现）、BotState、BotTicker、ActionImpl、StateReaderImpl、
@@ -194,7 +195,7 @@ io.ib67.yuanban.bot
    连接交出数据包的线程（TCP 连接为 Netty 事件循环）与提交请求的线程在放入任务后唤醒调度线程（`LockSupport.unpark`）。
 2. **按 bot 的创建顺序处理每个 bot**：
    1. 处理排队中的 observer 注册与关闭（见 11.4）。
-   2. 取出入站队列中的全部数据包，按到达顺序交给 `ProtocolMachine` 与世界模型。Bundle 内的数据包一次性处理（见 5.4）。每个数据包（或整个 bundle）处理完后，投递它产生的观察记录（见 11.2）。
+   2. 取出入站队列中的全部数据包，按到达顺序交给 `ProtocolMachine` 与世界模型。Bundle 内的数据包一次性处理（见 5.4）。每个数据包（或整个 bundle）处理完后，投递它产生的观察记录（见 11.2）。属于当前连接的数据包先经过两项检查（5.1 的状态机），不满足时按 12 结束 bot：这条连接的握手已经发出（打开连接之后、第 3 步执行握手之前收到的数据包不接受）；数据包属于当前连接状态对应的协议阶段。
    3. 完成上一轮在调度线程上调用、已经发生过的 `joined()`、`loaded()`（11.9），执行排队中的请求（动作入队、取消、查询任务、暂停请求），检查 TCP 的读取超时（4.2），然后在 bot 已经加载时执行排队中的一次性请求（见 8.2）。
    4. tick 到期时执行一次 tick（见 10），tick 产生的观察记录在对应步骤完成后投递。
    5. 把本轮产生的待发送数据包一次交给连接（TCP 连接在事件循环上的一个任务中依次写入，最后一次写出到套接字；wiki FAQ 建议同一 tick 内的数据包一起发送），然后投递 `PacketSent` 观察记录。
@@ -332,6 +333,22 @@ public interface InboundSink {
 `ProtocolMachine` 在调度线程上运行，全部连接共用。
 
 #### 5.1 登录与配置
+
+**连接状态机**：连接状态（`BotStatus`）只按下表改变，其它转移抛出 `IllegalStateException`，按 12 结束 bot（`BotInstance.transition`）。初始状态为 `LOGIN`。
+
+| 从 | 到 | 原因 |
+|---|---|---|
+| `LOGIN` | `CONFIGURATION` | Login Finished |
+| `CONFIGURATION` | `PLAY` | Finish Configuration |
+| `PLAY` | `CONFIGURATION` | Start Configuration |
+| `CONFIGURATION`、`PLAY` | `LOGIN` | Transfer（离开世界，打开新的连接） |
+| `DISCONNECTED` 以外的状态 | `DISCONNECTED` | 连接结束、bot 因异常结束（12） |
+
+- 打开连接分两步：先在调用 `runtime.connect` 的线程上（Transfer 时在一个虚拟线程上）调用 `Transport.open`，把 `InboundSink` 交给连接；之后在调度线程上执行握手（`ProtocolMachine.startLogin` 发送 Handshake 与 Login Start）。握手要求此刻的状态为 `LOGIN`（初始状态，或者 Transfer 设置的），它本身不改变状态。
+- 入站数据包在到达时检查（3.2 第 2 步）：
+  - 这条连接的握手还没有发出时收到数据包，bot 结束。服务端在收到 Login Start 之前不发送数据，TCP 连接不会出现这种情况；直接把数据包对象交给 `InboundSink` 的进程内连接如果在 bot 发出 Login Start 之前就交来数据包，就会出现。
+  - 数据包必须在当前状态对应的协议阶段（`LOGIN` → `ProtocolState.LOGIN`，`CONFIGURATION` → `CONFIGURATION`，`PLAY` → `GAME`）中注册为服务端发往客户端的数据包（`PacketDirection.clientboundIn`，按 `MinecraftCodec.CODEC` 中各阶段的注册判断），否则 bot 结束。TCP 连接由 MCProtocolLib 按当前阶段解码，总是满足；进程内连接交来的数据包没有经过这样的解码，属于其它阶段的数据包在这里被拒绝。改变阶段的数据包不在 bundle 中，按到达顺序应用，所以检查时的状态就是 TCP 连接解码这个数据包时的阶段。
+  - 原版客户端遇到这两种情况时数据包无法解码，断开连接。
 
 | 阶段 | 收到 | 发送 | 依据 |
 |---|---|---|---|
@@ -667,6 +684,7 @@ Minestom 的实体类型数据（`net.minestom:data` 的 `entity_type.json`）�
 - **光标物品**由每个窗口各自记录（原版每个 `AbstractContainerMenu` 各有一个 `carried`）：Set Container Content 的光标物品写入它指向的窗口（窗口 0 的写入窗口 0，即使打开着其它窗口），Set Cursor Item 写入当前窗口（打开的窗口，没有打开窗口时为窗口 0）；新打开的窗口光标为空；关闭窗口之后当前窗口回到窗口 0，光标为窗口 0 的光标。`StateReader.cursor()` 为当前窗口的光标，它改变时（包括打开与关闭窗口使当前窗口改变）产生 `CursorChanged`。
 - `ClientboundSetPlayerInventoryPacket`（Set Player Inventory Slot）：wiki 写明它使用玩家物品栏下标、顺序与窗口槽位不同，下标对应关系按原版客户端行为编码：0 到 8 为快捷栏，9 到 35 为主物品栏，36 到 39 依次为脚、腿、胸、头（窗口 0 的槽位 8 到 5），40 为副手（窗口 0 的槽位 45），41、42 为身体护甲与鞍（原版 `Inventory.EQUIPMENT_SLOT_MAPPING`）。身体护甲与鞍在窗口 0 中没有对应的槽位，保存在 `InventoryModel` 中（MCProtocolLib `EquipmentSlot` 的 `BODY` 与 `SADDLE`），由 `StateReader.equipment` 读取（空时为 null），改变时产生 `EntityEquipmentChanged`（实体编号为本地玩家的）。大于 42 的下标被忽略，下标为负数时 bot 因异常结束（原版 `Inventory.setItem`：负数在写入物品列表时越界，客户端断开连接）。
 - wiki Set Container Slot 规定：服务端对打开窗口中玩家物品栏部分的修改不会再针对窗口 0 重发。原版客户端的容器与窗口 0 共用同一个玩家物品栏，所以 `InventoryModel` 把一边的主物品栏与快捷栏修改同时写入另一边，两边各产生一条 `SlotChanged`。
+- 打开窗口（Open Screen、Open Horse Screen）时，新窗口的主物品栏与快捷栏取窗口 0 的物品（原版客户端的容器菜单直接使用玩家的 `Inventory`，打开时就有这些物品）。窗口刚刚建立，物品没有改变，所以不产生 `SlotChanged`；之后服务端发来的 Set Container Content 中这一部分与已有的物品相同时同样不产生。服务端打开窗口时不一定发送这一部分：Minestom 的 `AbstractInventory.update` 只发送容器自己的槽位。
 
 **点击**：
 
@@ -738,7 +756,7 @@ public final class ActionCancelledException extends RuntimeException {
 | 寻路找不到到达目标的路径（8.4，`NO_PATH`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（8.4，`BLOCKED`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（8.4、8.5，`NO_ENTITY`） | 以 `ActionCancelledException` 完成 | 返回 false |
-| 移动范围涉及未加载的区块（9.1，`CHUNK_NOT_LOADED`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| 移动范围涉及未加载的区块（9.1），或者手部交互动作读取的方块所在区块未加载（8.5）（`CHUNK_NOT_LOADED`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 世界重建或玩家死亡，队列被清空（8.2，`WORLD_REBUILT`、`PLAYER_DIED`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 连接结束（服务端断开、`Bot.disconnect()`、`BotRuntime.close()`）；连接结束时 observer 的 `onClose` 抛出异常的属于下面的「bot 因异常结束」（12） | 以 `BotDisconnectedException` 完成，异常信息为断开原因 | 抛出该异常 |
 | 写出即执行完毕的动作（一次性请求、`attack`、`interact`、`useItem` 的结束），数据包交给连接之后、写出之前，Transfer 关闭的旧连接断开 | 以 `BotDisconnectedException` 完成，异常信息说明连接在写出之前关闭；bot 继续在新连接上登录 | 抛出该异常 |
@@ -855,6 +873,7 @@ public final class ActionCancelledException extends RuntimeException {
   - 能力中有瞬间建造时（原版判断的是能力，与游戏模式无关）发送「Started digging」（带序号）与 Swing Arm，挖掘延迟设为 5，收到确认即执行完毕，不发送「Finished digging」（wiki Player Action）；
   - 本 tick 的进度已经达到 1 时发送「Started digging」与 Swing Arm，挖掘延迟不变，收到确认即执行完毕；
   - 其余情况发送「Started digging」与 Swing Arm，然后在同一 tick 执行一次「继续」。
+  - 本 tick 的进度在发送「Started digging」之前计算（原版 `startDestroyBlock` 在 `startPrediction` 中先判断进度、再发出数据包）。
 - **继续**（开始的 tick 与之后的每个 tick）：
   - 主手拿着穿刺武器时什么都不做，不累加、不挥手（原版 `continueAttack` 不调用 `continueDestroyBlock`）；
   - 目标方块变成空气时不再发送数据包，直接执行完毕；
@@ -866,6 +885,7 @@ public final class ActionCancelledException extends RuntimeException {
   - 否则按 `DigSpeed` 累加进度（与原版客户端相同，以 float 累加），达到 1 时先发送「Finished digging」（带序号），挖掘延迟设为 5，再发送 Swing Arm，收到确认即执行完毕；未达到时只发送 Swing Arm。
 - **示例**：空手挖泥土、延迟为 0 时每 tick 进度为 1/15（float 0.06666667，累加第 15 次正好等于 1.0）。第 1 tick 发送「Started digging」、Swing Arm，累加第 1 次，再发送 Swing Arm；第 2 至 14 tick 每 tick 累加并发送 Swing Arm；第 15 tick 第 15 次累加达到 1，先发送「Finished digging」，再发送 Swing Arm。紧接着的下一次挖掘在开始的 tick 发送「Started digging」，之后 5 次「继续」只减少延迟，第 6 次起才累加进度。
 - **取消**：发送「Cancelled digging」，面为 `DOWN`（-Y，wiki Player Action），然后以 `ActionCancelledException` 结束。
+- **区块未加载**：目标所在区块，或者计算进度时读取的眼睛所在区块未加载时，以 `CHUNK_NOT_LOADED` 取消（见下文「其它手部动作」中的区块未加载）。开始的 tick 中这些读取都在发送数据包之前，什么都不发送；挖掘中按「取消」发送「Cancelled digging」，与原版准星离开方块时 `stopDestroyBlock` 发送的中止相同。
 - **执行完毕的含义**：执行完毕只表示服务端处理了挖掘请求。服务端拒绝破坏时同样发送确认：Minestom 的 `PlayerActionListener` 在旁观模式、冒险模式下手持物品不能破坏该方块、方块不可破坏、`PlayerStartDiggingEvent` 或 `PlayerBlockBreakEvent` 被取消时都只发送确认。所以 `await` 返回 true 不能说明方块被破坏；执行完毕之后查询到的也只是最终状态，被破坏后又被服务端恢复的方块无法通过查询发现。
 - **方块更新先于确认到达**：Minestom 的 `InstanceContainer.breakBlock` 设置方块时立即向区块的观察者发送 Block Update，`PlayerActionListener` 在这之后才发送确认；原版服务端在世界 tick 中发送方块变化，在之后的连接 tick 中发送确认（原版服务端行为）。所以这次破坏引起的 `BlockChanged` 都在动作结束之前投递。
 - 判断方块是否被破坏使用 `Bot.breakBlock`（11.8）；掉落了什么由用户通过 observer 判断。
@@ -883,11 +903,13 @@ public final class ActionCancelledException extends RuntimeException {
 
 **其它手部动作**：
 
-- **先看向目标**：`useItemOn`、`placeBlock`、`attack`、`interact` 的数据包不带朝向，服务端按它最后收到的玩家朝向处理（放置有方向的方块、攻击的击退方向）。手部步骤在移动步骤之前（10，原版 `handleKeybinds` 在 `tickEntities` 之前），同一 tick 中手部数据包先于移动包发出。所以这四个动作开始的 tick 只确定要看向的朝向（开始时计算一次），由这个 tick 的移动步骤设置并发出；之后每个 tick 的手部步骤检查本地玩家的朝向，等于这个朝向时（此时它已经由之前的移动包发出）才发送数据包，通常是开始之后的下一个 tick。挖掘不等待：服务端处理 Player Action 时不使用玩家朝向，挖掘在开始的 tick 就发送「Started digging」（见上面的 `attemptBreakBlock`）。
+- **先看向目标**：`useItemOn`、`placeBlock`、`attack`、`interact` 的数据包不带朝向，服务端按它最后收到的玩家朝向处理（放置有方向的方块、攻击的击退方向）。手部步骤在移动步骤之前（10，原版 `handleKeybinds` 在 `tickEntities` 之前），同一 tick 中手部数据包先于移动包发出。所以这四个动作开始的 tick 只确定要看向的朝向（开始时计算一次），由这个 tick 的移动步骤设置并发出；之后每个 tick 的手部步骤检查本地玩家的朝向，等于这个朝向时（此时它已经由之前的移动包发出）才发送数据包，通常是开始之后的下一个 tick。本地玩家的位置为 Minestom 的 `Pos`，它把偏航角规范到 (-180, 180]、俯仰角限制到 [-90, 90]，所以比较之前对要看向的朝向做同样的规范（`HandController.aimed`）：目标正好在正北时 `Rotation.lookAt` 的偏航角为 -180，位置中为 180。挖掘不等待：服务端处理 Player Action 时不使用玩家朝向，挖掘在开始的 tick 就发送「Started digging」（见上面的 `attemptBreakBlock`）。
+- **区块未加载**：手部动作读取的方块所在区块未加载时，读取抛出 `ChunkNotLoadedException`。`HandController` 在调用当前动作的开始与每 tick 步骤时捕获这个异常，以 `CHUNK_NOT_LOADED` 取消这个动作，取消时照常执行它的清理（与移动步骤处理 `Kinematics` 抛出的同一个异常的方式相同，9.1）。读取方块的是 `attemptBreakBlock`（目标与眼睛所在的方块）与 `useItemOn`、`placeBlock`（计算 Inside block 时读取目标方块）。
 - **`placeBlock(Point against, Direction face, Hand hand)`**：等同于 `useItemOn`，光标取该面的中心（面的法向量取自 `Directions.normal`，原版 `Direction.getUnitVec3`）。
 - **`useItemOn(Point pos, Direction face, Hand hand, Point cursor)`**：
   - 先看向光标位置（见上）；
   - 目标方块在世界边框之外时不发送任何数据包（也不挥手），直接执行完毕（原版 `MultiPlayerGameMode.useItemOn` 返回 FAIL）；
+  - 目标所在区块未加载时不发送任何数据包，以 `CHUNK_NOT_LOADED` 取消（见上面的区块未加载）；
   - 发送 Use Item On：`ServerboundUseItemOnPacket(方块位置, 面, 手, 光标 x, 光标 y, 光标 z, Inside block, World Border Hit, 序号)`，手是第三个参数，World Border Hit 为 false（wiki Use Item On）。Inside block 按原版准星选取方块时的 `VoxelShape.clip` 计算：射线从眼睛出发，沿当前朝向的视线（原版 `Entity.calculateViewVector`），长度为 `block_interaction_range` 与 `entity_interaction_range` 属性中较大的一个（原版 `LocalPlayer.pick`），射线上前进全长千分之一的点在目标方块的轮廓形状之内时为 true。wiki 写的是眼睛在方块的碰撞箱内，原版选取方块使用轮廓形状（`ClipContext.Block.OUTLINE`），本库按原版；
   - 然后发送 Swing Arm（`ServerboundSwingPacket(手)`；本库不预测交互结果，所以总是发送）；
   - 收到确认即执行完毕。
@@ -1227,7 +1249,7 @@ Subscription.of(EntityMoved.class, EntitySpawned.class)    // 模型层与 bot �
 - `received` 与 `sent` 按 `Class.isInstance` 匹配。传入 `MinecraftPacket.class` 表示接收这一方向的全部数据包。
 - MCProtocolLib 的数据包类没有区分方向的类型，所以构造时用 `PacketDirection` 检查：`received` 中的类必须是服务端发往客户端的数据包，`sent` 中的类必须是客户端发往服务端的数据包，否则抛出 `IllegalArgumentException`。`PacketDirection` 遍历全部协议阶段，按 `MinecraftCodec.CODEC.getCodec(阶段)` 中这个类的注册判断方向（没有在任何阶段注册的类不属于任何方向），结果按类缓存；`MinecraftPacket.class` 本身两个方向都接受。
 - `Subscription.of(...)` 中不能直接写 `PacketReceived.class` 或 `PacketSent.class`，必须通过 `received`、`sent` 指定数据包类，否则构造时抛出异常。
-- 11.7 中按传入的类型订阅的 `first`、`observations`、`listener` 在调用工厂方法时就构造订阅，类型为 `PacketReceived` 或 `PacketSent` 时在调用线程上抛出 `IllegalArgumentException`，bot 不受影响（订阅在注册时读取，注册时 `subscription()` 抛出的异常会结束 bot，见 11.4）。数据包使用 `firstPacket`、`packets`、`sentPackets`、`packetListener`，它们同样在调用工厂方法时检查数据包类的方向，方向不对时在调用线程上抛出 `IllegalArgumentException`。
+- 11.7 中按传入的类型订阅的 `first`、`observations`、`listener` 在调用工厂方法时就构造订阅，类型为 `PacketReceived` 或 `PacketSent` 时在调用线程上抛出 `IllegalArgumentException`，bot 不受影响（订阅在注册时读取，注册时 `subscription()` 抛出异常会让这次注册失败，见 11.4）。数据包使用 `firstPacket`、`packets`、`sentPackets`、`packetListener`，它们同样在调用工厂方法时检查数据包类的方向，方向不对时在调用线程上抛出 `IllegalArgumentException`。
 
 #### 11.4 生命周期
 
@@ -1236,8 +1258,9 @@ public interface ObserverHandle<O extends Observer> extends AutoCloseable {
     O observer();
     boolean isOpen();
     @Nullable CloseReason closeReason();
+    @Nullable Throwable failure();                // 以 FAILED 关闭时回调抛出的异常，其余为 null
     <R> R read(Function<? super O, R> reader);   // 观察期间读取 observer 的状态：reader 在调度线程上执行
-    CloseReason awaitClose(Duration timeout);     // 等到关闭；超时抛出 BotTimeoutException
+    CloseReason awaitClose(Duration timeout);     // 等到关闭；以 FAILED 关闭时抛出 ObserverFailureException，超时抛出 BotTimeoutException
     void close();                                 // 关闭观察；对已关闭的 observer 不做任何事
 }
 
@@ -1256,7 +1279,7 @@ public enum CloseReason { BY_HANDLE, BY_OBSERVER, ACTION_COMPLETED, DISCONNECTED
 
   所以「先注册 observer，再提交动作」可以保证动作引起的全部变化都被观察到。
 - 在调度线程上（例如另一个 observer 的回调中）调用时立即注册。在 observer 的回调（`onStart`、`onObservation`、`onClose`）中调用时，从这个回调返回之后产生的观察记录开始投递，同一个回调中注册之后产生的记录（例如在回调中取消动作产生的 `ActionCompleted`）不投递给它；在调度线程上的其它代码中（例如 `Action.future()` 不带 async 的后续回调在 observer 的回调以外执行时）调用时，从注册时开始投递。
-- 注册完成时调用 `onStart`。注册时调用的 `subscription()`（`WorldBoundObserver` 中为 `worldSubscription()`）与 `onStart` 抛出的异常按 12 结束 bot，`observe` 抛出 `BotFailureException`；在其它线程调用时同样如此，不会一直等待。
+- 注册完成时调用 `onStart`。注册时调用的 `subscription()`（`WorldBoundObserver` 中为 `worldSubscription()`）或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭（下文的关闭表），`observe` 抛出 `ObserverFailureException`，原因为回调抛出的异常，bot 不受影响；在其它线程调用时同样如此，不会一直等待。这时 observer 算作注册过。
 - bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`（见 12）。这两种情况下 observer 不算注册过（包括在其它线程调用、注册请求交给调度线程之后 bot 才结束的情况），可以再交给其它 bot；`observeDuring` 相同。
 - 实现了内部接口 `RegistrationCheck` 的内置 observer（11.7 的 `distanceWithIn`、`distanceOutOf`）在调用 `observe` 的线程上先做检查；检查失败时 `observe` 抛出异常，bot 不受影响，observer 也不算注册过。
 - 「只能注册一次」按对象身份判断（以弱引用记录已经注册过的 observer）。
@@ -1271,11 +1294,11 @@ public enum CloseReason { BY_HANDLE, BY_OBSERVER, ACTION_COMPLETED, DISCONNECTED
 
 | 原因 | 触发 | 时机 |
 |---|---|---|
-| `BY_HANDLE` | 用户调用 `handle.close()` | 在其它线程调用时，等到调度线程处理完才返回，返回时 `onClose` 已经执行；在调度线程上调用时立即关闭。`onClose` 抛出的异常按 12 结束 bot，`close()` 抛出 `BotFailureException`，在其它线程调用时同样如此 |
+| `BY_HANDLE` | 用户调用 `handle.close()` | 在其它线程调用时，等到调度线程处理完才返回，返回时 `onClose` 已经执行；在调度线程上调用时立即关闭。这次关闭中 `onClose` 抛出异常时，observer 以 `FAILED` 关闭，`close()` 抛出 `ObserverFailureException`，在其它线程调用时同样如此 |
 | `BY_OBSERVER` | observer 在回调中调用 `context.close()` | 当前回调返回之后 |
 | `ACTION_COMPLETED` | 通过 `Bot.observeDuring` 注册的 observer，它对应的动作结束 | 这个动作的 `ActionCompleted` 投递之后（11.8） |
 | `DISCONNECTED` | bot 的连接结束：服务端断开、`Bot.disconnect()`、`BotRuntime.close()` | 连接结束时，先丢弃待投递的观察记录，再关闭该 bot 的全部 observer，然后结束未结束的动作 |
-| `FAILED` | observer 的回调抛出异常 | 立即关闭，不调用它的 `onClose`。按 12 节，这个异常同时结束整个 bot，其余 observer 以 `DISCONNECTED` 关闭 |
+| `FAILED` | observer 的回调（`subscription()`、`onStart`、`onObservation`、`onClose`）抛出异常 | 立即关闭，不调用它的 `onClose`（`onClose` 本身抛出异常的除外）。只有这个 observer 关闭，bot 与其余 observer 不受影响，同一条观察记录照常交给其余 observer。异常记在 `handle.failure()` 中，交给持有这个 observer 的一方：`observe`、`observeDuring`（注册时）、`awaitClose`、`close()`（这次关闭中 `onClose` 抛出异常时）、`ObservedAction.await`、`Bot.await` 抛出 `ObserverFailureException`，原因为回调抛出的异常。回调期间这个 observer 已经被关闭（在自己的回调中调用 `handle.close()`，或者连接在回调中结束）时，异常无法再随关闭交给持有者，按 12 结束 bot |
 
 **读取状态**
 
@@ -1384,7 +1407,7 @@ public sealed interface WorldClosed {
 |---|---|---|---|
 | `movementOf(Predicate<EntitySnapshot> who, MovementCriteria closeWhen)` | 是 | 当前世界中满足条件的实体数达到 `closeWhen` 要求的数量 | `met()`：是否因满足条件而关闭；`metBy()`：当前世界中满足条件的实体的 `MovementTrack`；`tracks()` 同上 |
 | `blockAt(Point pos, Predicate<Block> closeWhen)` | 是 | 该位置的方块满足条件；进入世界时先检查一次当前方块 | `met()`；`current()`、`history()` 同上 |
-| `blockBroken(Point pos)` | 否 | 该位置的方块变成方块编号（`Block.id()`）与 `original()` 不同的方块；进入新世界时也关闭 | `broken()`：是否因方块变化而关闭；`original()`：注册时该位置的方块（不在任何世界中注册时见下文）；`changedTo()`：第一次变成的不同方块，没有时为 null |
+| `blockBroken(Point pos)` | 否 | 该位置的方块变成方块编号（`Block.id()`）与 `original()` 不同的方块；进入新世界时也关闭 | `broken()`：是否因方块变化而关闭；`original()`：注册时该位置的方块（所在区块未加载或者不在任何世界中注册时见下文）；`changedTo()`：第一次变成的不同方块，没有时为 null |
 | `first(Class<O> type, Predicate<O> filter)` | 否 | 出现匹配的观察记录 | `matched()`：`Optional<O>` |
 | `firstPacket(Class<P> type, Predicate<P> filter)` | 否 | 收到匹配的数据包 | `matched()`：`Optional<P>` |
 | `firstChat(Predicate<ChatLine> filter)` | 否 | 收到匹配的聊天消息 | `matched()`：`Optional<ChatLine>` |
@@ -1396,7 +1419,7 @@ public sealed interface WorldClosed {
 - 这些 observer 在得出结论之前被句柄关闭、因连接断开而关闭或以 `ACTION_COMPLETED` 关闭（11.8）时，`met()`、`broken()` 为 false，`matched()` 为空，关闭原因见 `handle.closeReason()`。
 - `blockBroken`：
   - 订阅 `BlockChanged`、`ChunkLoaded` 与 `WorldEntered`。
-  - 在世界中注册时，`original()` 在 `onStart` 中读取；该位置所在区块未加载时抛出 `ChunkNotLoadedException`，按 12 结束 bot。
+  - 在世界中注册时，`original()` 在 `onStart` 中读取；该位置所在区块未加载时，`original()` 为之后该区块第一次加载（`ChunkLoaded`）时的方块，在这之前为 null，这期间该位置也不会产生 `BlockChanged`。所以在未加载区块上调用 `Bot.breakBlock` 时，动作以 `CHUNK_NOT_LOADED` 取消（8.5），observer 随之以 `ACTION_COMPLETED` 关闭，`broken()` 为 false，`original()` 为 null。
   - 只改变方块状态（例如朝向、含水）不算变成不同的方块。
   - 坐标只在一个世界中有意义，所以进入新世界时关闭自己，`broken()` 为 false。
   - 不在任何世界中时注册（5.1：进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）：坐标属于下一个世界，与这期间提交的动作一样等待进入世界（8.2）。收到的第一条 `WorldEntered` 不关闭；`original()` 为进入之后该位置所在区块第一次加载（`ChunkLoaded`）时的方块，在这之前为 null，这期间该位置也不会产生 `BlockChanged`（区块加载之前没有 Block Update 可以应用）；之后的 `WorldEntered` 照常关闭。
@@ -1440,7 +1463,8 @@ public interface ObservedAction<O extends Observer> {
     ObserverHandle<O> handle();
 
     /// 等到动作结束并且 observer 关闭，返回 observer，之后任何线程都可以直接读取它的状态。
-    /// 动作被取消时照常返回；连接结束或 bot 因异常结束时抛出与 Action.await 相同的异常；超时抛出 BotTimeoutException
+    /// 动作被取消时照常返回；observer 以 FAILED 关闭时立即抛出 ObserverFailureException，不等动作结束；
+    /// 连接结束或 bot 因异常结束时抛出与 Action.await 相同的异常；超时抛出 BotTimeoutException
     O await(Duration timeout);
 }
 ```
@@ -1448,10 +1472,10 @@ public interface ObservedAction<O extends Observer> {
 - **执行方式**：
   - 在其它线程调用时，注册与提交作为一个任务交给调度线程，在下一轮处理该 bot 的第一步完成（与 11.4 的注册相同）。`observeDuring` 等到任务完成才返回，这一步不执行推进函数。在调度线程上调用时立即执行。
   - 注册与提交在同一个任务中完成，动作开始执行之前 observer 已经在观察，中间没有可以被其它线程插入的间隔。
-  - `submit` 在调度线程上执行，必须返回它执行期间由这个 bot 提交的一个动作（按动作的提交编号判断），否则以 `BY_HANDLE` 关闭 observer 并抛出 `IllegalArgumentException`，bot 不受影响。`subscription()`、`onStart` 与 `submit` 抛出的异常按 12 结束 bot，`observeDuring` 抛出 `BotFailureException`。
+  - `submit` 在调度线程上执行，必须返回它执行期间由这个 bot 提交的一个动作（按动作的提交编号判断），否则以 `BY_HANDLE` 关闭 observer 并抛出 `IllegalArgumentException`，bot 不受影响。`subscription()` 或 `onStart` 抛出异常时按 11.4 只有这个 observer 以 `FAILED` 关闭，`observeDuring` 抛出 `ObserverFailureException`，不调用 `submit`；`submit` 抛出的异常按 12 结束 bot，`observeDuring` 抛出 `BotFailureException`。
 - **关闭时机**：动作结束时产生的 `ActionCompleted` 按 11.2 的顺序投递，投递完成后 observer 以 `ACTION_COMPLETED` 关闭。在此之前到达的数据包产生的观察记录都已经投递给它，包括同一个 bundle 中排在确认之前的数据包。observer 在这之前自己关闭、被句柄关闭或因连接断开而关闭时，按 11.4 的原因关闭。
 - 动作在 `submit` 执行期间就已经结束时（例如在 `submit` 中对它调用 `cancel()`，在调度线程上立即处理）同样如此：observer 在 `submit` 返回之后才绑定到动作上，所以 `submit` 执行期间提交的动作结束时总是产生 `ActionCompleted`（即使没有 observer 订阅它），它在绑定之后投递，observer 随之以 `ACTION_COMPLETED` 关闭。
-- `ObservedAction.await` 在等待期间执行 3.4 的推进函数；超时时不关闭 observer，也不取消动作。
+- `ObservedAction.await` 在等待期间执行 3.4 的推进函数；超时时不关闭 observer，也不取消动作。observer 以 `FAILED` 关闭时立即抛出 `ObserverFailureException`，同样不取消动作，由调用方决定是否取消。
 
 **破坏方块**：
 
@@ -1472,7 +1496,7 @@ ObservedAction<BlockBrokenObserver> breakBlock(Point pos[, Direction face]);
 
 | 方法 | 行为 |
 |---|---|
-| `Bot.await(Predicate<StateReader>, Duration)` | 注册一个 `condition(predicate)` 并等它关闭；超时时关闭它并抛出 `BotTimeoutException`；它因连接结束或 bot 因异常结束而关闭时抛出与 `Action.await` 相同的异常 |
+| `Bot.await(Predicate<StateReader>, Duration)` | 注册一个 `condition(predicate)` 并等它关闭；超时时关闭它并抛出 `BotTimeoutException`；predicate 抛出异常时（注册时的检查或之后的检查）这个 observer 以 `FAILED` 关闭，抛出 `ObserverFailureException`，bot 不受影响；它因连接结束或 bot 因异常结束而关闭时抛出与 `Action.await` 相同的异常 |
 | `Bot.joined()` / `Bot.loaded()` | 返回 `Action`，分别在 Login (play) 处理完成与 Player Loaded 发送（见 10）时执行完毕。「已经发生过」按当前状态判断：`joined()` 为 bot 在世界中（Login (play) 处理完成之后、离开世界之前）；`loaded()` 为当前世界已经加载（自上次 Login (play) 或 Respawn 以来发送过 Player Loaded，与 8.2 中请求开始执行的条件相同）。不在任何世界中时（5.1）调用的两者等待下一个世界的 Login (play) 与 Player Loaded，Respawn 之后、加载之前调用的 `loaded()` 等待这次重生之后的加载。已经发生过时在下一轮调度中执行完毕：在其它线程调用时请求本来就在下一轮处理，在调度线程上调用时推迟到下一轮，所以 `observeDuring(o, Bot::loaded)` 在动作结束之前已经把 observer 绑定到动作上，observer 以 `ACTION_COMPLETED` 关闭 |
 
 `Bot.await`、`ObserverHandle.awaitClose`、`Action.await`、`ObservedAction.await` 都执行 3.4 的推进函数。
@@ -1514,22 +1538,24 @@ assertTrue(damage.observer().damages().isEmpty());
 
 就地失败：出错的位置抛出异常，所属的 bot 结束，异常传到测试代码；同一 `BotRuntime` 中的其它 bot 不受影响。
 
-- **调度线程上的异常**：数据包处理、请求执行、tick、observer 回调中抛出的异常，在该 bot 的处理入口处被捕获，并用来结束这个 bot：
+- **调度线程上的异常**：数据包处理、请求执行、tick 中抛出的异常，在该 bot 的处理入口处被捕获，并用来结束这个 bot：
   - 关闭连接；
-  - 状态进入 `DISCONNECTED`，记录异常（`Bot.failure()`；`BotStatus` 依次为 `LOGIN`、`CONFIGURATION`、`PLAY`、`DISCONNECTED`）；
+  - 状态进入 `DISCONNECTED`，记录异常（`Bot.failure()`；`BotStatus` 的转移见 5.1 的连接状态机）；
   - 全部未结束的动作的 `future()` 以 `BotFailureException(cause)` 完成，`Action.await` 抛出这个异常（见 8.1）；
-  - 抛出异常的 observer 以 `FAILED` 关闭，其余 observer 以 `DISCONNECTED` 关闭（见 11.4）；
+  - 仍在观察的 observer 以 `DISCONNECTED` 关闭（见 11.4）；
   - 之后对该 bot 的调用（提交动作、注册 observer、查询、等待）立即抛出 `BotFailureException(cause)`。
 
   调度线程是所有 bot 共用的，异常不能让它退出。
+- **observer 回调中的异常**只关闭这个 observer（`FAILED`），交给持有它的一方（`ObserverFailureException`，11.4），bot 不受影响。例外是回调期间这个 observer 已经被关闭（在自己的回调中调用 `handle.close()`，或者连接在回调中结束）的情况：异常无法再随关闭交给持有者，按上一条结束 bot。
 - **连接上的异常**（解码失败、`InboundSink.accept` 中解码上下文的异常，例如注册表构建失败与 Encryption Request、写出失败、套接字错误）由连接以这个异常关闭，`InboundSink.closed(error)` 以同样的方式结束 bot；对端关闭属于正常关闭，按下文的服务端断开处理。MCProtocolLib 解码时遇到不认识的枚举编号（Entity Event、Display Objective 的位置、Update Objectives 与 Update Teams 的动作等）同样属于解码失败。寻路线程上的异常在移动动作取回结果时抛出，Transfer 打开新连接失败时在下一轮抛出，同样结束 bot。
-- observer 的 `onClose` 在连接结束时抛出异常：其余 observer 照常关闭，异常记录为 bot 的失败原因（`Bot.failure()`）。observer 在动作之前关闭（11.4），所以未结束的动作与之后的调用一样，都得到 `BotFailureException`；断开原因仍然记录在 `Bot.disconnectReason()` 中。
+- observer 的 `onClose` 在连接结束时抛出异常：这个 observer 以 `FAILED` 关闭，异常记在它的句柄上（`handle.failure()`，`awaitClose` 抛出 `ObserverFailureException`），其余 observer 照常关闭；bot 的结束方式不变（`Bot.failure()` 与动作得到的异常不受影响）。
 - **服务端断开**：这属于游戏中可能发生的结果，不算程序错误。
   - Disconnect 的原因记录在 `Bot.disconnectReason()` 与各动作 `future()` 的 `BotDisconnectedException` 中；
   - 未结束的动作的 `future()` 以 `BotDisconnectedException` 完成，`Action.await` 抛出这个异常；observer 以 `DISCONNECTED` 关闭；
   - 之后提交动作或注册 observer 抛出 `BotDisconnectedException`，查询仍可读取断开时的模型。
 - **不提供替代值**：查询未加载区块的方块直接抛出 `ChunkNotLoadedException`；注册表条目取不到值时直接失败。
 - **不支持的输入**：部分过滤的 Player Chat Message（待办 T2，7.7）与带组件条件的 `can_break`（待办 T4，8.5）抛出 `UnsupportedOperationException`，bot 结束。
+- **不符合协议顺序的输入**（5.1 的连接状态机）：握手发出之前收到数据包、收到不属于当前协议阶段的数据包、不允许的状态转移，抛出 `IllegalStateException`，bot 结束。
 
 ### 13. 资源占用
 
@@ -1611,18 +1637,18 @@ README 规定本库只编写单元测试，不编写端到端测试。进程内�
 |---|---|
 | `decode` | 经过 MCProtocolLib 编码与解码的区块数据中，方块实体取区段中的方块：告示牌等类型名称与方块名称不同的方块实体照常保留，没有 NBT 时为空的 `NbtMap`，区段中的方块不同、方块实体类型不同、超出维度高度时忽略；区段解码与 `SectionPool` 共享；把解码得到的区段重新写出与数据包中的字节相同；区段之后有剩余字节时出错，数据比维度高度要求的少时出错；Encryption Request 抛出 `UnsupportedOperationException`；区块按最近一次 Login (play) 或 Respawn 的维度确定区段数；重新配置的第一个 Registry Data 删除之前同步注册表的标签，方块标签保留 |
 | `transport` | TCP 连接的阶段与压缩：Set Compression、紧跟的压缩数据包与 Login Finished 之后的配置阶段数据包在同一次写入中到达时照常解码，Login Acknowledged 与 Finish Configuration 改变出站阶段，超过阈值的数据包压缩写出；`close()` 之前交出的批次照常写出；对端不读取、发送缓冲区已满时 `close()` 丢弃没有交给套接字的数据，连接随即关闭；连接重置时正在写出的批次以异常结束；编码失败时这一批以 `EncoderException` 结束、连接以这个异常关闭，之后交出的批次以 `ClosedChannelException` 结束；连接失败时 `open` 抛出 `UncheckedIOException`；登录阶段的读取超时 |
-| `protocol` | 登录与配置的发送顺序与内容（握手、Login Start、brand、Client Information 与它的语言 `en_us`、Known Packs 子集）；数据包方向的判断（只在一个阶段注册的数据包、配置与游戏阶段都有的数据包、方向不对与没有注册的类被拒绝、`MinecraftPacket.class` 两个方向都接受）；Set Passengers 拒绝形成循环的乘坐、实体乘坐自己时 bot 结束、跳过未知的乘客、乘客离开原来的载具；5.2 的应答（Ping、Cookie、资源包两种方式、区块批次确认、传送的两个应答）；Bundle 的整批交出与 4096 上限；区块批次确认的数值；cookie 的 5 KiB 上限；Transfer 重新登录并保留 cookie、取消移动队列；Transfer 时 Outbox 中的数据包交给旧连接、不发送清理数据包、新连接上的第一个数据包是 Handshake、同一个 bundle 中之后的数据包被忽略、旧连接写出失败的动作以 `BotDisconnectedException` 结束；重新配置的完整流程（离开世界、取消挖掘不发送清理数据包、配置阶段与 Login (play) 之前不 tick、期间提交的请求在下一个世界执行、`RECONFIGURATION`、新的本地玩家与方块交互序号）；Respawn（同一维度保留世界与方块交互序号、换维度重新创建并且序号从 1 开始、Close Container、Data kept 两个掩码、没有 0x02 时上次发送的 Player Input 与疾跑状态重新开始、Set Held Item(0)）；重复的 Login (play)；传送速度的 ROTATE_DELTA 旋转与 DELTA 标志、应答不计入上一次发送记录；Synchronize Vehicle Position 对实体的速度同样按 ROTATE_DELTA 旋转，俯仰角限制到 [-90, 90]；Teleport Entity 不改变实体的速度，本地玩家控制的船不被它移动，下船之后照常应用；实体包围盒的幼年尺寸（僵尸、乘以 scale 的牛、坐下的骆驼，史莱姆的幼年标记被忽略）与玩家、村民的姿势尺寸（潜行乘以 scale，死亡与睡觉为固定尺寸）；载具被移除与 Login (play) 时清除乘坐状态；Update Section Blocks 的负数区段坐标（从协议字节经过 MCProtocolLib 解码）；Chunk Biomes；区块方块实体的 NBT 经 `blockEntity()` 读取，`block()` 不带 NBT；Block Entity Data 只应用到同一类型的方块实体（类型不同、方块没有方块实体、区块没有加载、超出维度高度时忽略）；Entity Event 产生 `EntityStatusReceived`；Damage Event 的伤害类型换成名称、-1 的来源编号换成 null、编号不在注册表中时 bot 结束；Game Event 7、8 的数值限制到 [0, 1]；更新不存在的 Boss Bar 与引用不存在的签名编号时 bot 结束，Login (play) 之后签名缓存重新开始；新玩家的属性基础值；Game Event 3 按游戏模式设置能力（包括可以建造）；未知玩家的 Player Info Update 被忽略；断开之后的动作与查询；Respawn（包括同一维度）之后的第一次 tick 在一个间隔之后；Start Configuration 先发送 Acknowledge Message；Player Chat Message 的全局编号不连续时 bot 结束；Delete Message 去掉还没有告知服务端的已读条目；部分过滤的玩家聊天让 bot 以 `UnsupportedOperationException` 结束（待办 T2），完全过滤的不记录、只计入未确认的消息数；发送者不在玩家列表中的玩家聊天记录 `chat.validation_error`、只计入未确认的消息数；`ChatLine` 的聊天类型、发送者名称与目标名称，聊天类型的编号不在注册表中时 bot 结束；随数据包给出定义的聊天类型记录在 `inlineChatType` 中、`chatType` 为 null；移除实体时乘客停止乘坐、离开自己的载具，之后对被移除的载具的 Synchronize Vehicle Position 应用到本地玩家，同一编号的实体重新生成之后不再应用；Spawn Entity 的编号已有实体时先移除旧实体（乘坐关系解除，先产生旧实体的 `EntityRemoved`，不记下本地玩家乘坐过的载具）；ADD_PLAYER 保留已有条目；移除不存在的 Boss Bar 不产生观察记录；世界冻结时时间与世界边框只在 Step Tick 给出的 tick 推进；世界边框、World Age 与时钟在移动步骤之后推进；时钟属于连接（换维度的 Respawn 之后保留，重新配置之后重新开始），Update Time 按 World Age 的差值与速率推进没有列出的时钟；Player Info Update 改成旁观模式时竖直速度清零；队伍成员互斥与重复创建队伍，移除不在队伍中的成员时 bot 结束；玩家列表新条目的游戏模式为生存模式；重复创建目标时 bot 结束，删除目标时清空指向它的显示位置，Display Objective 指向不存在的目标时清空这个位置；离开世界之后 `joined()`、`loaded()` 等待下一个世界，Respawn 之后 `loaded()` 等待重新加载 |
+| `protocol` | 登录与配置的发送顺序与内容（握手、Login Start、brand、Client Information 与它的语言 `en_us`、Known Packs 子集）；握手发出之前收到数据包时 bot 结束，什么都不发送，连接被关闭；配置阶段收到游戏阶段的数据包、游戏阶段收到登录阶段的数据包时 bot 结束；数据包方向的判断（只在一个阶段注册的数据包、配置与游戏阶段都有的数据包、方向不对与没有注册的类被拒绝、`MinecraftPacket.class` 两个方向都接受）；Set Passengers 拒绝形成循环的乘坐、实体乘坐自己时 bot 结束、跳过未知的乘客、乘客离开原来的载具；5.2 的应答（Ping、Cookie、资源包两种方式、区块批次确认、传送的两个应答）；Bundle 的整批交出与 4096 上限；区块批次确认的数值；cookie 的 5 KiB 上限；Transfer 重新登录并保留 cookie、取消移动队列；Transfer 时 Outbox 中的数据包交给旧连接、不发送清理数据包、新连接上的第一个数据包是 Handshake、同一个 bundle 中之后的数据包被忽略、旧连接写出失败的动作以 `BotDisconnectedException` 结束；重新配置的完整流程（离开世界、取消挖掘不发送清理数据包、配置阶段与 Login (play) 之前不 tick、期间提交的请求在下一个世界执行、`RECONFIGURATION`、新的本地玩家与方块交互序号）；Respawn（同一维度保留世界与方块交互序号、换维度重新创建并且序号从 1 开始、Close Container、Data kept 两个掩码、没有 0x02 时上次发送的 Player Input 与疾跑状态重新开始、Set Held Item(0)）；重复的 Login (play)；传送速度的 ROTATE_DELTA 旋转与 DELTA 标志、应答不计入上一次发送记录；Synchronize Vehicle Position 对实体的速度同样按 ROTATE_DELTA 旋转，俯仰角限制到 [-90, 90]；Teleport Entity 不改变实体的速度，本地玩家控制的船不被它移动，下船之后照常应用；实体包围盒的幼年尺寸（僵尸、乘以 scale 的牛、坐下的骆驼，史莱姆的幼年标记被忽略）与玩家、村民的姿势尺寸（潜行乘以 scale，死亡与睡觉为固定尺寸）；载具被移除与 Login (play) 时清除乘坐状态；Update Section Blocks 的负数区段坐标（从协议字节经过 MCProtocolLib 解码）；Chunk Biomes；区块方块实体的 NBT 经 `blockEntity()` 读取，`block()` 不带 NBT；Block Entity Data 只应用到同一类型的方块实体（类型不同、方块没有方块实体、区块没有加载、超出维度高度时忽略）；Entity Event 产生 `EntityStatusReceived`；Damage Event 的伤害类型换成名称、-1 的来源编号换成 null、编号不在注册表中时 bot 结束；Game Event 7、8 的数值限制到 [0, 1]；更新不存在的 Boss Bar 与引用不存在的签名编号时 bot 结束，Login (play) 之后签名缓存重新开始；新玩家的属性基础值；Game Event 3 按游戏模式设置能力（包括可以建造）；未知玩家的 Player Info Update 被忽略；断开之后的动作与查询；Respawn（包括同一维度）之后的第一次 tick 在一个间隔之后；Start Configuration 先发送 Acknowledge Message；Player Chat Message 的全局编号不连续时 bot 结束；Delete Message 去掉还没有告知服务端的已读条目；部分过滤的玩家聊天让 bot 以 `UnsupportedOperationException` 结束（待办 T2），完全过滤的不记录、只计入未确认的消息数；发送者不在玩家列表中的玩家聊天记录 `chat.validation_error`、只计入未确认的消息数；`ChatLine` 的聊天类型、发送者名称与目标名称，聊天类型的编号不在注册表中时 bot 结束；随数据包给出定义的聊天类型记录在 `inlineChatType` 中、`chatType` 为 null；移除实体时乘客停止乘坐、离开自己的载具，之后对被移除的载具的 Synchronize Vehicle Position 应用到本地玩家，同一编号的实体重新生成之后不再应用；Spawn Entity 的编号已有实体时先移除旧实体（乘坐关系解除，先产生旧实体的 `EntityRemoved`，不记下本地玩家乘坐过的载具）；ADD_PLAYER 保留已有条目；移除不存在的 Boss Bar 不产生观察记录；世界冻结时时间与世界边框只在 Step Tick 给出的 tick 推进；世界边框、World Age 与时钟在移动步骤之后推进；时钟属于连接（换维度的 Respawn 之后保留，重新配置之后重新开始），Update Time 按 World Age 的差值与速率推进没有列出的时钟；Player Info Update 改成旁观模式时竖直速度清零；队伍成员互斥与重复创建队伍，移除不在队伍中的成员时 bot 结束；玩家列表新条目的游戏模式为生存模式；重复创建目标时 bot 结束，删除目标时清空指向它的显示位置，Display Objective 指向不存在的目标时清空这个位置；离开世界之后 `joined()`、`loaded()` 等待下一个世界，Respawn 之后 `loaded()` 等待重新加载 |
 | `registry` | 用原版的全部 Registry Data 构建 `SyncedRegistries`，条目名称的顺序与编号与服务端一致，维度类型的最低 y 与高度一致；条目省略数据时取自 `VanillaNetworkCodec`，数据包中带有的维度类型数据优先，原版中没有的条目省略数据时构建失败；重新配置的第一个 Registry Data 清空之前的同步注册表，之后的不再清空；聊天类型、伤害类型、世界时钟的编号换成名称，编号超出范围时为 null 或抛出异常；生物群系数量；`TagTable` 按标签逐个替换、删除给出的注册表的全部标签 |
 | `data` | `ItemData`：物品编号；`tool` 的规则保留标签与方块编号列表，省略的字段按原版编解码器的默认值补上；`equippable`、`use_effects`、`piercing_weapon` 的默认值；其它组件类型被拒绝。`Items`：补丁覆盖与移除默认组件、空物品没有组件、原版物品没有默认的 `can_break`；按原始补丁比较物品，没有补丁与空补丁相同，数量只在 `sameStack` 中比较 |
 | `player` 中的 `AttributeMap` | `attribute.json` 中的默认值与取值范围（`jump_strength` 为 `(double) 0.42F`）、玩家的基础值；三种修饰符按原版的顺序计算，同名修饰符替换之前的；取值限制到范围之内；Respawn 时复制基础值与修饰符或者只复制基础值 |
 | `view` 中的 `EntityMetaIndex` | 各常量的下标、掩码与默认值与 Minestom 的 `MetadataDef` 一致；没有收到的条目读出默认值；按下标与按掩码读取 |
 | `world` | 写入时复制；快照不受之后写入的影响；加载区域移动后的卸载，加载区域的半径（视距小于 2 时按 2 计算）；高度范围之外与未加载区块；方块实体数据单独读取，`getBlock` 不带 NBT，方块实体类型改变时删除数据；Chunk Biomes 替换每个区段的生物群系（整个区段同一种生物群系，待办 T1）；世界边框插值期间范围与碰撞使用上一 tick 的大小，插值结束时静止在目标大小，插值时间小于 0 时第一次推进之后为目标大小 |
 | `movement` | 9.1 的 wiki 数值（包括飞行与疾跑飞行）；使用物品时的减速；缓降、飘浮与 NoGravity；`air_drag_modifier`、`movement_efficiency` 属性；起跳时竖直速度取较大的一个；开始时的速度归零；站在方块边缘时按支撑方块确定脚下方块；着地时停止飞行并发送 Player Abilities；疾跑的开始与停止条件（饥饿值、失明、撞墙）与 Player Input 的疾跑键；`jumpTo` 起跳没有离开地面时执行完毕；寻路跟随（在构造的世界上走完 `WALK`、`JUMP`、`FALL` 节点；按站立高度走上半砖与楼梯，在半砖上行走不起跳，再走下半砖）；找不到路径时停在最近点并以 `NO_PATH` 取消（远离原点、寻路结果末尾带 `REPATH` 节点）；目标在正上方或者正下方另一层、没有路径时不算到达，以 `NO_PATH` 取消；走进未加载区块时以 `CHUNK_NOT_LOADED` 取消，包围盒离未加载区块不到一格时背离它的移动照常执行；重新寻路三次之后以 `BLOCKED` 取消；寻路期间的传送让结果作废，寻路期间被改变的路径方块在取回结果之后触发重新寻路；`moveForward` 连续被阻挡时取消；`rotate`、`lookAt` 的朝向计算、发送，俯仰角超出 [-90, 90] 或为 NaN 时提交时抛出异常，以及与手部动作朝向的优先级（8.3），服务端用传送或 Player Rotation 设置的朝向不被 `rotate` 留下的朝向改回；指向本地玩家自己的 Synchronize Vehicle Position 在距离不超过 64 时由之后 3 次移动计算插值到目标的位置与朝向（每一步前进剩余的三分之一、二分之一、全部），不发送 Confirm Teleportation，距离超过 64 时立即设置并产生 `PlayerTeleported`；movement suspension 的停止与照常项（暂停期间 `rotate` 照常执行，每 20 tick 的位置照常发送；暂停期间轮到的 `moveTo` 不开始，不清除 `rotate` 设置的朝向，排在后面的动作随之等待，恢复之后照常执行）；`jumpTo`（按水平距离选择行走或疾跑，指定移动方式时不按距离选择，起跳后再次着地即执行完毕，与目标顶面中心的水平距离小于 0.1 时原地起跳）；骑乘（座位位置、新登上船时的偏航角、每 tick 的 Set Player Rotation 与 Move Vehicle、不控制矿车、载具或者它下面的载具所在区块未加载时只发送 Client Tick End、下马之后恢复移动包、载具未知的 Set Passengers 被忽略、马在被乘坐之前的人立动画、世界冻结时没有玩家乘客的马不更新人立动画） |
-| `interaction` | `DigSpeed` 与 wiki Breaking 页的公式与示例一致（急迫 II、效率 V 钻石镐瞬间破坏石头）；序号确认；挖掘每个 tick 的 Swing Arm 次数与先后（第 1 tick 两次，Finished digging 与它所在 tick 的 Swing Arm 的先后）；挖掘延迟 5 推迟下一次挖掘的进度；`breakBlock`：确认之前收到 Block Update 时 `broken()` 为 true，只收到确认时为 false，Block Update 只改变方块状态时为 false；`placeBlock` 的字段；`placeBlock` 与 `attack` 的数据包在之前的 tick 已经发出目标朝向之后才发送；Inside block 按方块的轮廓形状计算（眼睛在蜘蛛网中时为 true），目标在世界边框之外的 `placeBlock` 什么都不发送；`useItem` 的保持与结束；`attack` 的目标不存在时取消，攻击幼年僵尸时看向它的幼年包围盒的中心；挖掘中更换手持物品时中止并以新的序号重新开始，重新开始的 tick 不累加；主手拿着穿刺武器时发送 Stab，挖掘中换成穿刺武器时不累加、不挥手；旁观模式的挖掘与攻击只发送 Spectator Action（挖掘不带实体编号，攻击带目标实体编号）；挖掘中能力变成瞬间建造时以新的序号发送 Started digging，不再累加；`can_break` 的匹配（服务端标签与编号列表、任意一个谓词匹配、精确属性值、整数与枚举与布尔值的范围、部分匹配的 NBT 与方块实体的类型和坐标、没有方块实体时不匹配、组件条件抛出 `UnsupportedOperationException`） |
-| `inventory` | `ContainerSlots.unique` 与 wiki Inventory 页的第一个主物品栏槽位逐项一致，合成器与讲台的布局；窗口槽位与窗口 0 的同步；点击包字段，按键与模式不对应时在调用线程上抛出异常；每个窗口各自的状态编号与光标；关闭窗口，Close Container 不看窗口编号；Open Horse Screen 只为模型中的马类与鹦鹉螺打开窗口，鹦鹉螺的窗口不看列数；Set Container Slot 与 Set Container Content 的槽位越界时 bot 结束，窗口编号不符时忽略；Set Player Inventory Slot 的下标 41、42 为身体护甲与鞍（`equipment` 与 `EntityEquipmentChanged`），大于 42 的下标被忽略，负数时 bot 结束；选择快捷栏 |
+| `interaction` | `DigSpeed` 与 wiki Breaking 页的公式与示例一致（急迫 II、效率 V 钻石镐瞬间破坏石头）；序号确认；挖掘每个 tick 的 Swing Arm 次数与先后（第 1 tick 两次，Finished digging 与它所在 tick 的 Swing Arm 的先后）；挖掘延迟 5 推迟下一次挖掘的进度；`breakBlock`：确认之前收到 Block Update 时 `broken()` 为 true，只收到确认时为 false，Block Update 只改变方块状态时为 false；`placeBlock` 的字段；`placeBlock` 与 `attack` 的数据包在之前的 tick 已经发出目标朝向之后才发送，目标正好在正北（偏航角 -180 规范为 180）时同样如此；目标在未加载区块上的 `attemptBreakBlock`、`placeBlock`、`breakBlock` 以 `CHUNK_NOT_LOADED` 取消，什么都不发送，`breakBlock` 的 `original()` 为 null；挖掘中目标所在区块被卸载时发送 Cancelled digging 并取消；眼睛所在区块未加载时挖掘在开始的 tick 取消，什么都不发送；Inside block 按方块的轮廓形状计算（眼睛在蜘蛛网中时为 true），目标在世界边框之外的 `placeBlock` 什么都不发送；`useItem` 的保持与结束；`attack` 的目标不存在时取消，攻击幼年僵尸时看向它的幼年包围盒的中心；挖掘中更换手持物品时中止并以新的序号重新开始，重新开始的 tick 不累加；主手拿着穿刺武器时发送 Stab，挖掘中换成穿刺武器时不累加、不挥手；旁观模式的挖掘与攻击只发送 Spectator Action（挖掘不带实体编号，攻击带目标实体编号）；挖掘中能力变成瞬间建造时以新的序号发送 Started digging，不再累加；`can_break` 的匹配（服务端标签与编号列表、任意一个谓词匹配、精确属性值、整数与枚举与布尔值的范围、部分匹配的 NBT 与方块实体的类型和坐标、没有方块实体时不匹配、组件条件抛出 `UnsupportedOperationException`） |
+| `inventory` | `ContainerSlots.unique` 与 wiki Inventory 页的第一个主物品栏槽位逐项一致，合成器与讲台的布局；窗口槽位与窗口 0 的同步，打开窗口时玩家物品栏部分取窗口 0 的物品、不产生 `SlotChanged`，只带容器槽位的 Set Container Content 不改变这一部分；点击包字段，按键与模式不对应时在调用线程上抛出异常；每个窗口各自的状态编号与光标；关闭窗口，Close Container 不看窗口编号；Open Horse Screen 只为模型中的马类与鹦鹉螺打开窗口，鹦鹉螺的窗口不看列数；Set Container Slot 与 Set Container Content 的槽位越界时 bot 结束，窗口编号不符时忽略；Set Player Inventory Slot 的下标 41、42 为身体护甲与鞍（`equipment` 与 `EntityEquipmentChanged`），大于 42 的下标被忽略，负数时 bot 结束；选择快捷栏 |
 | `chat` | Checksum 与 wiki 描述的计算方法一致；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending` 只去掉还没有告知服务端的条目；没有显示的消息只计入新增消息数，不计入已读 |
 | `player` | `PlayerLoadTracker`：收到 Game Event 13 之前不发送 Player Loaded，也不超时；之后条件满足，或者自开始等待起超过 30 秒时发送；Respawn 重新开始计时；开始等待之前的 Game Event 13 被忽略 |
-| `scheduler` | 两个线程同时等待时推进函数不并发执行，开始时间至少相隔 50 毫秒；不 tick 的阶段中暂停状态改变时产生 `StateUpdated`，`condition` 随之检查；三类队列的执行规则（一次性请求等到 Player Loaded 之后执行；没有收到 Game Event 13 时一直不发送 Player Loaded，请求不执行；进入第一个世界之前提交的移动与手部动作不被第一次 Login (play) 取消；移动队列先进先出；两条队列互相独立）；8.1 每种结束情况下 `await` 的返回值或异常与 `future()` 的结果；取消（排队中、执行中、在调度线程上调用）；世界重建与玩家死亡时取消移动与手部队列中的动作；进入世界之前查询本地玩家与方块抛出 `IllegalStateException`；在调度线程上调用阻塞方法时抛出异常；模型入口在其它线程调用时抛出异常；某个 bot 抛出异常时其它 bot 继续运行；关闭之后不能再连接；runtime 关闭之后 Transfer 线程才打开的连接被关闭，关闭期间连接的 bot 被断开，最后一轮之后才入队的查询得到结果 |
-| `observe` | 注册后应用的数据包全部被观察到、注册前的不补发；投递顺序（含 bundle）；只投递订阅的类型；`Subscription` 拒绝方向不对的数据包类；五种关闭原因各自的时机与 `onClose` 调用；回调抛出异常时 bot 结束；`subscription()` 抛出异常时 bot 结束，在其它线程与调度线程上调用的 `observe` 以及 `observeDuring` 都抛出 `BotFailureException`；重复注册抛出异常；bot 已经结束时 `observe` 失败的 observer 不算注册过（包括注册请求交给调度线程之后 bot 才结束的情况），可以交给其它 bot；在回调中注册的 observer 收不到同一个回调中注册之后产生的记录，回调返回之后的照常收到；在其它线程调用 `handle.close()` 时 `onClose` 抛出的异常结束 bot 并让 `close()` 抛出 `BotFailureException`；连接结束时 `onClose` 抛出异常，未结束的动作与之后的调用都得到 `BotFailureException`，断开原因保留；观察中跨线程读取状态抛出异常；`observeDuring` 的注册先于动作提交，`ACTION_COMPLETED` 在该动作的 `ActionCompleted` 投递之后关闭（含确认与 Block Update 在同一个 bundle 中的情况，已经发生过的 `loaded()`，以及在 `submit` 中就已经取消、没有 observer 订阅 `ActionCompleted` 的动作），`submit` 返回其它动作时抛出异常 |
+| `scheduler` | 连接状态只允许 5.1 表中的转移；两个线程同时等待时推进函数不并发执行，开始时间至少相隔 50 毫秒；不 tick 的阶段中暂停状态改变时产生 `StateUpdated`，`condition` 随之检查；三类队列的执行规则（一次性请求等到 Player Loaded 之后执行；没有收到 Game Event 13 时一直不发送 Player Loaded，请求不执行；进入第一个世界之前提交的移动与手部动作不被第一次 Login (play) 取消；移动队列先进先出；两条队列互相独立）；8.1 每种结束情况下 `await` 的返回值或异常与 `future()` 的结果；取消（排队中、执行中、在调度线程上调用）；世界重建与玩家死亡时取消移动与手部队列中的动作；进入世界之前查询本地玩家与方块抛出 `IllegalStateException`；在调度线程上调用阻塞方法时抛出异常；模型入口在其它线程调用时抛出异常；某个 bot 抛出异常时其它 bot 继续运行；关闭之后不能再连接；runtime 关闭之后 Transfer 线程才打开的连接被关闭，关闭期间连接的 bot 被断开，最后一轮之后才入队的查询得到结果 |
+| `observe` | 注册后应用的数据包全部被观察到、注册前的不补发；投递顺序（含 bundle）；只投递订阅的类型；`Subscription` 拒绝方向不对的数据包类；五种关闭原因各自的时机与 `onClose` 调用；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，不调用它的 `onClose`，同一条记录照常交给之后的 observer，bot 继续运行；`subscription()` 或 `onStart` 抛出异常时，在其它线程与调度线程上调用的 `observe` 以及 `observeDuring` 都抛出 `ObserverFailureException`，`observeDuring` 不调用 `submit`，这个 observer 算作注册过；`Bot.await` 的条件抛出异常时抛出 `ObserverFailureException`；`ObservedAction.await` 在 observer 失败时立即抛出，动作仍在执行；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；重复注册抛出异常；bot 已经结束时 `observe` 失败的 observer 不算注册过（包括注册请求交给调度线程之后 bot 才结束的情况），可以交给其它 bot；在回调中注册的 observer 收不到同一个回调中注册之后产生的记录，回调返回之后的照常收到；在其它线程调用 `handle.close()` 时 `onClose` 抛出异常，observer 以 `FAILED` 关闭，`close()` 抛出 `ObserverFailureException`；连接结束时 `onClose` 抛出异常，只有这个 observer 以 `FAILED` 关闭，bot 按断开结束，断开原因保留；观察中跨线程读取状态抛出异常；`observeDuring` 的注册先于动作提交，`ACTION_COMPLETED` 在该动作的 `ActionCompleted` 投递之后关闭（含确认与 Block Update 在同一个 bundle 中的情况，已经发生过的 `loaded()`，以及在 `submit` 中就已经取消、没有 observer 订阅 `ActionCompleted` 的动作），`submit` 返回其它动作时抛出异常 |
 | `observe` 中的 `WorldBoundObserver` | 进入新世界时的 `closeWorld` / `openWorld` 顺序；进入第一个世界之前的记录被丢弃；关闭时关闭当前世界 |
 | `observe` 中的内置 observer | 范围判断（粒子的中心坐标、实体音效的实体位置）；`limit` 与 `truncated()`，注册之后调用 `limit` 抛出异常；`first`、`observations`、`listener` 的类型为 `PacketReceived` 或 `PacketSent` 时在调用工厂方法时抛出异常，`packets`、`firstPacket`、`packetListener`、`sentPackets` 的数据包类方向不对时同样如此；`movementOf` 的跟踪、关闭条件、实体移除与换世界后的重新跟踪；`blockAt` 注册时先检查当前方块；`distanceWithIn` 在移动后满足距离条件时取消动作，`distanceOutOf` 在动作先结束时关闭且 `met()` 为 false，动作属于其它 bot 时注册失败；`condition`、`firstChat`、`damageTaken`；`firstTranslatedChat` 按子组件与翻译参数中的翻译键匹配；`blockBroken` 进入新世界时关闭；进入第一个世界之前注册的 `breakBlock` 与 `distanceWithIn` 观察下一个世界 |

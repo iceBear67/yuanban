@@ -1,0 +1,10 @@
+{
+  "name": "unloaded",
+  "description": "目标所在区块没有加载：目标区域与路线都列为未知，不算安全",
+  "input": {"target": {"x": 40.5, "y": 64, "z": 0.5}},
+  "world": {"ground": {"y": 63, "name": "minecraft:stone"}, "loadedChunks": [[0, 0], [1, 0]]},
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"safe": false, "hazards": []}
+  }
+}

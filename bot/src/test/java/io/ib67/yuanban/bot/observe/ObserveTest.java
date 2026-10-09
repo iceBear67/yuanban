@@ -6,6 +6,7 @@ import io.ib67.yuanban.bot.BotDisconnectedException;
 import io.ib67.yuanban.bot.BotFailureException;
 import io.ib67.yuanban.bot.BotRuntime;
 import io.ib67.yuanban.bot.BotStatus;
+import io.ib67.yuanban.bot.ObserverFailureException;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -255,21 +257,96 @@ class ObserveTest {
     }
 
     @Test
-    void failingCallbackEndsTheBotWithoutOnClose() {
+    void failingCallbackClosesOnlyThatObserverWithoutOnClose() {
         withBot((peer, bot) -> {
-            var other = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
             var failing = bot.observe(new Recorder(Subscription.of(ChatReceived.class)) {
                 @Override
                 public void onObservation(Observation observation, ObserverContext context) {
                     throw new IllegalStateException("broken observer");
                 }
             });
+            var other = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
             peer.push(chat("boom"));
-            assertEquals(CloseReason.FAILED, failing.awaitClose(TIMEOUT));
+            // 只有抛出异常的 observer 以 FAILED 关闭，不调用它的 onClose；等待它的一方得到 ObserverFailureException
+            var thrown = assertThrows(ObserverFailureException.class, () -> failing.awaitClose(TIMEOUT));
+            assertEquals("broken observer", thrown.getCause().getMessage());
+            assertEquals(CloseReason.FAILED, failing.closeReason());
+            assertEquals("broken observer", failing.failure().getMessage());
             assertNull(failing.observer().closed);
-            assertEquals(CloseReason.DISCONNECTED, other.awaitClose(TIMEOUT));
-            assertEquals("broken observer", bot.failure().getMessage());
-            assertThrows(BotFailureException.class, () -> bot.observe(new Recorder(Subscription.of(ChatReceived.class))));
+            // 已经关闭，close() 不做任何事
+            failing.close();
+            // 同一条记录照常交给之后的 observer，bot 继续运行
+            peer.push(chat("again"));
+            peer.barrier();
+            other.close();
+            assertEquals(List.of("start", "chat boom", "chat again", "close BY_HANDLE"), other.observer().events);
+            assertNull(other.failure());
+            assertNull(bot.failure());
+            assertEquals(BotStatus.PLAY, bot.status());
+        });
+    }
+
+    @Test
+    void aThrowingConditionFailsOnlyTheWait() {
+        withBot((_, bot) -> {
+            // 注册时先检查一次条件：这时抛出异常，Bot.await 抛出 ObserverFailureException
+            var atStart = assertThrows(ObserverFailureException.class, () -> bot.await(_ -> {
+                throw new IllegalStateException("broken at start");
+            }, TIMEOUT));
+            assertEquals("broken at start", atStart.getCause().getMessage());
+            // 之后在 StateUpdated 时检查：抛出异常同样如此
+            var checks = new AtomicInteger();
+            var later = assertThrows(ObserverFailureException.class, () -> bot.await(_ -> {
+                if (checks.incrementAndGet() > 1) {
+                    throw new IllegalStateException("broken later");
+                }
+                return false;
+            }, TIMEOUT));
+            assertEquals("broken later", later.getCause().getMessage());
+            assertNull(bot.failure());
+            assertTrue(bot.rotate(0, 0).await(TIMEOUT));
+        });
+    }
+
+    @Test
+    void observedActionAwaitThrowsAsSoonAsTheObserverFails() {
+        withBot((_, bot) -> {
+            var observed = bot.observeDuring(new Recorder(Subscription.of(BotTicked.class)) {
+                @Override
+                public void onObservation(Observation observation, ObserverContext context) {
+                    throw new IllegalStateException("broken during the action");
+                }
+            }, b -> b.moveForward(1000));
+            // 不等动作结束，也不取消动作
+            var thrown = assertThrows(ObserverFailureException.class, () -> observed.await(TIMEOUT));
+            assertEquals("broken during the action", thrown.getCause().getMessage());
+            assertEquals(CloseReason.FAILED, observed.handle().closeReason());
+            assertFalse(observed.action().future().isDone());
+            observed.action().cancel();
+            assertFalse(observed.action().await(TIMEOUT));
+            assertNull(bot.failure());
+        });
+    }
+
+    @Test
+    void aCallbackThrowingAfterItsObserverWasClosedEndsTheBot() {
+        withBot((peer, bot) -> {
+            var self = new CompletableFuture<ObserverHandle<?>>();
+            var handle = bot.observe(new Recorder(Subscription.of(ChatReceived.class)) {
+                @Override
+                public void onObservation(Observation observation, ObserverContext context) {
+                    // 在调度线程上调用 handle.close() 立即关闭这个 observer，之后回调又抛出异常
+                    self.join().close();
+                    throw new IllegalStateException("thrown after close");
+                }
+            });
+            self.complete(handle);
+            peer.push(chat("boom"));
+            // observer 已经以 BY_HANDLE 关闭，异常无法再随关闭交给持有者，结束 bot
+            assertThrows(BotFailureException.class, () -> bot.await(_ -> false, TIMEOUT));
+            assertEquals("thrown after close", bot.failure().getMessage());
+            assertEquals(CloseReason.BY_HANDLE, handle.closeReason());
+            assertNull(handle.failure());
         });
     }
 
@@ -286,46 +363,56 @@ class ObserveTest {
     void aThrowingOnCloseFailsHandleCloseOnOtherThreads() {
         withBot((_, bot) -> {
             var handle = bot.observe(brokenOnClose());
-            // 在其它线程（测试线程）调用：onClose 抛出的异常结束 bot，close() 与在调度线程上调用时一样抛出 BotFailureException
-            var thrown = assertThrows(BotFailureException.class, handle::close);
+            // 在其它线程（测试线程）调用：onClose 抛出异常时 observer 以 FAILED 关闭，close() 抛出 ObserverFailureException，bot 不受影响
+            var thrown = assertThrows(ObserverFailureException.class, handle::close);
             assertEquals("broken onClose", thrown.getCause().getMessage());
             assertEquals(CloseReason.FAILED, handle.closeReason());
-            assertEquals("broken onClose", bot.failure().getMessage());
+            assertEquals("broken onClose", handle.failure().getMessage());
+            // 已经关闭，再次关闭不做任何事
+            handle.close();
+            assertNull(bot.failure());
+            assertTrue(bot.rotate(0, 0).await(TIMEOUT));
         });
     }
 
     @Test
-    void aThrowingOnCloseWhenTheConnectionEndsFailsTheBot() {
+    void aThrowingOnCloseWhenTheConnectionEndsFailsOnlyThatObserver() {
         withBot((peer, bot) -> {
             var moving = bot.moveForward(1000);
-            bot.observe(brokenOnClose());
+            var broken = bot.observe(brokenOnClose());
             var other = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
             peer.push(new ClientboundDisconnectPacket(Component.text("bye")));
-            // 其余 observer 照常关闭；onClose 的异常记录为失败原因，未结束的动作与之后的调用都得到 BotFailureException
+            // 其余 observer 照常关闭；onClose 抛出异常的 observer 以 FAILED 关闭，异常记在它的句柄上
             assertEquals(CloseReason.DISCONNECTED, other.awaitClose(TIMEOUT));
-            var failure = assertThrows(BotFailureException.class, () -> moving.await(TIMEOUT));
-            assertEquals("broken onClose", failure.getCause().getMessage());
-            assertEquals("broken onClose", assertThrows(BotFailureException.class, () -> bot.rotate(0, 0)).getCause().getMessage());
-            assertEquals("broken onClose", bot.failure().getMessage());
-            // 断开原因仍然保留
+            var thrown = assertThrows(ObserverFailureException.class, () -> broken.awaitClose(TIMEOUT));
+            assertEquals("broken onClose", thrown.getCause().getMessage());
+            // bot 按断开结束：未结束的动作与之后的调用都得到 BotDisconnectedException
+            assertEquals("bye", assertThrows(BotDisconnectedException.class, () -> moving.await(TIMEOUT)).getMessage());
+            assertThrows(BotDisconnectedException.class, () -> bot.rotate(0, 0));
+            assertNull(bot.failure());
             assertEquals(Component.text("bye"), bot.disconnectReason());
             assertEquals(BotStatus.DISCONNECTED, bot.status());
         });
     }
 
     @Test
-    void aThrowingSubscriptionEndsTheBotAndObserveThrows() {
+    void aThrowingSubscriptionOrOnStartFailsObserveWithoutEndingTheBot() {
         withBot((_, bot) -> {
-            var broken = new Recorder(Subscription.NONE) {
+            var broken = brokenSubscription();
+            // 在其它线程调用：注册失败时 observe 抛出 ObserverFailureException，不会一直等待
+            var thrown = assertTimeoutPreemptively(TIMEOUT, () -> assertThrows(ObserverFailureException.class, () -> bot.observe(broken)));
+            assertEquals("broken subscription", thrown.getCause().getMessage());
+            // 注册失败的 observer 算作注册过
+            assertThrows(IllegalStateException.class, () -> bot.observe(broken));
+            var brokenStart = new Recorder(Subscription.of(ChatReceived.class)) {
                 @Override
-                public Subscription subscription() {
-                    throw new IllegalStateException("broken subscription");
+                public void onStart(ObserverContext context) {
+                    throw new IllegalStateException("broken onStart");
                 }
             };
-            // 在其它线程调用：注册失败时 observe 抛出 BotFailureException，不会一直等待
-            var thrown = assertTimeoutPreemptively(TIMEOUT, () -> assertThrows(BotFailureException.class, () -> bot.observe(broken)));
-            assertEquals("broken subscription", thrown.getCause().getMessage());
-            assertEquals("broken subscription", bot.failure().getMessage());
+            assertEquals("broken onStart", assertThrows(ObserverFailureException.class, () -> bot.observe(brokenStart)).getCause().getMessage());
+            assertNull(bot.failure());
+            assertTrue(bot.rotate(0, 0).await(TIMEOUT));
         });
     }
 
@@ -339,8 +426,8 @@ class ObserveTest {
     }
 
     @Test
-    void aThrowingSubscriptionEndsTheBotOnTheSchedulerThreadAndInObserveDuring() {
-        // 在调度线程上（另一个 observer 的回调中）注册：observe 抛出 BotFailureException，bot 结束
+    void aThrowingSubscriptionFailsObserveOnTheSchedulerThreadAndInObserveDuring() {
+        // 在调度线程上（另一个 observer 的回调中）注册：observe 抛出 ObserverFailureException，bot 不受影响
         withBot((_, bot) -> {
             var thrown = new CompletableFuture<Throwable>();
             bot.observe(Observers.listener(BotTicked.class, _ -> {
@@ -353,15 +440,20 @@ class ObserveTest {
                     }
                 }
             }));
-            var failure = assertInstanceOf(BotFailureException.class, assertTimeoutPreemptively(TIMEOUT, () -> thrown.get()));
+            var failure = assertInstanceOf(ObserverFailureException.class, assertTimeoutPreemptively(TIMEOUT, () -> thrown.get()));
             assertEquals("broken subscription", failure.getCause().getMessage());
-            assertEquals("broken subscription", bot.failure().getMessage());
+            assertNull(bot.failure());
         });
-        // observeDuring：注册失败时同样结束 bot，不提交动作
+        // observeDuring：注册失败时同样抛出 ObserverFailureException，不调用 submit
         withBot((_, bot) -> {
-            var thrown = assertThrows(BotFailureException.class, () -> bot.observeDuring(brokenSubscription(), b -> b.rotate(0, 0)));
+            var submitted = new AtomicBoolean();
+            var thrown = assertThrows(ObserverFailureException.class, () -> bot.observeDuring(brokenSubscription(), b -> {
+                submitted.set(true);
+                return b.rotate(0, 0);
+            }));
             assertEquals("broken subscription", thrown.getCause().getMessage());
-            assertEquals("broken subscription", bot.failure().getMessage());
+            assertFalse(submitted.get());
+            assertNull(bot.failure());
         });
     }
 

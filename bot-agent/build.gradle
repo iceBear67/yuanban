@@ -1,0 +1,20 @@
+plugins {
+    id("application")
+}
+
+dependencies {
+    api(project(":bot"))
+    implementation("org.graalvm.polyglot:polyglot:25.0.0")
+    implementation("org.graalvm.polyglot:js:25.0.0")
+    implementation("com.google.code.gson:gson:2.14.0")
+    // 物品编号到名称的对照取自 item.json，与 bot 读取的是同一份数据
+    implementation("net.minestom:data:26.2-rv3")
+    implementation("com.networknt:json-schema-validator:3.0.8")
+    implementation("com.openai:openai-java:4.78.1")
+    implementation("com.knuddels:jtokkit:1.1.0")
+    implementation("org.jline:jline:3.30.17")
+}
+
+application {
+    mainClass = "io.ib67.yuanban.agent.cli.AgentMain"
+}

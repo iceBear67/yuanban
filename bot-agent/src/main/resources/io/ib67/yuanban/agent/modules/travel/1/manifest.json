@@ -1,0 +1,19 @@
+{
+  "entry": "main",
+  "description": "移动到 target 并用 movementReached observer 确认到达；本地处理未加载区块、阻挡与找不到路径，暂停时等待恢复，尝试用完时发出 attention(unreachable)。返回 {kind: arrived|failed|stopped}。",
+  "inputSchema": {
+    "type": "object",
+    "required": ["target"],
+    "properties": {
+      "target": {"type": "object", "required": ["x", "y", "z"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}},
+      "closeDistance": {"type": "number", "minimum": 0.1, "maximum": 8},
+      "maxDistance": {"type": "number", "minimum": 1, "maximum": 256},
+      "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 10}
+    }
+  },
+  "roles": ["primary", "recovery"],
+  "messagesIn": ["stop", "focus", "policy", "pause", "resume", "bot_event"],
+  "messagesOut": ["progress", "attention", "fault"],
+  "capabilities": ["observe.*", "locomotion.moveTo"],
+  "fallback": "pause-on-unknown-fault"
+}

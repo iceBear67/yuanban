@@ -60,7 +60,7 @@
 |---|---|
 | `registryData(omitData)`、`tags()` | 原版的全部 Registry Data 与 Update Tags；`omitData` 为 true 时条目的数据为 null |
 | `registryEntries`、`registryId`、`overworldId`、`netherId`、`biomeCount` | 原版注册表中的条目与编号 |
-| `configure(peer, username)` | 从 Login Finished 到 Finish Configuration，等到 bot 回应 Finish Configuration |
+| `configure(peer, username)` | 先等 bot 在这条连接上发出 Login Start（服务端收到 Login Start 之后才回应，bot 拒绝握手之前的数据包），然后从 Login Finished 到 Finish Configuration，等到 bot 回应 Finish Configuration |
 | `joinPacket(gameMode)`、`netherRespawn(gameMode, copyData)` | 进入主世界的 Login (play)；重生到下界的 Respawn |
 | `flatChunk()` | y 小于 0 为石头、其余为空气的区块 |
 | `join(peer, spawn[, gameMode, chunk])` | Login (play)、传送到出生点、加载中心 ±1 的区块、Game Event 13，等到 bot 发送 Player Loaded |
@@ -100,7 +100,7 @@ void chatIsSent() {
 |---|---|
 | `decode.DecodeTest` | 方块实体取区段中的方块；相同区段共享；区段字节重新写出后相同；区段之后有剩余字节时出错；Encryption Request 不支持；区块按最近一次 Login (play) 或 Respawn 的维度确定区段数；重新配置删除重新发送的注册表的标签 |
 | `transport.TcpConnectionTest` | 两侧的阶段与压缩；`close()` 之前交出的批次照常写出；写出中连接断开时批次以异常结束；`close()` 丢弃套接字不能接受的数据并释放连接；编码失败关闭连接；连接失败时抛出异常；登录阶段的读取超时 |
-| `protocol.LoginFlowTest` | 登录、配置与进入世界的发送顺序与内容；Known Packs 只回应匹配的 core |
+| `protocol.LoginFlowTest` | 登录、配置与进入世界的发送顺序与内容；Known Packs 只回应匹配的 core；握手发出之前收到数据包时 bot 结束；收到不属于当前协议阶段的数据包时 bot 结束 |
 | `protocol.PacketDirectionTest` | 按全部协议阶段判断数据包方向；方向不对与没有注册的类被拒绝；`MinecraftPacket.class` 两个方向都接受 |
 | `protocol.ProtocolRepliesTest` | Ping 与 Cookie；资源包的两种回应；区块批次与传送的应答；Transfer 重新连接并保留 cookie |
 | `protocol.BufferAndBatchTest` | bundle 在结束分隔符处整批交出；超过 4096 个时拒绝；区块批次的数值；cookie 的 5 KiB 上限 |
@@ -117,12 +117,12 @@ void chatIsSent() {
 | `movement.MovementBotTest` | `rotate` 与 `lookAt`；服务端设置的朝向；指向本地玩家的 Synchronize Vehicle Position 插值；`moveTo` 的平地、台阶、半砖与楼梯、高度比较、跳下、找不到路径、未加载区块、重新寻路、寻路期间的传送与方块改变；`moveForward` 被阻挡；`jumpTo`；着地停止飞行；疾跑条件；暂停移动；骑乘船、矿车、马与骆驼；马的人立动画；手部动作的朝向优先 |
 | `interaction.DigSpeedTest` | wiki Breaking 页的公式与示例 |
 | `interaction.BlockPredicatesTest` | `can_break` 的方块集合、属性范围、NBT 部分匹配与组件条件 |
-| `interaction.InteractionBotTest` | 挖掘每个 tick 的数据包与挖掘延迟；更换手持物品时重新开始；穿刺武器；冒险模式；旁观模式；挖掘中变成瞬间破坏；`breakBlock` 的结论；`placeBlock`；Inside block 与世界边框；`useItem` 的保持；`attack` 的目标 |
+| `interaction.InteractionBotTest` | 挖掘每个 tick 的数据包与挖掘延迟；更换手持物品时重新开始；穿刺武器；冒险模式；旁观模式；挖掘中变成瞬间破坏；`breakBlock` 的结论；`placeBlock`；目标在正北时的朝向比较；未加载区块上的挖掘、放置与 `breakBlock`，挖掘中目标所在区块被卸载，眼睛所在区块未加载；Inside block 与世界边框；`useItem` 的保持；`attack` 的目标 |
 | `inventory.WindowLayoutTest` | 独有槽位数与 wiki 相同；打开窗口中玩家物品栏部分写入窗口 0 |
-| `inventory.InventoryBotTest` | 点击与关闭使用打开的窗口；按键与模式不对应时拒绝；每个窗口各自的状态编号与光标；Close Container 不看编号；槽位越界时 bot 结束；身体护甲与鞍；马与鹦鹉螺的窗口；选择快捷栏 |
+| `inventory.InventoryBotTest` | 点击与关闭使用打开的窗口；打开的窗口中玩家物品栏部分取窗口 0 的物品；按键与模式不对应时拒绝；每个窗口各自的状态编号与光标；Close Container 不看编号；槽位越界时 bot 结束；身体护甲与鞍；马与鹦鹉螺的窗口；选择快捷栏 |
 | `chat.LastSeenTrackerTest` | Checksum 的计算；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending`；没有显示的消息 |
-| `scheduler.SchedulerTest` | 一次性请求等到 Player Loaded；没有 Game Event 13 时不加载；不 tick 时暂停状态改变也更新状态；等待线程共用推进函数；两条队列互相独立；各种取消的结果；世界重建与玩家死亡取消队列；进入世界之前的请求；`BotRuntime` 关闭期间的连接与查询；在调度线程上阻塞时抛出异常；一个 bot 失败不影响其它 bot；模型入口拒绝其它线程 |
-| `observe.ObserveTest` | 只投递注册之后的记录；模型记录排在数据包之前，bundle 先整体应用；在回调中注册的 observer；只投递订阅的类型；`Subscription` 的检查；关闭原因；回调抛出异常时 bot 结束；`onClose` 与 `subscription()` 抛出异常的各种情况；`observeDuring` 的关闭时机；只能注册一次；跨线程读取内置 observer；`WorldBoundObserver` 切换世界 |
+| `scheduler.SchedulerTest` | 连接状态只允许协议规定的转移；一次性请求等到 Player Loaded；没有 Game Event 13 时不加载；不 tick 时暂停状态改变也更新状态；等待线程共用推进函数；两条队列互相独立；各种取消的结果；世界重建与玩家死亡取消队列；进入世界之前的请求；`BotRuntime` 关闭期间的连接与查询；在调度线程上阻塞时抛出异常；一个 bot 失败不影响其它 bot；模型入口拒绝其它线程 |
+| `observe.ObserveTest` | 只投递注册之后的记录；模型记录排在数据包之前，bundle 先整体应用；在回调中注册的 observer；只投递订阅的类型；`Subscription` 的检查；关闭原因；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，bot 继续运行；`onClose`、`subscription()`、`onStart` 与 `Bot.await` 的条件抛出异常的各种情况；`ObservedAction.await` 在 observer 失败时立即抛出；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；`observeDuring` 的关闭时机；只能注册一次；跨线程读取内置 observer；`WorldBoundObserver` 切换世界 |
 | `observe.builtin.BuiltinObserversTest` | 粒子与音效的范围；`limit`；数据包类型在构造时拒绝；`movementOf`；`blockAt`；`blockBroken` 换世界时关闭；距离 observer；不在世界中时注册的 observer 观察下一个世界；`condition`、`firstChat`、`damageTaken`、`firstTranslatedChat` |
 
 [目录](README.md) · 上一篇：[错误处理](errors.md) · 下一篇：[限制与待办](limitations.md)

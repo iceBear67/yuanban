@@ -1,0 +1,15 @@
+{
+  "name": "unreachable",
+  "description": "两次尝试都超时，发出 attention(unreachable) 并返回 failed",
+  "input": {"target": {"x": 10.5, "y": 64, "z": 0.5}, "maxAttempts": 2},
+  "actions": [
+    {"tool": "locomotion.moveTo", "outcome": "timeout"},
+    {"tool": "locomotion.moveTo", "outcome": "timeout"}
+  ],
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"kind": "failed", "reason": "UNREACHABLE"},
+    "events": [{"type": "progress", "payload": {"step": "retry"}}, {"type": "attention", "topic": "unreachable"}],
+    "maxToolCalls": 2
+  }
+}

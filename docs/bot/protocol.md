@@ -33,16 +33,22 @@
 
 ## 连接阶段
 
-`BotStatus` 的取值与切换：
+`BotStatus` 的初始值为 `LOGIN`，只按下表切换（`BotInstance.transition`），其它切换抛出 `IllegalStateException`，bot 结束：
 
-| 状态 | 进入时机 |
-|---|---|
-| `LOGIN` | 新连接接入时（`startLogin`），包括 Transfer 之后的新连接 |
-| `CONFIGURATION` | 收到 Login Success；收到 Start Configuration |
-| `PLAY` | 收到 Finish Configuration |
-| `DISCONNECTED` | 连接结束或 bot 因异常结束，见[错误处理](errors.md) |
+| 从 | 到 | 时机 |
+|---|---|---|
+| `LOGIN` | `CONFIGURATION` | 收到 Login Success |
+| `CONFIGURATION` | `PLAY` | 收到 Finish Configuration |
+| `PLAY` | `CONFIGURATION` | 收到 Start Configuration |
+| `CONFIGURATION`、`PLAY` | `LOGIN` | 收到 Transfer，新连接接入之前 |
+| `DISCONNECTED` 以外的状态 | `DISCONNECTED` | 连接结束或 bot 因异常结束，见[错误处理](errors.md) |
 
-`startLogin(地址, 端口, transfer)` 写入：
+入站数据包在到达时检查，不满足时 bot 以 `IllegalStateException` 结束：
+
+- 这条连接的握手已经发出（接入任务已经执行，见[连接与解码 · 连接的代数](connection.md#连接的代数)）。
+- 数据包类在当前状态对应的协议阶段（`LOGIN` → `ProtocolState.LOGIN`，`CONFIGURATION` → `CONFIGURATION`，`PLAY` → `GAME`）中注册为服务端发往客户端的数据包，按 `MinecraftCodec.CODEC` 中各阶段的注册判断（`PacketDirection.clientboundIn`）。TCP 连接由 MCProtocolLib 按当前阶段解码，总是满足；进程内连接交出的数据包对象没有经过解码，属于其它阶段的数据包在这里被拒绝。改变阶段的数据包不在 bundle 中，按到达顺序应用，所以检查时的状态就是 TCP 连接解码这个数据包时的阶段。
+
+`startLogin(地址, 端口, transfer)` 要求连接状态为 `LOGIN`（初始状态，或者 Transfer 设置的），本身不改变状态，写入：
 
 1. `ClientIntentionPacket`：协议号取 `MinecraftCodec.CODEC.getProtocolVersion()`（776），意图为 `LOGIN`，Transfer 之后为 `TRANSFER`；
 2. `ServerboundHelloPacket`：名称与离线 UUID（由 `OfflinePlayer:<名称>` 的 UTF-8 字节生成的 UUID v3）。

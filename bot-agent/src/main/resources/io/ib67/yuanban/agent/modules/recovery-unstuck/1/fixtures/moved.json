@@ -1,0 +1,13 @@
+{
+  "name": "moved",
+  "description": "第一个方向就能移动",
+  "role": "recovery",
+  "actions": [
+    {"tool": "locomotion.moveForward", "outcome": "completed", "effects": {"player": {"position": {"x": 2.0, "y": 64, "z": 0.5}}}}
+  ],
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"kind": "moved", "direction": {"x": 1, "z": 0}},
+    "maxToolCalls": 3
+  }
+}

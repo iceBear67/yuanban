@@ -26,6 +26,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.Clien
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetChunkCacheCenterPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundPlayerLoadedPacket;
 import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundLoginFinishedPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.serverbound.ServerboundHelloPacket;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -142,9 +143,12 @@ public final class TestServer {
     }
 
     /**
-     * Login Finished 到 Finish Configuration，等到 bot 回应 Finish Configuration
+     * 等到 bot 在这条连接上发出 Login Start（服务端在收到 Login Start 之后才回应），
+     * 然后 Login Finished 到 Finish Configuration，等到 bot 回应 Finish Configuration
      */
     public static void configure(TestPeer peer, String username) {
+        // 每个 TestPeer 只对应一条连接，Login Start 从第一个发出的数据包开始找
+        peer.awaitSent(0, ServerboundHelloPacket.class, TIMEOUT);
         var mark = peer.mark();
         peer.push(new ClientboundLoginFinishedPacket(profile(username), new UUID(0, 0)));
         peer.push(new ClientboundSelectKnownPacks(List.of(

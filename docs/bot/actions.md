@@ -14,6 +14,7 @@
 - [手部交互动作](#手部交互动作)
   - [方块交互序号](#方块交互序号)
   - [先看向目标](#先看向目标)
+  - [区块未加载](#区块未加载)
   - [挖掘](#挖掘)
   - [挖掘速度](#挖掘速度)
   - [冒险模式的 can_break](#冒险模式的-can_break)
@@ -53,11 +54,11 @@ public interface Action {
 | 寻路找不到到达目标的路径（`NO_PATH`） | 同上 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（`BLOCKED`） | 同上 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（`NO_ENTITY`） | 同上 | 返回 false |
-| 移动范围涉及未加载的区块（`CHUNK_NOT_LOADED`） | 同上 | 返回 false |
+| 移动范围涉及未加载的区块，或者手部交互动作读取的方块所在区块未加载（`CHUNK_NOT_LOADED`） | 同上 | 返回 false |
 | 世界重建（`WORLD_REBUILT`）或玩家死亡（`PLAYER_DIED`），队列被清空 | 同上 | 返回 false |
 | 连接结束：服务端断开、`Bot.disconnect()`、`BotRuntime.close()` | 以 `BotDisconnectedException` 完成，异常信息为断开原因 | 抛出该异常 |
 | Transfer 关闭的旧连接在写出之前断开，这一批中写出即执行完毕的动作 | 以 `BotDisconnectedException` 完成，异常信息说明连接在写出之前关闭；bot 继续在新连接上登录 | 抛出该异常 |
-| bot 因异常结束（包括连接结束时 observer 的 `onClose` 抛出异常） | 以 `BotFailureException` 完成 | 抛出该异常 |
+| bot 因异常结束 | 以 `BotFailureException` 完成 | 抛出该异常 |
 | 等待超时 | 不受影响 | 抛出 `BotTimeoutException` |
 
 取消原因是 `ActionCancelledException` 中的字符串常量，作为异常信息给出。
@@ -139,7 +140,16 @@ public interface Action {
 
 `useItemOn`、`placeBlock`、`attack`、`interact` 的数据包不带朝向，服务端按它最后收到的玩家朝向处理（放置有方向的方块、攻击的击退方向）。手部步骤在移动步骤之前，同一 tick 中手部数据包先于移动包发出。所以这四个动作开始的 tick 只确定要看向的朝向（开始时计算一次），由这个 tick 的移动步骤设置并发出；之后每个 tick 的手部步骤检查本地玩家的朝向，等于这个朝向时（它已经由之前的移动包发出）才发送数据包，通常是开始之后的下一个 tick。
 
+本地玩家的位置为 Minestom 的 `Pos`，它把偏航角规范到 (-180, 180]、俯仰角限制到 [-90, 90]，所以 `HandController.aimed` 比较之前对要看向的朝向做同样的规范：目标正好在正北时 `Rotation.lookAt` 的偏航角为 -180，位置中为 180。
+
 挖掘不等待：服务端处理 Player Action 时不使用玩家朝向，挖掘在开始的 tick 就发送 Started digging。
+
+### 区块未加载
+
+手部动作读取的方块所在区块未加载时，读取抛出 `ChunkNotLoadedException`。`HandController.tick` 在调用当前动作的开始与每 tick 步骤时捕获这个异常，以 `CHUNK_NOT_LOADED` 取消这个动作，取消时照常执行清理（与移动步骤处理 `Kinematics` 抛出的同一个异常的方式相同）。读取方块的动作：
+
+- `attemptBreakBlock`：目标方块，以及计算进度时眼睛所在的方块。开始的 tick 中这些读取都在发送数据包之前（进度在发送 Started digging 之前计算，与原版 `startDestroyBlock` 的顺序相同），什么都不发送；挖掘中取消时发送 Cancelled digging，与原版准星离开方块时 `stopDestroyBlock` 发送的中止相同。
+- `useItemOn`、`placeBlock`：计算 Inside block 时读取目标方块，什么都不发送。
 
 ### 挖掘
 
@@ -157,8 +167,10 @@ public interface Action {
 | 主手物品带 `piercing_weapon` 组件 | Player Action「Stab」与挥手 | 写出即执行完毕 |
 | 冒险模式不能破坏目标，或者目标在世界边框之外 | 挥手；挖掘延迟大于 0 时减一并再挥手一次 | 执行完毕 |
 | 能力中有瞬间破坏 | Started digging（带序号）与挥手，挖掘延迟设为 5 | 收到确认即执行完毕 |
-| 本 tick 的进度已经达到 1 | Started digging 与挥手 | 收到确认即执行完毕 |
+| 本 tick 的进度已经达到 1（在发送 Started digging 之前计算） | Started digging 与挥手 | 收到确认即执行完毕 |
 | 其余 | Started digging 与挥手，记下主手物品，然后在同一 tick 执行一次「继续」 | |
+
+读取目标时目标所在区块未加载，或者计算进度时眼睛所在区块未加载，什么都不发送，以 `CHUNK_NOT_LOADED` 取消（[区块未加载](#区块未加载)）。
 
 **继续**（之后每个 tick）：
 
@@ -169,7 +181,7 @@ public interface Action {
 5. 主手物品与开始挖掘时不同（`Items.sameItemSameComponents`，例如中途 `selectHotbar`）时，这个 tick 不累加，重新开始：冒险模式不能破坏目标、目标在世界边框之外时什么都不发送，下一 tick 再次尝试；否则发送 Cancelled digging（当前的面，序号 0），再以新的序号发送 Started digging；本 tick 的进度已经达到 1 时挥手，收到确认即执行完毕；否则进度归零，记下现在的主手物品，挥手。
 6. 否则累加进度（以 float 累加，与原版相同）：达到 1 时发送 Finished digging（带序号），挖掘延迟设为 5，再挥手，收到确认即执行完毕；未达到时只挥手。
 
-**取消**：挖掘进行中被取消时发送 Cancelled digging，面为 `DOWN`；等待确认时被取消只丢弃等待中的确认。
+**取消**：挖掘进行中被取消时发送 Cancelled digging，面为 `DOWN`；等待确认时被取消只丢弃等待中的确认。挖掘进行中目标或者眼睛所在的区块被卸载时，以 `CHUNK_NOT_LOADED` 取消，同样发送 Cancelled digging。
 
 **示例**：空手挖泥土、延迟为 0 时每 tick 进度为 1/15。第 1 tick 发送 Started digging、挥手，累加第 1 次，再挥手；第 2 至 14 tick 每 tick 累加并挥手；第 15 tick 累加达到 1，先发送 Finished digging，再挥手。紧接着的下一次挖掘在开始的 tick 发送 Started digging，之后 5 次「继续」只减少延迟，第 6 次起才累加进度。
 
@@ -201,7 +213,7 @@ public interface Action {
 `useItemOn(pos, face, hand, cursor)`（`UseItemOnTask`），`placeBlock(against, face, hand)` 等同于光标取该面中心的 `useItemOn`：
 
 1. 先看向光标位置（`方块位置 + cursor`）。
-2. 朝向已经发出之后：目标方块在世界边框之外时不发送任何数据包，直接执行完毕（原版 `MultiPlayerGameMode.useItemOn` 返回 FAIL）。
+2. 朝向已经发出之后：目标方块在世界边框之外时不发送任何数据包，直接执行完毕（原版 `MultiPlayerGameMode.useItemOn` 返回 FAIL）；目标所在区块未加载时不发送任何数据包，以 `CHUNK_NOT_LOADED` 取消（[区块未加载](#区块未加载)）。
 3. 否则发送 Use Item On：`ServerboundUseItemOnPacket(方块位置, 面, 手, 光标 x, y, z, Inside block, World Border Hit = false, 序号)`，然后发送挥手（本库不预测交互结果，所以总是发送）。
 4. 收到确认即执行完毕。
 

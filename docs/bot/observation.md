@@ -166,8 +166,9 @@ public interface ObserverHandle<O extends Observer> extends AutoCloseable {
     O observer();
     boolean isOpen();
     @Nullable CloseReason closeReason();
+    @Nullable Throwable failure();                // 以 FAILED 关闭时回调抛出的异常，其余为 null
     <R> R read(Function<? super O, R> reader);   // 观察期间读取：reader 在调度线程上执行
-    CloseReason awaitClose(Duration timeout);     // 等到关闭；等待期间执行推进函数
+    CloseReason awaitClose(Duration timeout);     // 等到关闭；等待期间执行推进函数；以 FAILED 关闭时抛出 ObserverFailureException
     void close();                                 // 关闭；对已关闭的 observer 不做任何事
 }
 ```
@@ -177,7 +178,7 @@ public interface ObserverHandle<O extends Observer> extends AutoCloseable {
 - 每个 observer 实例只能注册一次，并且只属于一个 bot。重复注册（包括关闭之后再次注册）抛出 `IllegalStateException`。按对象身份判断，以弱引用记录已经注册过的 observer（Caffeine 的弱键缓存）。
 - 在其它线程调用 `observe` 时，注册请求交给调度线程，在下一轮处理该 bot 的第一步完成；`observe` 等到注册完成才返回。`observe` 返回之后应用的数据包和发生的变化都会被观察到，之前发生的不补发。所以「先注册 observer，再提交动作」可以保证动作引起的全部变化都被观察到。
 - 在调度线程上调用时立即注册，在回调中注册的规则见[投递](#投递)。
-- 注册完成时调用 `onStart`。注册时调用的 `subscription()` 与 `onStart` 抛出的异常结束 bot，`observe` 抛出 `BotFailureException`。
+- 注册完成时调用 `onStart`。注册时调用的 `subscription()` 或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭，`observe` 抛出 `ObserverFailureException`，bot 不受影响；这时 observer 算作注册过。
 - bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`。这两种情况下 observer 不算注册过，可以再交给其它 bot。
 - 实现了内部接口 `RegistrationCheck` 的内置 observer（`distanceWithIn`、`distanceOutOf`）在调用 `observe` 的线程上先做检查；检查失败时 `observe` 抛出异常，bot 不受影响，observer 也不算注册过。
 
@@ -187,11 +188,11 @@ public interface ObserverHandle<O extends Observer> extends AutoCloseable {
 
 | 原因 | 触发 | 时机 |
 |---|---|---|
-| `BY_HANDLE` | 用户调用 `handle.close()` | 在其它线程调用时，等到调度线程处理完才返回，返回时 `onClose` 已经执行；在调度线程上调用时立即关闭。`onClose` 抛出的异常结束 bot，`close()` 抛出 `BotFailureException` |
+| `BY_HANDLE` | 用户调用 `handle.close()` | 在其它线程调用时，等到调度线程处理完才返回，返回时 `onClose` 已经执行；在调度线程上调用时立即关闭。这次关闭中 `onClose` 抛出异常时，observer 以 `FAILED` 关闭，`close()` 抛出 `ObserverFailureException` |
 | `BY_OBSERVER` | observer 调用 `context.close()` | 当前回调返回之后 |
 | `ACTION_COMPLETED` | 通过 `observeDuring` 注册的 observer，它对应的动作结束 | 这个动作的 `ActionCompleted` 投递之后 |
 | `DISCONNECTED` | bot 的连接结束（服务端断开、`Bot.disconnect()`、`BotRuntime.close()`），或者 bot 因异常结束 | 先丢弃待投递的记录，再关闭全部 observer，然后结束未结束的动作 |
-| `FAILED` | observer 的回调抛出异常 | 立即关闭，不调用它的 `onClose`；这个异常同时结束整个 bot |
+| `FAILED` | observer 的回调抛出异常 | 立即关闭，不调用它的 `onClose`（`onClose` 本身抛出异常的除外）；只有这个 observer 关闭，bot 与其余 observer 不受影响，异常由 `handle.failure()` 给出，等待它的方法抛出 `ObserverFailureException`（见[错误处理 · observer 回调中的异常](errors.md#observer-回调中的异常)） |
 
 bot 进入新世界时 observer 继续观察，订阅了 `WorldEntered` 的会收到这条记录。
 
@@ -283,7 +284,7 @@ observer 没有自己的时限，等多久由测试代码决定；「某件事�
 - `first`、`observations`、`listener` 的类型为 `PacketReceived` 或 `PacketSent` 时，调用工厂方法时就在调用线程上抛出 `IllegalArgumentException`；`packets`、`sentPackets`、`firstPacket`、`packetListener` 的数据包类方向不对时同样如此。bot 不受影响。
 - `blockBroken`：
   - 订阅 `BlockChanged`、`ChunkLoaded`、`WorldEntered`。只改变方块状态（例如朝向、含水）不算变成不同的方块。
-  - 在世界中注册时，`original()` 在 `onStart` 中读取；该位置所在区块未加载时抛出 `ChunkNotLoadedException`，bot 结束。
+  - 在世界中注册时，`original()` 在 `onStart` 中读取；该位置所在区块未加载时，`original()` 为之后该区块第一次加载时的方块，在这之前为 null。所以在未加载区块上调用 `breakBlock` 时，动作以 `CHUNK_NOT_LOADED` 取消，observer 随之以 `ACTION_COMPLETED` 关闭，`broken()` 为 false，`original()` 为 null。
   - 不在任何世界中时注册：坐标属于下一个世界。收到的第一条 `WorldEntered` 不关闭；`original()` 为进入之后该位置所在区块第一次加载时的方块，在这之前为 null；之后的 `WorldEntered` 照常关闭。
 - `distanceWithIn`、`distanceOutOf`：
   - 订阅 `PlayerMoved`、`PlayerTeleported`、`ActionCompleted`。在提交动作之后构造并注册；`action` 必须由同一个 bot 提交，否则注册时抛出 `IllegalArgumentException`。
@@ -321,9 +322,9 @@ public interface ObservedAction<O extends Observer> {
 ```
 
 - 在调度线程上的同一个任务中依次完成：注册 observer（调用 `onStart`）、调用 `submit` 提交一个动作、把 observer 绑定到这个动作上。动作开始执行之前 observer 已经在观察，中间没有可以被其它线程插入的间隔。在其它线程调用时等到任务完成才返回，不执行推进函数。
-- `submit` 必须返回它执行期间由这个 bot 提交的一个动作（按动作的编号判断），否则以 `BY_HANDLE` 关闭 observer 并抛出 `IllegalArgumentException`，bot 不受影响。`subscription()`、`onStart` 与 `submit` 抛出的异常结束 bot，`observeDuring` 抛出 `BotFailureException`。
+- `submit` 必须返回它执行期间由这个 bot 提交的一个动作（按动作的编号判断），否则以 `BY_HANDLE` 关闭 observer 并抛出 `IllegalArgumentException`，bot 不受影响。`subscription()` 或 `onStart` 抛出异常时只有这个 observer 以 `FAILED` 关闭，`observeDuring` 抛出 `ObserverFailureException`，不调用 `submit`；`submit` 抛出的异常结束 bot，`observeDuring` 抛出 `BotFailureException`。
 - 动作结束时产生的 `ActionCompleted` 投递完成后，observer 以 `ACTION_COMPLETED` 关闭。在此之前到达的数据包产生的记录都已经投递给它，包括同一个 bundle 中排在确认之前的数据包。动作在 `submit` 执行期间就已经结束时同样如此。
-- `ObservedAction.await`：动作被取消时照常返回；连接结束或 bot 因异常结束时抛出与 `Action.await` 相同的异常；等待期间执行推进函数；超时抛出 `BotTimeoutException`，不关闭 observer，也不取消动作。
+- `ObservedAction.await`：动作被取消时照常返回；observer 以 `FAILED` 关闭时立即抛出 `ObserverFailureException`，不等动作结束，也不取消动作；连接结束或 bot 因异常结束时抛出与 `Action.await` 相同的异常；等待期间执行推进函数；超时抛出 `BotTimeoutException`，不关闭 observer，也不取消动作。
 
 **破坏方块**：`breakBlock(pos[, face])` 等同于 `observeDuring(Observers.blockBroken(pos), bot -> bot.attemptBreakBlock(pos[, face]))`。`breakBlock(pos).await(timeout).broken()` 为 true 表示：从提交 `attemptBreakBlock` 到它结束这段时间内，`pos` 处的方块在 bot 的世界模型中至少有一次变成了方块编号不同的方块。
 
@@ -336,7 +337,7 @@ public interface ObservedAction<O extends Observer> {
 
 | 方法 | 行为 |
 |---|---|
-| `Bot.await(Predicate<StateReader>, Duration)` | 注册一个 `condition(predicate)` 并等它关闭；超时时关闭它并抛出 `BotTimeoutException`；它因连接结束或 bot 因异常结束而关闭时抛出与 `Action.await` 相同的异常 |
+| `Bot.await(Predicate<StateReader>, Duration)` | 注册一个 `condition(predicate)` 并等它关闭；超时时关闭它并抛出 `BotTimeoutException`；predicate 抛出异常时这个 observer 以 `FAILED` 关闭，抛出 `ObserverFailureException`，bot 不受影响；它因连接结束或 bot 因异常结束而关闭时抛出与 `Action.await` 相同的异常 |
 | `Bot.joined()` | 返回 `Action`，Login (play) 处理完成时执行完毕；bot 已经在世界中时在下一轮调度中执行完毕 |
 | `Bot.loaded()` | 返回 `Action`，发送 Player Loaded 时执行完毕；当前世界已经加载时在下一轮调度中执行完毕 |
 

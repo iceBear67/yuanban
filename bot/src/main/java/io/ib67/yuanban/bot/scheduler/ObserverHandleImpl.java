@@ -1,14 +1,14 @@
 package io.ib67.yuanban.bot.scheduler;
 
+import io.ib67.yuanban.bot.ObserverFailureException;
 import io.ib67.yuanban.bot.observe.CloseReason;
 import io.ib67.yuanban.bot.observe.Observer;
 import io.ib67.yuanban.bot.observe.ObserverHandle;
 import io.ib67.yuanban.bot.observe.dispatch.ObserverEntry;
-import io.ib67.yuanban.bot.observe.dispatch.ObserverFailure;
-import io.ib67.yuanban.bot.BotFailureException;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -54,13 +54,22 @@ final class ObserverHandleImpl<O extends Observer> implements ObserverHandle<O> 
     }
 
     @Override
+    public @Nullable Throwable failure() {
+        return entry.failure();
+    }
+
+    @Override
     public CloseReason awaitClose(Duration timeout) {
         bot.checkNotSchedulerThread("ObserverHandle.awaitClose");
-        return Waits.await(entry.closed(), timeout, bot.pump(), "observer " + observer + " to close");
+        var reason = Waits.await(entry.closed(), timeout, bot.pump(), "observer " + observer + " to close");
+        if (reason == CloseReason.FAILED) {
+            throw new ObserverFailureException(Objects.requireNonNull(entry.failure()));
+        }
+        return reason;
     }
 
     /**
-     * {@code onClose} 抛出的异常结束 bot，调用方收到 {@link BotFailureException}：在调度线程上调用时直接抛出；
+     * 这次关闭中 {@code onClose} 抛出异常时，调用方收到 {@link ObserverFailureException}：在调度线程上调用时直接抛出；
      * 在其它线程调用时由调度线程处理，等它处理完之后在调用线程上抛出
      */
     @Override
@@ -69,25 +78,35 @@ final class ObserverHandleImpl<O extends Observer> implements ObserverHandle<O> 
             return;
         }
         if (bot.onSchedulerThread()) {
-            try {
-                bot.dispatcher().close(entry, CloseReason.BY_HANDLE);
-            } catch (ObserverFailure e) {
-                bot.fail(e);
-                throw new BotFailureException(e.getCause());
-            }
+            closeByHandle();
             return;
         }
         var result = new CompletableFuture<Void>();
         bot.observerTask(() -> {
             try {
-                bot.dispatcher().close(entry, CloseReason.BY_HANDLE);
-            } catch (ObserverFailure e) {
-                result.completeExceptionally(new BotFailureException(e.getCause()));
-                // 由调度循环的处理入口结束 bot
-                throw e;
+                closeByHandle();
+            } catch (ObserverFailureException e) {
+                result.completeExceptionally(e);
+                return;
             }
             result.complete(null);
         });
         Waits.join(result);
+    }
+
+    /**
+     * 调度线程：以 BY_HANDLE 关闭；在这之前已经关闭的不做任何事
+     *
+     * @throws ObserverFailureException 这次关闭中 {@code onClose} 抛出异常
+     */
+    private void closeByHandle() {
+        if (!entry.isOpen()) {
+            return;
+        }
+        bot.dispatcher().close(entry, CloseReason.BY_HANDLE);
+        var failure = entry.failure();
+        if (failure != null) {
+            throw new ObserverFailureException(failure);
+        }
     }
 }

@@ -66,7 +66,8 @@ public interface TransportResolver {
 
 - `open()`（第一条连接，在调用线程上）与 `transfer()`（Transfer 线程上的新连接）都先把代数加一，再用这个代数创建 `Sink`。
 - `Sink` 交给入站队列的每个条目都带有它的代数。调度线程丢弃代数与当前不同的条目，所以 Transfer 之后旧连接的数据包与关闭通知都被忽略。
-- 新连接打开之后，接入任务（`attach`）在调度线程上检查代数：代数已经改变或者 bot 已经结束时关闭这条连接；否则把它设为当前连接，新建 `BundleBuffer`，调用 `ProtocolMachine.startLogin` 写入 Handshake 与 Login Start。
+- 新连接打开之后，接入任务（`attach`）在调度线程上检查代数：代数已经改变或者 bot 已经结束时关闭这条连接；否则把它设为当前连接，新建 `BundleBuffer`，调用 `ProtocolMachine.startLogin` 写入 Handshake 与 Login Start（要求连接状态为 `LOGIN`，见[协议状态机 · 连接阶段](protocol.md#连接阶段)）。
+- 打开连接与接入之间，连接已经可以向 `Sink` 交出数据包。属于当前代数、在接入之前（当前连接为 null）到达的数据包让 bot 以 `IllegalStateException` 结束。TCP 连接不会出现这种情况：服务端在收到 Login Start 之前不发送数据，而 Login Start 由接入任务写出；直接交出数据包对象的进程内连接必须等 bot 发出 Login Start 之后再交出数据包。
 - 每条连接有自己的 `DecodeContext`（在 `Sink` 中创建）。
 
 ## TCP 连接

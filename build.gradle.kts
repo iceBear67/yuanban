@@ -5,6 +5,7 @@ plugins {
     id("java-library")
     id("io.freefair.lombok") version "9.7.0"
     id("de.undercouch.download") version "5.7.0"
+    kotlin("jvm") version "2.4.20" apply false
 }
 
 group = "io.ib67"
@@ -13,6 +14,7 @@ version = property("version")!!
 allprojects {
     plugins.apply("java-library")
     plugins.apply("io.freefair.lombok")
+    plugins.apply("org.jetbrains.kotlin.jvm")
     repositories {
         mavenCentral()
         maven("https://repo.opencollab.dev/main/") {
@@ -33,11 +35,38 @@ allprojects {
         testImplementation(platform("org.junit:junit-bom:6.0.0"))
         testImplementation("org.junit.jupiter:junit-jupiter")
         testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+        // 测试使用 Kotlin 编写
+        testImplementation(kotlin("stdlib"))
         compileOnly("org.jetbrains:annotations:26.1.0")
     }
 
     tasks.test {
-        useJUnitPlatform()
+        useJUnitPlatform {
+            excludeTags("isolated")
+        }
+    }
+
+    // 带有 isolated 标签的测试类，每个类在单独的 JVM 中运行，见 story 模块的设计
+    val isolatedTest = tasks.register<Test>("isolatedTest") {
+        description = "运行带有 isolated 标签的测试类，每个类一个 JVM"
+        group = "verification"
+        val testSourceSet = project.the<SourceSetContainer>()["test"]
+        testClassesDirs = testSourceSet.output.classesDirs
+        classpath = testSourceSet.runtimeClasspath
+        useJUnitPlatform {
+            includeTags("isolated")
+        }
+        forkEvery = 1
+        maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+        // isolated 类的 ServerSetup 可以在创建服务端之前修改 Minestom 的 ServerProperties
+        systemProperty("minestom.properties.mutable", "true")
+        // 没有 isolated 测试的模块中，这个任务不发现任何测试
+        failOnNoDiscoveredTests = false
+        shouldRunAfter(tasks.test)
+    }
+
+    tasks.check {
+        dependsOn(isolatedTest)
     }
 }
 

@@ -1,0 +1,24 @@
+dependencies {
+    // 玩家由 bot 扮演
+    api(project(":bot"))
+    api("net.minestom:minestom:2026.10.05-26.2")
+    // @Story 组合了 JUnit 的 @Test 与 @ExtendWith，StoryExtension 实现 JUnit 的扩展接口
+    api(platform("org.junit:junit-bom:6.0.0"))
+    api("org.junit.jupiter:junit-jupiter-api")
+    // 期望中的比较使用 Kotest 的 Matcher
+    api("io.kotest:kotest-assertions-core:6.2.5")
+    api("org.jetbrains.kotlin:kotlin-stdlib")
+    // 按照 KClass 取得 ServerSetup 的 object 实例或者调用无参构造方法
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    // 运行示例故事，检查扩展给出的测试结论
+    testImplementation("org.junit.platform:junit-platform-testkit")
+}
+
+tasks.withType(Test).configureEach {
+    // 示例故事只由 EngineTestKit 显式选择运行，两个测试任务都排除它们
+    useJUnitPlatform {
+        excludeTags("sample")
+    }
+    // JoinStories 中 Transfer 到测试服务端：服务端属性在共享 JVM 中只读，只能在启动 JVM 时设置
+    systemProperty("minestom.accept-transfers", "true")
+}

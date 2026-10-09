@@ -39,7 +39,7 @@
 | 步骤 | 内容 |
 |---|---|
 | 1 | 执行 `observerTasks` 中的任务（其它线程交来的 observer 注册与关闭），然后投递观察记录 |
-| 2 | 取出入站队列的全部条目。`Received` 的代数与当前连接不同、或者 bot 已经结束时丢弃；否则交给 `BundleBuffer`，得到一批数据包后逐个交给 `ProtocolMachine.handle`，处理过程中 bot 结束或者代数改变（Transfer）时停止处理这一批的其余数据包；每批之后投递观察记录。`Closed` 的代数为当前连接时，带异常的结束 bot（`fail`），不带异常的按「connection closed」断开 |
+| 2 | 取出入站队列的全部条目。`Received` 的代数与当前连接不同、或者 bot 已经结束时丢弃；否则先检查这条连接的握手已经发出（第 4 步的接入已经执行）、数据包属于当前连接状态对应的协议阶段，不满足时结束 bot（[协议状态机 · 连接阶段](protocol.md#连接阶段)），然后交给 `BundleBuffer`，得到一批数据包后逐个交给 `ProtocolMachine.handle`，处理过程中 bot 结束或者代数改变（Transfer）时停止处理这一批的其余数据包；每批之后投递观察记录。`Closed` 的代数为当前连接时，带异常的结束 bot（`fail`），不带异常的按「connection closed」断开 |
 | 3 | 完成上一轮在调度线程上调用、调用时已经发生过的 `joined()` 与 `loaded()` |
 | 4 | 执行 `requests` 中的任务（动作入队、取消、查询、等待 `joined`/`loaded`、新连接的接入、`disconnect`），然后投递观察记录 |
 | 5 | bot 没有结束时：根据 `Bot` 与 `BotRuntime` 两级的请求更新实际的暂停状态，改变时产生 `MovementSuspensionChanged`；检查 TCP 连接的读取超时 |

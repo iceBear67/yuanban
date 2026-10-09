@@ -1,9 +1,11 @@
 package io.ib67.yuanban.bot.interaction;
 
+import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.Bot;
 import io.ib67.yuanban.bot.BotOptions;
 import io.ib67.yuanban.bot.BotRuntime;
+import io.ib67.yuanban.bot.BotStatus;
 import io.ib67.yuanban.bot.TestPeer;
 import io.ib67.yuanban.bot.TestServer;
 import io.ib67.yuanban.bot.data.ItemData;
@@ -31,6 +33,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.play
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundForgetLevelChunkPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.border.ClientboundSetBorderSizePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket;
@@ -358,6 +361,90 @@ class InteractionBotTest {
             peer.barrier();
             assertTrue(peer.sentSince(mark, ServerboundUseItemOnPacket.class).isEmpty());
             assertTrue(peer.sentSince(mark, ServerboundSwingPacket.class).isEmpty());
+        });
+    }
+
+    @Test
+    void aTargetDueNorthIsAimedAtBeforeTheBlockIsUsed() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            // 光标为 (0, -1, -1) 顶面的中心 (0.5, 0, -0.5)，在眼睛 (0.5, 1.62, 0.5) 的正北：
+            // Rotation.lookAt 的偏航角为 -180，本地玩家的位置把它规范为 180，两者按规范之后的值比较
+            var eye = new Vec(0.5, 1.62, 0.5);
+            var lookAt = Rotation.lookAt(eye, new Vec(0.5, 0, -0.5));
+            assertEquals(-180f, lookAt.yaw());
+            var mark = peer.mark();
+            var place = bot.placeBlock(new Vec(0, -1, -1), Direction.UP, Hand.MAIN_HAND);
+            var placement = peer.awaitSent(mark, ServerboundUseItemOnPacket.class, TIMEOUT);
+            assertEquals(Vector3i.from(0, -1, -1), placement.getPosition());
+            assertAimedBefore(peer.sentSince(mark), placement, new Rotation(180, lookAt.pitch()));
+            peer.push(new ClientboundBlockChangedAckPacket(placement.getSequence()));
+            assertTrue(place.await(TIMEOUT));
+        });
+    }
+
+    private static String cancelReason(Action action) {
+        return assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage();
+    }
+
+    @Test
+    void handActionsOnUnloadedChunksAreCancelled() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            // (100, -1, 0) 所在的区块 (6, 0) 没有加载
+            var far = new Vec(100, -1, 0);
+            var mark = peer.mark();
+            var dig = bot.attemptBreakBlock(far);
+            assertFalse(dig.await(TIMEOUT));
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED, cancelReason(dig));
+            var place = bot.placeBlock(far, Direction.UP, Hand.MAIN_HAND);
+            assertFalse(place.await(TIMEOUT));
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED, cancelReason(place));
+            // breakBlock：observer 注册时所在区块未加载，original 为 null；动作以 CHUNK_NOT_LOADED 取消
+            var broken = bot.breakBlock(far);
+            var observer = broken.await(TIMEOUT);
+            assertFalse(observer.broken());
+            assertNull(observer.original());
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED, cancelReason(broken.action()));
+            peer.barrier();
+            assertTrue(peer.sentSince(mark, ServerboundPlayerActionPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundUseItemOnPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundSwingPacket.class).isEmpty());
+            assertEquals(BotStatus.PLAY, bot.status());
+        });
+    }
+
+    @Test
+    void unloadingTheTargetChunkWhileDiggingCancelsTheDigging() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            // 目标 (16, -1, 0) 在区块 (1, 0) 中，空手挖石头需要 150 tick
+            var mark = peer.mark();
+            var dig = bot.attemptBreakBlock(new Vec(16, -1, 0));
+            awaitDigging(peer, mark, PlayerAction.START_DIGGING);
+            peer.push(new ClientboundForgetLevelChunkPacket(1, 0));
+            assertFalse(dig.await(TIMEOUT));
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED, cancelReason(dig));
+            // 与原版准星离开方块时的 stopDestroyBlock 相同：发送 Cancelled digging，面为 DOWN
+            var cancelled = awaitDigging(peer, mark, PlayerAction.CANCEL_DIGGING);
+            assertEquals(Vector3i.from(16, -1, 0), cancelled.getPosition());
+            assertEquals(Direction.DOWN, cancelled.getFace());
+            assertEquals(BotStatus.PLAY, bot.status());
+        });
+    }
+
+    @Test
+    void diggingIsCancelledBeforeAnythingIsSentWhenTheChunkAtTheEyesIsNotLoaded() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            // 目标 (16, -1, 0) 所在的区块 (1, 0) 已加载，眼睛所在的区块 (0, 0) 被卸载：计算进度时读取眼睛所在的方块
+            peer.push(new ClientboundForgetLevelChunkPacket(0, 0));
+            peer.barrier();
+            var mark = peer.mark();
+            var dig = bot.attemptBreakBlock(new Vec(16, -1, 0));
+            assertFalse(dig.await(TIMEOUT));
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED, cancelReason(dig));
+            // 开始的 tick 先计算进度、再发送 Started digging（原版 startDestroyBlock 的顺序），所以什么都没有发出
+            peer.barrier();
+            assertTrue(peer.sentSince(mark, ServerboundPlayerActionPacket.class).isEmpty());
+            assertTrue(peer.sentSince(mark, ServerboundSwingPacket.class).isEmpty());
+            assertEquals(BotStatus.PLAY, bot.status());
         });
     }
 

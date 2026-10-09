@@ -31,7 +31,7 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 - 进程内连接由外部模块实现 `Transport` 提供。实现要求见 `Transport`、`ClientConnection`、`InboundSink` 的注释：`InboundSink.accept` 必须串行调用，交给它的是 MCProtocolLib 的数据包对象。
 - `runtime.connect` 在调用线程上打开连接，建立 TCP 连接时会阻塞调用线程；连接失败时抛出 `UncheckedIOException`。
 - `bot.joined()` 在 Login (play) 处理完成时执行完毕，`bot.loaded()` 在 bot 发送 Player Loaded 时执行完毕。与原版客户端相同，bot 在收到 Game Event 13（开始等待区块）之后、玩家所在区块已经加载时发送 Player Loaded，自 Login (play) 或 Respawn 起超过 30 秒时不等区块加载也发送；服务端不发送 Game Event 13 时 bot 一直不加载。bot 已经在世界中、当前世界已经加载时，两者在下一轮调度中执行完毕。不在任何世界中时（重新配置、Transfer 期间）调用的两者等待下一个世界的 Login (play) 与 Player Loaded，Respawn 之后、加载之前调用的 `loaded()` 等待这次重生之后的加载。
-- `bot.status()` 给出连接所处的阶段。连接结束之后，`bot.disconnectReason()` 为断开原因，`bot.failure()` 为 bot 因异常结束时的异常。连接结束时某个 observer 的 `onClose` 抛出异常的，两者都有值，未结束的动作与之后的调用都得到 `BotFailureException`。
+- `bot.status()` 给出连接所处的阶段。连接结束之后，`bot.disconnectReason()` 为断开原因，`bot.failure()` 为 bot 因异常结束时的异常。
 
 ### 动作
 
@@ -51,6 +51,7 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 
 - bot 加载完成（`view().loaded()` 为 true）之前，三类请求都不开始执行。bot 不在任何世界中时（进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）提交的请求同样等待，进入世界并加载之后执行。
 - 离开世界（重新配置、Transfer）、在世界中收到 Login (play) 或 Respawn、玩家死亡时，移动与手部交互队列中在这个世界里提交的动作全部被取消（`WORLD_REBUILT`、`PLAYER_DIED`）；离开世界与 Login (play) 引起的取消不发送清理数据包（与原版客户端相同）。
+- 移动范围涉及未加载的区块，或者手部交互动作读取的方块所在区块未加载（`attemptBreakBlock` 的目标与眼睛所在的区块，`useItemOn`、`placeBlock` 的目标所在区块）时，这个动作以 `CHUNK_NOT_LOADED` 取消，bot 继续运行；挖掘中取消时发送 Cancelled digging。
 - Transfer 之前已经交给旧连接、还没有写出的数据包，因为旧连接断开而没有写出时，在写出时执行完毕的动作以 `BotDisconnectedException` 结束，bot 继续在新连接上登录。
 - `MoveOptions` 设置移动方式（`MovementMode` 的 `WALK`、`SPRINT`、`SNEAK`）、`moveTo` 判断到达的水平距离与寻路的最大距离、`moveForward` 的移动方向。`moveTo` 到达目标还要求玩家着地，并且脚部与目标的站立高度（站在目标位置时脚部的高度，按目标下方方块的碰撞箱计算，与寻路的终点相同）相差小于 1，所以目标在正上方或者正下方的另一层时不算到达。
 
@@ -97,7 +98,8 @@ assertTrue(damage.observer().damages().isEmpty());
 ```
 
 - 读取状态：observer 关闭之后，任何线程都可以通过 `handle.observer()` 直接读取。观察期间使用 `handle.read(o -> ...)`，读取函数在调度线程上执行；内置 observer 在观察期间被其它线程直接读取时抛出 `IllegalStateException`。
-- `ObserverHandle` 实现了 `AutoCloseable`，`closeReason()` 给出关闭原因（`CloseReason`）。连接结束时全部 observer 以 `DISCONNECTED` 关闭。`onClose` 抛出的异常结束 bot，这时 `handle.close()` 抛出 `BotFailureException`。
+- `ObserverHandle` 实现了 `AutoCloseable`，`closeReason()` 给出关闭原因（`CloseReason`）。连接结束时全部 observer 以 `DISCONNECTED` 关闭。
+- observer 的回调（`subscription()`、`onStart`、`onObservation`、`onClose`）抛出异常时，只有这个 observer 以 `FAILED` 关闭（不调用它的 `onClose`），bot 与其余 observer 不受影响。异常由 `handle.failure()` 给出，等待它的方法抛出 `ObserverFailureException`（原因为回调抛出的异常）：注册时失败的 `observe` 与 `observeDuring`（不提交动作），`awaitClose`，这次关闭中 `onClose` 抛出异常的 `handle.close()`，`ObservedAction.await`（立即抛出，不等动作结束，也不取消动作），以及条件抛出异常的 `bot.await`。回调期间这个 observer 已经被关闭（在自己的回调中调用 `handle.close()`，或者连接在回调中结束）时，异常无法再交给持有者，bot 以这个异常结束。
 - `Observers` 提供内置 observer：
   - 只做记录：`particlesWithin`、`sounds`、`blockChanges`、`blockAt`、`movementOf`、`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations`；除 `blockAt`、`movementOf` 以外都可以用 `limit(n)` 限制保存的记录数，必须在注册之前调用，注册之后调用抛出 `IllegalStateException`；
   - 得出结论时关闭自己：带关闭条件的 `movementOf` 与 `blockAt`，以及 `blockBroken`、`first`、`firstPacket`、`firstChat`、`firstTranslatedChat`、`condition`；

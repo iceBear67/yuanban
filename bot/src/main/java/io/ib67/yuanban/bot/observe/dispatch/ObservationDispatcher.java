@@ -1,12 +1,14 @@
 package io.ib67.yuanban.bot.observe.dispatch;
 
 import io.ib67.yuanban.bot.Action;
+import io.ib67.yuanban.bot.ObserverFailureException;
 import io.ib67.yuanban.bot.observe.CloseReason;
 import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
 import io.ib67.yuanban.bot.observe.Observation.PacketReceived;
 import io.ib67.yuanban.bot.observe.Observation.PacketSent;
 import io.ib67.yuanban.bot.observe.Observer;
+import io.ib67.yuanban.bot.observe.Subscription;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
 
 import java.util.ArrayDeque;
@@ -84,10 +86,16 @@ public final class ObservationDispatcher {
      * 注册 observer 并调用 {@code onStart}。从这之后产生的观察记录开始投递；
      * 在另一个 observer 的回调中注册时，从那个回调返回之后产生的观察记录开始投递
      *
-     * @throws ObserverFailure {@code onStart} 抛出异常
+     * @throws ObserverFailureException {@code subscription()} 或 {@code onStart} 抛出异常，这个 observer 以 FAILED 关闭
      */
     public ObserverEntry register(Observer observer) {
-        var entry = new ObserverEntry(observer, observer.subscription(), host, this, sequence);
+        Subscription subscription;
+        try {
+            subscription = observer.subscription();
+        } catch (Throwable t) {
+            throw new ObserverFailureException(t);
+        }
+        var entry = new ObserverEntry(observer, subscription, host, this, sequence);
         if (callbackDepth > 0) {
             entry.startSequence = Long.MAX_VALUE;
             entry.startDepth = callbackDepth;
@@ -95,6 +103,10 @@ public final class ObservationDispatcher {
         }
         index.add(entry);
         call(entry, () -> observer.onStart(entry.context));
+        var failure = entry.failure();
+        if (failure != null) {
+            throw new ObserverFailureException(failure);
+        }
         return entry;
     }
 
@@ -106,9 +118,8 @@ public final class ObservationDispatcher {
     }
 
     /**
-     * 按产生顺序投递待投递的观察记录，直到队列为空。在投递过程中再次调用时直接返回
-     *
-     * @throws ObserverFailure observer 的回调抛出异常
+     * 按产生顺序投递待投递的观察记录，直到队列为空。在投递过程中再次调用时直接返回。
+     * 回调抛出异常的 observer 以 FAILED 关闭，同一条记录照常交给其余 observer（见 {@link #call}）
      */
     public void flush() {
         if (flushing) {
@@ -138,9 +149,8 @@ public final class ObservationDispatcher {
     }
 
     /**
-     * 关闭 observer：从订阅索引中移除，调用 {@code onClose}，然后完成它的关闭 future。对已关闭的 observer 不做任何事
-     *
-     * @throws ObserverFailure {@code onClose} 抛出异常
+     * 关闭 observer：从订阅索引中移除，调用 {@code onClose}，然后完成它的关闭 future。对已关闭的 observer 不做任何事。
+     * {@code onClose} 抛出异常时 observer 以 FAILED 关闭，异常记在 {@link ObserverEntry#failure()} 中
      */
     public void close(ObserverEntry entry, CloseReason reason) {
         if (!entry.isOpen()) {
@@ -152,8 +162,8 @@ public final class ObservationDispatcher {
             callbackDepth++;
             entry.observer.onClose(reason, entry.context);
         } catch (Throwable t) {
-            entry.closed.complete(CloseReason.FAILED);
-            throw new ObserverFailure(t);
+            entry.fail(t);
+            return;
         } finally {
             entry.inCallback = false;
             callbackReturned();
@@ -163,27 +173,20 @@ public final class ObservationDispatcher {
 
     /**
      * 连接结束或 bot 因异常结束：丢弃待投递的记录，关闭全部 observer。
-     * 某个 observer 的 {@code onClose} 抛出的异常不影响其余 observer 的关闭，最后一起抛出
+     * 某个 observer 的 {@code onClose} 抛出异常时它以 FAILED 关闭，不影响其余 observer 的关闭
      */
     public void closeAll(CloseReason reason) {
         pending.clear();
-        RuntimeException failure = null;
         for (var entry : index.all()) {
-            try {
-                close(entry, reason);
-            } catch (ObserverFailure e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
-            }
-        }
-        if (failure != null) {
-            throw failure;
+            close(entry, reason);
         }
     }
 
+    /**
+     * 执行 observer 的回调。回调抛出异常时 observer 以 FAILED 关闭，不调用它的 {@code onClose}，异常记在
+     * {@link ObserverEntry#failure()} 中，由它的持有者在等待时得到。回调期间这个 observer 已经被关闭（在自己的回调中调用
+     * {@code ObserverHandle.close()}，或者连接在回调中结束）时，异常无法再随关闭交给持有者，原样抛出，结束 bot
+     */
     private void call(ObserverEntry entry, Runnable callback) {
         entry.inCallback = true;
         callbackDepth++;
@@ -191,9 +194,12 @@ public final class ObservationDispatcher {
             callback.run();
         } catch (Throwable t) {
             entry.inCallback = false;
+            if (!entry.isOpen()) {
+                throw t;
+            }
             index.remove(entry);
-            entry.closed.complete(CloseReason.FAILED);
-            throw new ObserverFailure(t);
+            entry.fail(t);
+            return;
         } finally {
             callbackReturned();
         }

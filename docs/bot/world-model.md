@@ -298,6 +298,7 @@ Synchronize Vehicle Position 指向本地玩家自己时（原版本地玩家也
 窗口编号与窗口 0 及打开的窗口都不同的数据包被忽略（原版客户端行为）。
 
 - **两边同步**：原版客户端的容器与窗口 0 共用同一个玩家物品栏，wiki Set Container Slot 规定服务端对其中一边的修改不会针对另一边重发。所以一边的主物品栏与快捷栏修改同时写入另一边，两边各产生一条 `SlotChanged`。
+- **打开时的玩家物品栏部分**：打开窗口（Open Screen、Open Horse Screen）时，新窗口的主物品栏与快捷栏取窗口 0 的物品（原版客户端的容器菜单直接使用玩家的 `Inventory`），不产生 `SlotChanged`；之后 Set Container Content 中这一部分与已有的物品相同时同样不产生。服务端打开窗口时不一定发送这一部分：Minestom 的 `AbstractInventory.update` 只发送容器自己的槽位。
 - **状态编号与光标**：每个窗口各自记录（原版每个 `AbstractContainerMenu` 各有 `stateId` 与 `carried`）。点击使用当前窗口的状态编号；`StateReader.cursor()` 为当前窗口（打开的窗口，没有打开窗口时为窗口 0）的光标，它改变时（包括打开与关闭窗口使当前窗口改变）产生 `CursorChanged`，排在 `WindowOpened`、`WindowClosed` 之前。
 - **身体护甲与鞍**：在窗口 0 中没有槽位，保存在 `InventoryModel` 中，由 `StateReader.equipment(BODY 或 SADDLE)` 读取，改变时产生 `EntityEquipmentChanged`（实体编号为本地玩家的）。其它装备槽位在窗口 0 中，`equipment` 对它们抛出 `IllegalArgumentException`。
 

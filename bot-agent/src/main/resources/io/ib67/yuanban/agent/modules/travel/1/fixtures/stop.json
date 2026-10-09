@@ -1,0 +1,15 @@
+{
+  "name": "stop",
+  "description": "移动中收到 stop：正在执行的移动被取消，脚本及时返回，之后不再调用工具",
+  "input": {"target": {"x": 10.5, "y": 64, "z": 0.5}},
+  "actions": [
+    {"tool": "locomotion.moveTo", "outcome": "completed", "delayMs": 5000}
+  ],
+  "stopAtMs": 300,
+  "expect": {
+    "status": "STOPPED",
+    "result": {"kind": "stopped"},
+    "stopWithinMs": 1500,
+    "noToolCallsAfterStop": true
+  }
+}

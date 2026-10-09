@@ -31,6 +31,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.Clientbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundGameEventPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
@@ -45,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -460,6 +462,25 @@ class SchedulerTest {
     }
 
     @Test
+    void onlyTheProtocolStatusTransitionsAreAllowed() {
+        // Login Finished、Finish Configuration、Start Configuration、Transfer、连接结束或 bot 因异常结束
+        var allowed = Set.of(
+                List.of(BotStatus.LOGIN, BotStatus.CONFIGURATION),
+                List.of(BotStatus.CONFIGURATION, BotStatus.PLAY),
+                List.of(BotStatus.PLAY, BotStatus.CONFIGURATION),
+                List.of(BotStatus.CONFIGURATION, BotStatus.LOGIN),
+                List.of(BotStatus.PLAY, BotStatus.LOGIN),
+                List.of(BotStatus.LOGIN, BotStatus.DISCONNECTED),
+                List.of(BotStatus.CONFIGURATION, BotStatus.DISCONNECTED),
+                List.of(BotStatus.PLAY, BotStatus.DISCONNECTED));
+        for (var from : BotStatus.values()) {
+            for (var to : BotStatus.values()) {
+                assertEquals(allowed.contains(List.of(from, to)), BotInstance.allowedTransition(from, to), from + " -> " + to);
+            }
+        }
+    }
+
+    @Test
     void oneFailingBotDoesNotStopOthers() {
         try (var runtime = BotRuntime.create()) {
             var peerA = new TestPeer();
@@ -468,11 +489,10 @@ class SchedulerTest {
             var b = TestServer.joinedBot(runtime, peerB, "healthy", new Pos(0.5, 0, 0.5));
             var pending = a.moveForward(1000);
             var other = a.observe(Observers.chatMessages());
-            a.observe(Observers.listener(BotTicked.class, _ -> {
-                throw new IllegalStateException("observer bug");
-            }));
+            // 窗口 0 没有槽位 46：原版 AbstractContainerMenu.getSlot 越界抛出异常，bot 以这个异常结束
+            peerA.push(new ClientboundContainerSetSlotPacket(0, 1, 46, null));
             var failure = assertThrows(BotFailureException.class, () -> pending.await(TIMEOUT));
-            assertEquals("observer bug", failure.getCause().getMessage());
+            assertInstanceOf(IndexOutOfBoundsException.class, failure.getCause());
             assertEquals(BotStatus.DISCONNECTED, a.status());
             assertEquals(io.ib67.yuanban.bot.observe.CloseReason.DISCONNECTED, other.closeReason());
             assertThrows(BotFailureException.class, () -> a.rotate(0, 0));

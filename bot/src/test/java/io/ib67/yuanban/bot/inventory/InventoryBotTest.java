@@ -8,6 +8,7 @@ import io.ib67.yuanban.bot.data.ItemData;
 import io.ib67.yuanban.bot.observe.Observation.CursorChanged;
 import io.ib67.yuanban.bot.observe.Observation.EntityEquipmentChanged;
 import io.ib67.yuanban.bot.observe.Observation.HeldSlotChanged;
+import io.ib67.yuanban.bot.observe.Observation.SlotChanged;
 import io.ib67.yuanban.bot.observe.Observation.WindowClosed;
 import io.ib67.yuanban.bot.observe.Observation.WindowOpened;
 import io.ib67.yuanban.bot.observe.builtin.Observers;
@@ -97,6 +98,38 @@ class InventoryBotTest {
             // 按键的类型必须与模式对应，在提交请求的线程上检查
             assertThrows(IllegalArgumentException.class,
                     () -> bot.inventory().click(5, ContainerActionType.SHIFT_CLICK_ITEM, ClickItemAction.LEFT_CLICK));
+        }
+    }
+
+    @Test
+    void openedWindowsStartWithThePlayerInventory() {
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "sharer", new Pos(0.5, 0, 0.5));
+            var stone = item("stone");
+            var dirt = item("dirt");
+            // 窗口 0：主物品栏第一格（槽位 9）为石头，快捷栏第一格（槽位 36）为泥土
+            peer.push(new ClientboundContainerSetSlotPacket(0, 1, 9, stone), new ClientboundContainerSetSlotPacket(0, 2, 36, dirt));
+            peer.barrier();
+            var changes = bot.observe(Observers.observations(SlotChanged.class));
+            // 原版客户端的容器菜单直接使用玩家的 Inventory，打开时玩家物品栏部分就有这些物品（一行的箱子：主物品栏从 9 开始，快捷栏从 36 开始）
+            peer.push(new ClientboundOpenScreenPacket(7, ContainerType.GENERIC_9X1, Component.text("box")));
+            peer.barrier();
+            var window = bot.view().openWindow();
+            assertEquals(stone, window.slot(9));
+            assertEquals(dirt, window.slot(36));
+            // Minestom 打开窗口时只发送容器自己的槽位：玩家物品栏部分不变
+            var content = new ItemStack[9];
+            content[0] = dirt;
+            peer.push(new ClientboundContainerSetContentPacket(7, 3, content, null));
+            peer.barrier();
+            window = bot.view().openWindow();
+            assertEquals(dirt, window.slot(0));
+            assertEquals(stone, window.slot(9));
+            assertEquals(dirt, window.slot(36));
+            changes.close();
+            // 打开窗口时物品没有改变，只有容器槽位 0 产生变化
+            assertEquals(List.of(new SlotChanged(7, 0, null, dirt)), changes.observer().observations());
         }
     }
 

@@ -73,7 +73,7 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 | [`view`](../../bot/src/main/java/io/ib67/yuanban/bot/view) | `BotView`、`StateReader`、各快照 record、`ActiveEffect`、`EntityMeta`、`EntityMetaIndex`、`ChatLine`、`ChatKind` | 只读的查询接口与快照 | [查询与观察 · 查询](observation.md#查询) |
 | [`observe`](../../bot/src/main/java/io/ib67/yuanban/bot/observe) | `Observation`、`Observer`、`Subscription`、`ObserverContext`、`ObserverHandle`、`CloseReason`、`WorldBoundObserver`、`WorldInfo`、`WorldEntryCause`、`WorldRecord`、`WorldClosed`、`Region` | 观察的公开接口 | [查询与观察](observation.md) |
 | [`observe.builtin`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/builtin) | `Observers` 与各内置 observer、`MovementCriteria`、`Records`、各记录 record | 内置 observer | [查询与观察 · 内置 observer](observation.md#内置-observer) |
-| [`observe.dispatch`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost`、`RegistrationCheck`、`ObserverFailure` | 观察记录的投递与订阅索引 | [查询与观察 · 投递](observation.md#投递) |
+| [`observe.dispatch`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost`、`RegistrationCheck` | 观察记录的投递与订阅索引 | [查询与观察 · 投递](observation.md#投递) |
 
 ## 公开接口与内部实现
 

@@ -18,8 +18,8 @@ import java.util.Objects;
  * 该位置的方块变成方块编号（{@link Block#id()}）与 {@link #original()} 不同的方块时关闭自己；进入新世界时也关闭。
  * 只改变方块状态（例如朝向、含水）不算变成不同的方块。
  * <ul>
- *     <li>在世界中注册时，{@code original} 为此刻该位置的方块；所在区块未加载时 {@code onStart} 抛出
- *     {@link io.ib67.yuanban.bot.ChunkNotLoadedException}；</li>
+ *     <li>在世界中注册时，{@code original} 为此刻该位置的方块；所在区块未加载时为该区块第一次加载时的方块，
+ *     在这之前该位置不会产生 {@link BlockChanged}；</li>
  *     <li>不在任何世界中时注册，坐标属于下一个世界：收到的第一条 {@link WorldEntered} 不关闭，
  *     {@code original} 为进入之后该位置所在区块第一次加载时的方块，在这之前该位置不会产生 {@link BlockChanged}。</li>
  * </ul>
@@ -46,8 +46,8 @@ public final class BlockBrokenObserver extends BuiltinObserver {
     }
 
     /**
-     * 注册时该位置的方块；不在任何世界中注册时，为进入下一个世界之后该位置所在区块第一次加载时的方块，
-     * 在这之前为 null
+     * 注册时该位置的方块；注册时所在区块未加载的，为之后该区块第一次加载时的方块；不在任何世界中注册时，
+     * 为进入下一个世界之后该位置所在区块第一次加载时的方块。在这之前为 null
      */
     public @Nullable Block original() {
         checkReadable();
@@ -71,7 +71,10 @@ public final class BlockBrokenObserver extends BuiltinObserver {
     void started(ObserverContext context) {
         if (context.world() != null) {
             inWorld = true;
-            original = context.state().block(position);
+            var state = context.state();
+            if (state.chunkLoaded(CoordConversion.globalToChunk(position.blockX()), CoordConversion.globalToChunk(position.blockZ()))) {
+                original = state.block(position);
+            }
         }
     }
 

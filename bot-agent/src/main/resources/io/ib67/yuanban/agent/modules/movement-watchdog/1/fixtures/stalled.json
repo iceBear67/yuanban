@@ -1,0 +1,17 @@
+{
+  "name": "stalled",
+  "description": "primary 的移动持续 2 秒，期间没有位置变化：发出 fault(stalled)，primary 结束后 drain",
+  "asSupervisorOf": {
+    "primary": "travel@1",
+    "input": {"target": {"x": 10.5, "y": 64, "z": 0.5}, "watchdog": {"stallMs": 600}}
+  },
+  "actions": [
+    {"tool": "locomotion.moveTo", "outcome": "completed", "delayMs": 2000}
+  ],
+  "timeoutMs": 8000,
+  "expect": {
+    "status": "COMPLETED",
+    "result": {"kind": "drained"},
+    "events": [{"type": "fault", "topic": "stalled"}]
+  }
+}

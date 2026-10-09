@@ -3,6 +3,8 @@ package io.ib67.yuanban.bot.observe;
 /**
  * 由用户构造、交给 {@link io.ib67.yuanban.bot.Bot#observe} 的观察者。
  * 全部回调在调度线程上执行；回调阻塞会让同一 {@link io.ib67.yuanban.bot.BotRuntime} 中的全部 bot 停住。
+ * 回调抛出异常时只有这个 observer 以 {@link CloseReason#FAILED} 关闭，bot 不受影响，异常交给等待它的一方
+ * （{@link io.ib67.yuanban.bot.ObserverFailureException}）。
  */
 public interface Observer {
     /**
