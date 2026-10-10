@@ -6,6 +6,8 @@ build/
 !**/src/test/**/build/
 .kotlin
 
+local-test/
+
 ### IntelliJ IDEA ###
 .idea/modules.xml
 .idea/jarRepositories.xml

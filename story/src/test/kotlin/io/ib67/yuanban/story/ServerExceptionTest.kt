@@ -31,7 +31,7 @@ class ServerExceptionTest {
 
         // bot 因异常结束时示例故事失败
         val botFailure = samples.failure("bot 因异常结束").shouldBeInstanceOf<StoryFailure>()
-        botFailure.stackTraceToString() shouldContain "observer 的异常"
+        botFailure.stackTraceToString() shouldContain "is updated before it is added"
 
         // 用户名不在路由表中的玩家被默认的访客处理器踢出，并记为服务端异常
         val visitorFailure = samples.failure("用户名不在路由表中的玩家").shouldBeInstanceOf<StoryFailure>()

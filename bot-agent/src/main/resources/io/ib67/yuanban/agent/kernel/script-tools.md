@@ -5,7 +5,7 @@
 
 注意：async 函数返回请求对象时，请求会被 Promise 当作 thenable 执行。需要传递未执行的请求时放进对象，例如 `{retry: 请求}`。
 
-结果的 kind：OK、ACTION_CANCELLED（reason 为 BY_USER、NO_PATH、BLOCKED、NO_ENTITY、CHUNK_NOT_LOADED、WORLD_REBUILT、PLAYER_DIED）、
+结果的 kind：OK、ACTION_CANCELLED（reason 为 BY_USER、NO_PATH、BLOCKED、NO_ENTITY、CHUNK_NOT_LOADED、OUT_OF_RANGE、WORLD_REBUILT、PLAYER_DIED）、
 DISCONNECTED、BOT_FAILURE、TIMEOUT、CHUNK_NOT_LOADED、NOT_IN_WORLD、WAIT_TIMEOUT、ASSERTION_FAILED、WOULD_EXECUTE（dry-run，ok 为 true）、
 INVALID_ARGUMENT、PERMISSION_DENIED、LEASE_REQUIRED、BUDGET_EXHAUSTED、RATE_LIMITED、DUPLICATE_SUPPRESSED（ok 为 true）、
 UNCERTAIN_SIDE_EFFECT、LIMIT_EXCEEDED、RESULT_TOO_LARGE、CANCELLED（网关取消：停止、暂停 PAUSED、lease 变化）、REPLAY_MISMATCH。
@@ -41,5 +41,5 @@ observer 描述（交给 withObserver 或 attempt 的 observer 选项）：`api.
 `{gameMode: SURVIVAL|CREATIVE|ADVENTURE|SPECTATOR}`。
 
 恢复：`api.recover(kind, async (result, {attempt, request}) => ..., {maxRetries, budgetMs})` 只能注册 CHUNK_NOT_LOADED、NO_PATH、BLOCKED、
-NO_ENTITY、WAIT_TIMEOUT、TIMEOUT；`api.attempt` 遇到这些错误时运行处理函数后重试，处理函数返回 `{retry: 请求}` 时改用这个请求，返回 false 时放弃。
+NO_ENTITY、OUT_OF_RANGE、WAIT_TIMEOUT、TIMEOUT；`api.attempt` 遇到这些错误时运行处理函数后重试，处理函数返回 `{retry: 请求}` 时改用这个请求，返回 false 时放弃。
 开始与用完时自动发出 recovery_started、recovery_exhausted 通知。

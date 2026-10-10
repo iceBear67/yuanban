@@ -8,6 +8,7 @@ import net.kyori.adventure.key.Key;
 import net.minestom.server.instance.block.Block;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.AttackRange;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentType;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.Equippable;
@@ -30,8 +31,9 @@ import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
 /**
- * 物品的编号与默认组件，取自 {@code item.json}。默认组件只转换本库读取的四种：{@code tool}、{@code equippable}、
- * {@code use_effects}、{@code piercing_weapon}。JSON 是原版编解码器的格式，取默认值的字段被省略，转换时按原版编解码器的默认值补上。
+ * 物品的编号与默认组件，取自 {@code item.json}。默认组件只转换本库读取的五种：{@code tool}、{@code equippable}、
+ * {@code use_effects}、{@code piercing_weapon}、{@code attack_range}。JSON 是原版编解码器的格式，取默认值的字段被省略，
+ * 转换时按原版编解码器的默认值补上。
  */
 public final class ItemData {
     private static final Map<String, BuiltinSound> SOUNDS = Arrays.stream(BuiltinSound.values())
@@ -41,6 +43,7 @@ public final class ItemData {
     private static final Equippable[] EQUIPPABLES;
     private static final UseEffects[] USE_EFFECTS;
     private static final PiercingWeapon[] PIERCING_WEAPONS;
+    private static final AttackRange[] ATTACK_RANGES;
 
     static {
         var json = MinestomDataFiles.read("item.json");
@@ -49,6 +52,7 @@ public final class ItemData {
         EQUIPPABLES = new Equippable[count];
         USE_EFFECTS = new UseEffects[count];
         PIERCING_WEAPONS = new PiercingWeapon[count];
+        ATTACK_RANGES = new AttackRange[count];
         for (var item : json.entrySet()) {
             var entry = item.getValue().getAsJsonObject();
             var id = entry.get("id").getAsInt();
@@ -61,6 +65,7 @@ public final class ItemData {
             EQUIPPABLES[id] = convert(components, "minecraft:equippable", ItemData::equippable);
             USE_EFFECTS[id] = convert(components, "minecraft:use_effects", ItemData::useEffects);
             PIERCING_WEAPONS[id] = convert(components, "minecraft:piercing_weapon", ItemData::piercingWeapon);
+            ATTACK_RANGES[id] = convert(components, "minecraft:attack_range", ItemData::attackRange);
         }
     }
 
@@ -82,7 +87,7 @@ public final class ItemData {
      * 物品的默认组件
      *
      * @return 物品没有这个默认组件时为 null
-     * @throws IllegalArgumentException 不是本类转换的四种组件之一，或者没有这个物品编号
+     * @throws IllegalArgumentException 不是本类转换的五种组件之一，或者没有这个物品编号
      */
     @SuppressWarnings("unchecked")
     public static <T> @Nullable T prototype(int itemId, DataComponentType<T> type) {
@@ -100,6 +105,9 @@ public final class ItemData {
         }
         if (type == DataComponentTypes.PIERCING_WEAPON) {
             return (T) PIERCING_WEAPONS[itemId];
+        }
+        if (type == DataComponentTypes.ATTACK_RANGE) {
+            return (T) ATTACK_RANGES[itemId];
         }
         throw new IllegalArgumentException("default component " + type + " is not loaded");
     }
@@ -158,6 +166,16 @@ public final class ItemData {
         return new PiercingWeapon(booleanOr(json, "deals_knockback", true), booleanOr(json, "dismounts", false),
                 json.has("sound") ? sound(json.get("sound")) : null,
                 json.has("hit_sound") ? sound(json.get("hit_sound")) : null);
+    }
+
+    /**
+     * 原版 {@code AttackRange.CODEC}：{@code min_reach} 默认 0，{@code max_reach} 默认 3，{@code min_creative_reach} 默认 0，
+     * {@code max_creative_reach} 默认 5，{@code hitbox_margin} 默认 0.3，{@code mob_factor} 默认 1
+     */
+    private static AttackRange attackRange(JsonObject json) {
+        return new AttackRange(floatOr(json, "min_reach", 0.0F), floatOr(json, "max_reach", 3.0F),
+                floatOr(json, "min_creative_reach", 0.0F), floatOr(json, "max_creative_reach", 5.0F),
+                floatOr(json, "hitbox_margin", 0.3F), floatOr(json, "mob_factor", 1.0F));
     }
 
     /**

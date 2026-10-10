@@ -25,13 +25,14 @@ import java.util.UUID;
  */
 public final class LocalPlayer {
     /**
-     * 原版客户端常量：站立与潜行时的眼睛高度、包围盒高度
+     * 原版 {@code Avatar.STANDING_DIMENSIONS} 与 {@code Avatar.POSES} 中潜行的尺寸：站立与潜行时的眼睛高度、包围盒的宽与高。
+     * 原版以 float 保存与计算，所以这里也是 float
      */
-    public static final double STANDING_EYE_HEIGHT = 1.62;
-    public static final double SNEAKING_EYE_HEIGHT = 1.27;
-    public static final double WIDTH = 0.6;
-    public static final double STANDING_HEIGHT = 1.8;
-    public static final double SNEAKING_HEIGHT = 1.5;
+    public static final float STANDING_EYE_HEIGHT = 1.62F;
+    public static final float SNEAKING_EYE_HEIGHT = 1.27F;
+    public static final float WIDTH = 0.6F;
+    public static final float STANDING_HEIGHT = 1.8F;
+    public static final float SNEAKING_HEIGHT = 1.5F;
 
     private final UUID uuid;
     private final String username;
@@ -278,8 +279,12 @@ public final class LocalPlayer {
         return attributes.value(AttributeType.Builtin.SCALE);
     }
 
+    /**
+     * 眼睛高度 1.62（潜行时 1.27）乘以 {@code minecraft:scale} 属性。与原版 {@code EntityDimensions.scale} 相同以 float 计算：
+     * 属性值先换成 float（原版 {@code LivingEntity.getScale}）
+     */
     public double eyeHeight() {
-        return (sneaking ? SNEAKING_EYE_HEIGHT : STANDING_EYE_HEIGHT) * scale();
+        return (sneaking ? SNEAKING_EYE_HEIGHT : STANDING_EYE_HEIGHT) * (float) scale();
     }
 
     public Vec eyePosition() {
@@ -287,11 +292,14 @@ public final class LocalPlayer {
     }
 
     /**
-     * 宽 0.6、高 1.8（潜行时 1.5），乘以 {@code minecraft:scale} 属性
+     * 宽 0.6、高 1.8（潜行时 1.5），乘以 {@code minecraft:scale} 属性，与 {@link #eyeHeight()} 相同以 float 计算。
+     * 原版 {@code EntityDimensions.makeBoundingBox} 的半宽为 float 的 {@code 宽 / 2}，0.6F 时换成 double 是 0.30000001192092896；
+     * 按 double 的 0.3 计算时，贴墙的玩家在服务端的包围盒会伸进墙内
      */
     public BoundingBox boundingBox() {
-        var scale = scale();
-        return new BoundingBox(WIDTH * scale, (sneaking ? SNEAKING_HEIGHT : STANDING_HEIGHT) * scale, WIDTH * scale);
+        var scale = (float) scale();
+        var width = WIDTH * scale;
+        return new BoundingBox(width, (sneaking ? SNEAKING_HEIGHT : STANDING_HEIGHT) * scale, width);
     }
 
     public PlayerSnapshot snapshot() {

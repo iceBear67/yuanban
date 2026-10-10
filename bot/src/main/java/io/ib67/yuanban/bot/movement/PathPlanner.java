@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.movement;
 
+import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.world.WorldSnapshot;
 import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Point;
@@ -41,16 +42,17 @@ public final class PathPlanner {
     }
 
     /**
+     * @param tags 服务端的标签，节点生成器用它判断方块能否攀爬（{@link PlayerNodeGenerator}）
      * @return 路径的节点列表；列表为空表示找不到路径
      */
     public static CompletableFuture<List<PNode>> plan(WorldSnapshot snapshot, Pos start, Point target, double closeDistance,
-                                                      double maxDistance, BoundingBox boundingBox, boolean onGround) {
+                                                      double maxDistance, BoundingBox boundingBox, boolean onGround, TagTable tags) {
         var result = new CompletableFuture<List<PNode>>();
         Thread.ofVirtual().name("yuanban-bot-path").start(() -> {
             try {
-                // GroundNodeGenerator 内部有可变状态，每次寻路新建一个
+                // PlayerNodeGenerator 内部有可变状态，每次寻路新建一个
                 var path = PathGenerator.generate(snapshot, start, target, closeDistance, maxDistance, PATH_VARIANCE,
-                        boundingBox, onGround, new GroundNodeGenerator(), null);
+                        boundingBox, onGround, new PlayerNodeGenerator(tags), null);
                 result.complete(List.copyOf(path.getNodes()));
             } catch (Throwable t) {
                 result.completeExceptionally(t);

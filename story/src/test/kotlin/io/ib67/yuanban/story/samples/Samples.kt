@@ -2,8 +2,6 @@ package io.ib67.yuanban.story.samples
 
 import io.ib67.yuanban.bot.Bot
 import io.ib67.yuanban.bot.BotOptions
-import io.ib67.yuanban.bot.observe.Observation
-import io.ib67.yuanban.bot.observe.builtin.Observers
 import io.ib67.yuanban.bot.transport.TcpTransport
 import io.ib67.yuanban.story.IsolatedJvm
 import io.ib67.yuanban.story.Story
@@ -14,8 +12,10 @@ import net.minestom.server.event.Event
 import net.minestom.server.event.EventNode
 import net.minestom.server.instance.Instance
 import net.minestom.server.instance.block.Block
+import net.minestom.server.network.packet.server.play.BossBarPacket
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Tag
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -116,7 +116,8 @@ class ServerExceptionSamples {
     @Story
     fun `bot 因异常结束`() = story {
         val alice = player("alice")
-        alice.bot.observe(Observers.listener(Observation.BotTicked::class.java) { throw IllegalStateException("observer 的异常") })
+        // 更新没有添加过的 Boss Bar：bot 以 IllegalStateException 结束（docs/bot/errors.md「结束 bot 的输入」）
+        env.onServer { alice.player.sendPacket(BossBarPacket(UUID.randomUUID(), BossBarPacket.UpdateHealthAction(0.5f))) }
         env.awaitServer(10.seconds) { alice.bot.failure() != null }
     }
 

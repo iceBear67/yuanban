@@ -958,15 +958,16 @@ class WorldPacketsTest {
             peer.push(spawn(106, EntityType.VILLAGER), new ClientboundUpdateAttributesPacket(106, scaled),
                     metadata(106, pose(Pose.SLEEPING)));
             peer.barrier();
-            var slimeWidth = EntityTypeData.width(EntityType.SLIME);
-            assertEquals(new BoundingBox(0.49, 0.98, 0.49), bot.view().entity(100).boundingBox());
-            assertEquals(new BoundingBox(0.9, 1.4, 0.9), bot.view().entity(101).boundingBox());
-            assertEquals(new BoundingBox(slimeWidth, EntityTypeData.height(EntityType.SLIME), slimeWidth),
+            // 原版的尺寸为 float：实体类型的宽高换成 float，scale 换成 float 再相乘
+            var slimeWidth = (float) EntityTypeData.width(EntityType.SLIME);
+            assertEquals(new BoundingBox(0.49F, 0.98F, 0.49F), bot.view().entity(100).boundingBox());
+            assertEquals(new BoundingBox(0.45F * 2, 0.7F * 2, 0.45F * 2), bot.view().entity(101).boundingBox());
+            assertEquals(new BoundingBox(slimeWidth, (float) EntityTypeData.height(EntityType.SLIME), slimeWidth),
                     bot.view().entity(102).boundingBox());
-            assertEquals(new BoundingBox(0.95, 0.425, 0.95), bot.view().entity(103).boundingBox());
-            assertEquals(new BoundingBox(1.2, 3.0, 1.2), bot.view().entity(104).boundingBox());
-            assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(105).boundingBox());
-            assertEquals(new BoundingBox(0.2, 0.2, 0.2), bot.view().entity(106).boundingBox());
+            assertEquals(new BoundingBox(0.95F, 0.425F, 0.95F), bot.view().entity(103).boundingBox());
+            assertEquals(new BoundingBox(0.6F * 2, 1.5F * 2, 0.6F * 2), bot.view().entity(104).boundingBox());
+            assertEquals(new BoundingBox(0.2F, 0.2F, 0.2F), bot.view().entity(105).boundingBox());
+            assertEquals(new BoundingBox(0.2F, 0.2F, 0.2F), bot.view().entity(106).boundingBox());
         });
     }
 }

@@ -238,7 +238,8 @@ public final class ToolCatalog {
                     var args = context.args();
                     return context.action(new ActionSpec.UseItem(hand(args), args.has("holdTicks") ? args.get("holdTicks").getAsInt() : null));
                 });
-        add("interaction.attack", ToolLayer.INTERACTION, "攻击实体",
+        add("interaction.attack", ToolLayer.INTERACTION, "看向实体并攻击；目标超出原版客户端的攻击距离（默认为眼睛到目标包围盒 3 格，"
+                        + "随 entity_interaction_range 属性与手持物品的 attack_range 组件变化）时以 OUT_OF_RANGE 取消；成功只表示攻击数据包已写出",
                 schema(ENTITY, "entityId"), true, true, INTERACT, INTERACT_MAX,
                 context -> context.action(new ActionSpec.Attack(context.args().get("entityId").getAsInt())));
         add("interaction.interact", ToolLayer.INTERACTION, "与实体交互（右键）",

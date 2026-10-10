@@ -21,9 +21,14 @@ public final class ActionCancelledException extends RuntimeException {
      */
     public static final String NO_ENTITY = "实体不存在";
     /**
-     * 移动范围涉及未加载的区块，或者手部交互动作（挖掘、对方块使用物品）读取的方块所在区块未加载
+     * 移动范围涉及未加载的区块；{@code moveTo} 找不到路径（或者只能走到最近点）并且寻路时目标所在区块未加载；
+     * 或者手部交互动作（挖掘、对方块使用物品）读取的方块所在区块未加载
      */
     public static final String CHUNK_NOT_LOADED = "区块未加载";
+    /**
+     * {@code attack} 发送时目标不在原版客户端的攻击距离内
+     */
+    public static final String OUT_OF_RANGE = "超出攻击距离";
     /**
      * 世界重建，移动与手部交互队列中在上一个世界里提交的动作被取消：离开世界（Start Configuration、Transfer），
      * 或者在世界中收到 Login (play) 或 Respawn。不在任何世界中时收到的 Login (play) 不取消这期间提交的动作

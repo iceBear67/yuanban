@@ -18,7 +18,7 @@ public final class Items {
 
     /**
      * 物品实际的组件：补丁中有这个组件时取补丁中的值（值为 null 表示补丁移除了它），否则取默认组件。
-     * 只支持 {@link ItemData#prototype} 转换的四种组件与 {@link DataComponentTypes#CAN_BREAK}（原版物品都没有这个默认组件）
+     * 只支持 {@link ItemData#prototype} 转换的五种组件与 {@link DataComponentTypes#CAN_BREAK}（原版物品都没有这个默认组件）
      *
      * @param item 物品；为 null（空槽位）时没有任何组件
      * @throws IllegalArgumentException 不支持的组件

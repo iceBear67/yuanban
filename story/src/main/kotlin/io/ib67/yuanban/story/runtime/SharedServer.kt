@@ -6,6 +6,9 @@ import net.minestom.server.Auth
 import net.minestom.server.MinecraftServer
 import net.minestom.server.ServerProcess
 import net.minestom.server.event.server.ServerTickMonitorEvent
+import net.minestom.server.listener.common.KeepAliveListener
+import net.minestom.server.listener.manager.PacketPlayListenerConsumer
+import net.minestom.server.network.packet.client.common.ClientKeepAlivePacket
 import net.minestom.server.property.ServerProperties
 import org.junit.jupiter.api.extension.ExtensionConfigurationException
 import java.net.InetAddress
@@ -195,6 +198,14 @@ internal object SharedServer {
 
         val tickEnd = TickEnd(pausePoint)
         process.eventHandler().addListener(ServerTickMonitorEvent::class.java) { tickEnd.run() }
+
+        // FIXME(Minestom M24): Minestom 在连接的读取线程上处理 Keep Alive，refreshLatency 在这个线程上广播 Player Info Update，
+        // 广播可能排在另一个玩家的 Start Configuration 之后。这里把它交给下一个 tick 开始时执行，与 updateWaitingPlayers 在同一个线程上
+        val keepAlive = PacketPlayListenerConsumer<ClientKeepAlivePacket> { packet, player ->
+            process.scheduler().scheduleNextTick { if (player.isOnline) KeepAliveListener.listener(packet, player) }
+        }
+        process.packetListener().setPlayListener(ClientKeepAlivePacket::class.java, keepAlive)
+        process.packetListener().setConfigurationListener(ClientKeepAlivePacket::class.java, keepAlive)
 
         val defaults = StoryDefaults()
         val value = setup?.configure(process, defaults)

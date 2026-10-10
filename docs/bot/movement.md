@@ -15,6 +15,7 @@
 - [服务端施加的位置与速度](#服务端施加的位置与速度)
 - [寻路与路径跟随](#寻路与路径跟随)
   - [寻路](#寻路)
+  - [节点生成器](#节点生成器)
   - [路径的判断](#路径的判断)
   - [站立高度](#站立高度)
   - [跟随](#跟随)
@@ -147,17 +148,28 @@
 
 `moveTo` 开始时（以及每次重新寻路时）调用 `PathPlanner.plan`：
 
-- 在 `ClientWorld.snapshot(玩家位置, maxDistance)` 得到的世界快照上，在新的虚拟线程中调用 Minestom 的 `PathGenerator.generate(快照, 起点, 目标, closeDistance, maxDistance, 20, 玩家包围盒, 是否着地, new GroundNodeGenerator(), null)`。`pathVariance` 20 与 `maxDistance` 默认 50 取自 Minestom `Navigator.setPathTo` 的默认参数。`GroundNodeGenerator` 内部有可变状态，每次寻路新建一个。
+- 在 `ClientWorld.snapshot(玩家位置, maxDistance)` 得到的世界快照上，在新的虚拟线程中调用 Minestom 的 `PathGenerator.generate(快照, 起点, 目标, closeDistance, maxDistance, 20, 玩家包围盒, 是否着地, new PlayerNodeGenerator(服务端的标签), null)`。`pathVariance` 20 与 `maxDistance` 默认 50 取自 Minestom `Navigator.setPathTo` 的默认参数。`PlayerNodeGenerator` 内部有可变状态，每次寻路新建一个。
 - 寻路期间期望移动方向为零。结果由 `moveTo` 在之后的 tick 中取回；寻路线程上的异常在取回时抛出，bot 结束。
-- 同时用这次的快照计算目标的站立高度（见下文）。
+- 同时用这次的快照计算目标的站立高度（见下文），并记下目标所在区块此刻是否已加载。
+
+### 节点生成器
+
+`PlayerNodeGenerator` 继承 Minestom 的 `GroundNodeGenerator`，节点高度、起跳与下落的规则不变，改变能否走过去的判断。Minestom 的 `NodeGenerator.canMoveTowards` 把节点脚部任何不是 `Block.AIR` 的方块当作障碍，地表常见的草、花、单层雪以及 `cave_air` 都走不过去，寻路结果为空。`PlayerNodeGenerator` 的判断：
+
+- **碰撞**：与 Minestom 的默认实现相同，用 `CollisionUtils.handlePhysics` 让包围盒从起点直线移动到终点，三个方向都没有碰撞。
+- **本库不模拟其效果的方块**：`Kinematics` 不模拟这些方块的效果（见[限制与待办 · 不覆盖的移动](limitations.md#不覆盖的移动)），走进去之后的移动与原版客户端不同，所以避开它们。包围盒从起点移动到终点时新接触这些方块的节点被排除；起点已经接触的方块不算，否则站在这些方块中时走不出来。`canMoveTowards` 与 `getWalkable` 都做这个判断，`JUMP` 节点与 `FALL` 节点的落点由后者排除。
+  - 包围盒放在起点与终点的范围合起来，各边向内收缩 1.0E-5（原版 `checkInsideBlocks`）之后接触的方块中：流体（`Block.fluid()`：水、熔岩、含水方块、海草、海带、气泡柱），以及原版 26.2 中覆盖 `entityInside`、碰撞箱为空，并且会减速、造成伤害或者传送的方块：蜘蛛网、甜浆果丛、细雪、火、灵魂火、凋灵玫瑰、下界传送门、末地传送门、末地折跃门。节点之间相邻，斜向移动时包围盒经过的四格、下落时经过的整列都在这个范围内。有碰撞箱的仙人掌、营火、蜂蜜块由碰撞判断处理。
+  - 原版 `LivingEntity.onClimbable` 只看脚部所在方块：终点所在的列上，脚部在起点与终点高度之间经过的方块属于服务端标签 `minecraft:climbable`，或者是打开的活板门（名称以 `_trapdoor` 结尾的方块，即原版 26.2 的 `TrapDoorBlock`），下面是朝向相同的梯子。
+- 草、花、单层雪、火把、铁轨、`cave_air` 等碰撞箱为空、没有上述效果的方块可以走过去。
 
 ### 路径的判断
 
 Minestom 的 `PPath.getState()` 只在包内可见，所以按节点列表判断：
 
 - **REPATH 节点**：已搜索的节点数达到 `maxDistance × 10` 而开放列表不为空时，Minestom 在最近节点之后接一个坐标为 (0, 0, 0)、类型为 `REPATH` 的节点，并且只在它位于第一个时把路径判定为无效。所以先去掉第一个 `REPATH` 节点及其之后的节点，剩下的路径一定不完整。
-- 列表为空：以 `NO_PATH` 取消。
-- 去掉过 `REPATH` 节点，或者最后一个节点没有到达目标（按执行完毕的条件判断，高度取这个节点的站立高度）：只走到最近点（与 Minestom 的 BEST_EFFORT 相同），走完之后以 `NO_PATH` 取消。
+- 列表为空：以「找不到路径的原因」取消。
+- 去掉过 `REPATH` 节点，或者最后一个节点没有到达目标（按执行完毕的条件判断，高度取这个节点的站立高度）：只走到最近点（与 Minestom 的 BEST_EFFORT 相同），走完之后以「找不到路径的原因」取消。
+- 找不到路径的原因：寻路时目标所在区块未加载为 `CHUNK_NOT_LOADED`，否则为 `NO_PATH`。快照对未加载的区块返回屏障，目标的区块未加载时路径只能停在已加载区域的边缘；调用方等待这个区块加载之后再次 `moveTo` 即可。按寻路时的状态判断：目标在 `maxDistance` 之外时快照不包含它的区块，只能查 `ClientWorld`；走完最近点时这个区块可能已经加载，调用方等待区块加载会立即返回。
 - 其余为完整路径，最后一个节点为目标本身；节点全部到达之后直接朝目标移动。
 
 ### 站立高度

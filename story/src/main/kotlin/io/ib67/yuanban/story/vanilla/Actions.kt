@@ -63,7 +63,7 @@ internal fun PlayerActor.requireInInventory(material: Material) {
     }
 }
 
-/** 原版客户端的眼睛位置与交互距离：站立时眼睛高度为 1.62 乘以 minecraft:scale */
+/** 原版客户端的眼睛位置与交互距离：站立时眼睛高度为 1.62F 乘以 minecraft:scale，与原版相同以 float 计算 */
 internal class Reach(val eye: Vec, val block: Double, val entity: Double)
 
 internal fun PlayerActor.reach(): Reach = bot.inspect { state -> reachOf(state) }
@@ -71,7 +71,8 @@ internal fun PlayerActor.reach(): Reach = bot.inspect { state -> reachOf(state) 
 private fun reachOf(state: StateReader): Reach {
     val player = state.player()
     fun attribute(type: AttributeType.Builtin) = player.attributes()[type] ?: AttributeMap.PLAYER_BASE.applyAsDouble(type)
-    val eye = player.position().asVec().add(0.0, LocalPlayer.STANDING_EYE_HEIGHT * attribute(AttributeType.Builtin.SCALE), 0.0)
+    val eyeHeight = LocalPlayer.STANDING_EYE_HEIGHT * attribute(AttributeType.Builtin.SCALE).toFloat()
+    val eye = player.position().asVec().add(0.0, eyeHeight.toDouble(), 0.0)
     return Reach(
         eye,
         attribute(AttributeType.Builtin.BLOCK_INTERACTION_RANGE),

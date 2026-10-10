@@ -130,6 +130,8 @@ class ObserveTest {
     void onlyObservationsAfterRegistrationAreDelivered() {
         withBot((peer, bot) -> {
             peer.push(chat("before"));
+            // 等 before 应用之后再注册：一轮中先处理注册，后处理入站数据包，交出与应用之间注册的 observer 会收到它
+            peer.barrier();
             var handle = bot.observe(new Recorder(Subscription.of(ChatReceived.class)));
             peer.push(chat("after"));
             peer.barrier();

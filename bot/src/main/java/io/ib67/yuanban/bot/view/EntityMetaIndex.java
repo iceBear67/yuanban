@@ -22,6 +22,10 @@ public final class EntityMetaIndex {
      */
     public static final EntityMeta<Float> LIVING_HEALTH = EntityMeta.index(9, 1F);
     /**
+     * AbstractArrow（箭、光灵箭、三叉戟）：插在方块上
+     */
+    public static final EntityMeta<Boolean> ARROW_IN_GROUND = EntityMeta.index(10, false);
+    /**
      * ArmorStand：小型盔甲架
      */
     public static final EntityMeta<Boolean> ARMOR_STAND_IS_SMALL = EntityMeta.bit(15, 0x01);

@@ -100,7 +100,7 @@
     }
 
     // attempt / recover：只对白名单错误运行恢复，限制次数与时间
-    const recoverable = new Set(['CHUNK_NOT_LOADED', 'NO_PATH', 'BLOCKED', 'NO_ENTITY', 'WAIT_TIMEOUT', 'TIMEOUT']);
+    const recoverable = new Set(['CHUNK_NOT_LOADED', 'NO_PATH', 'BLOCKED', 'NO_ENTITY', 'OUT_OF_RANGE', 'WAIT_TIMEOUT', 'TIMEOUT']);
     const handlers = new Map();
 
     function recoveryKey(result) {

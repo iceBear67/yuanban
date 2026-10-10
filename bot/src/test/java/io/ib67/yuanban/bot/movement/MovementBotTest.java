@@ -20,12 +20,10 @@ import io.ib67.yuanban.bot.observe.builtin.Observers;
 import io.ib67.yuanban.bot.protocol.Vectors;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
 import io.ib67.yuanban.bot.view.EntityMetaIndex;
-import net.minestom.server.collision.BoundingBox;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.pathfinding.PNode;
 import net.minestom.server.entity.pathfinding.PathGenerator;
-import net.minestom.server.entity.pathfinding.generators.GroundNodeGenerator;
 import net.minestom.server.instance.block.Block;
 import org.cloudburstmc.math.vector.Vector3d;
 import org.cloudburstmc.math.vector.Vector3i;
@@ -161,7 +159,7 @@ class MovementBotTest {
 
             mark = peer.mark();
             // 眼睛在 (0.5, 1.62, 0.5)，目标在正东方同一高度
-            assertTrue(bot.lookAt(new Vec(10.5, 1.62, 0.5)).await(TIMEOUT));
+            assertTrue(bot.lookAt(new Vec(10.5, 1.62F, 0.5)).await(TIMEOUT));
             var look = awaitRotation(peer, mark);
             assertEquals(-90, look.yaw(), 1e-4);
             assertEquals(0, look.pitch(), 1e-4);
@@ -353,6 +351,75 @@ class MovementBotTest {
     }
 
     @Test
+    void moveToWalksThroughBlocksWithoutCollision() {
+        // Minestom 的 NodeGenerator.canMoveTowards 把脚部不是 Block.AIR 的方块都当作障碍；
+        // 没有碰撞箱、本库也不需要模拟其效果的方块可以走过去
+        for (var cover : List.of(Block.SHORT_GRASS, Block.DANDELION, Block.SNOW, Block.CAVE_AIR)) {
+            withBot(new Pos(0.5, 0, 0.5), (_, _, chunk) -> {
+                for (int bx = 0; bx < 16; bx++) {
+                    for (int bz = 0; bz < 16; bz++) {
+                        chunk.set(bx, 0, bz, cover);
+                    }
+                }
+            }, (_, bot) -> {
+                var target = new Vec(6.5, 0, 3.5);
+                var move = bot.moveTo(target);
+                assertTrue(move.await(TIMEOUT), () -> cover + ": " + move.future());
+                var position = bot.view().player().position();
+                assertTrue(Math.hypot(position.x() - target.x(), position.z() - target.z()) <= 0.5, () -> cover + ": " + position);
+            });
+        }
+    }
+
+    @Test
+    void moveToAvoidsBlocksWhoseEffectsAreNotSimulated() {
+        // x = 3 立起两格高的一排方块，只在 z = 8 留一个缺口：寻路绕到缺口。流体与蜘蛛网等有效果的方块：包围盒（各边向内收缩 1.0E-5）
+        // 从不接触这一排方块；可以攀爬的方块：原版只看脚部所在方块，脚部从不在这一排方块中
+        for (var obstacle : List.of(Block.WATER, Block.COBWEB, Block.SWEET_BERRY_BUSH, Block.VINE)) {
+            withBot(new Pos(0.5, 0, 0.5), (x, z, chunk) -> {
+                if (x != 0) {
+                    return;
+                }
+                for (int bz = 0; bz < 16; bz++) {
+                    if (z == 0 && bz == 8) {
+                        continue;
+                    }
+                    chunk.set(3, 0, bz, obstacle);
+                    chunk.set(3, 1, bz, obstacle);
+                }
+            }, (_, bot) -> {
+                var moves = bot.observe(Observers.observations(PlayerMoved.class));
+                var target = new Vec(6.5, 0, 0.5);
+                var move = bot.moveTo(target);
+                assertTrue(move.await(TIMEOUT), () -> obstacle + ": " + move.future());
+                moves.close();
+                var positions = moves.observer().observations().stream().map(PlayerMoved::to).toList();
+                for (var position : positions) {
+                    if (obstacle == Block.VINE) {
+                        assertTrue(position.blockX() != 3 || position.blockZ() == 8, () -> obstacle + ": " + position + " in " + positions);
+                    } else if (position.x() + 0.3 - 1.0E-5 > 3 && position.x() - 0.3 + 1.0E-5 < 4) {
+                        assertTrue(position.z() - 0.3 + 1.0E-5 >= 8 && position.z() + 0.3 - 1.0E-5 <= 9,
+                                () -> obstacle + ": " + position + " in " + positions);
+                    }
+                }
+            });
+        }
+    }
+
+    @Test
+    void moveToATargetInAnUnloadedChunkIsCancelledAsChunkNotLoaded() {
+        // 已加载的区块为 x 方向的 -1 到 1（方块 -16 到 31）；目标在 x = 40，寻路时它的区块未加载：走到最近点之后以 CHUNK_NOT_LOADED 取消
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (_, bot) -> {
+            var action = bot.moveTo(new Vec(40.5, 0, 0.5));
+            assertFalse(action.await(TIMEOUT));
+            assertEquals(ActionCancelledException.CHUNK_NOT_LOADED,
+                    assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage());
+            assertTrue(bot.view().player().position().x() > 28, () -> bot.view().player().position().toString());
+        });
+    }
+
+    @Test
     void moveToWithoutAPathStopsAtTheNearestPoint() {
         // 远离原点：寻路结果末尾的 REPATH 节点坐标为 (0, 0, 0)，走向它会离开已加载的区块
         var spawn = new Pos(160.5, 0, 160.5);
@@ -373,9 +440,11 @@ class MovementBotTest {
         }, (_, bot) -> {
             // 前提：这个场景下搜索达到节点上限，Minestom 在最近节点之后接上 REPATH 节点
             var snapshot = bot.inspect(_ -> ((BotInstance) bot).state().world().snapshot(spawn, MoveOptions.DEFAULT.maxDistance()));
+            var tags = bot.inspect(_ -> ((BotInstance) bot).state().tags());
+            var boundingBox = bot.inspect(_ -> ((BotInstance) bot).state().player().boundingBox());
             var path = PathGenerator.generate(snapshot, spawn, target, MoveOptions.DEFAULT.closeDistance(),
-                    MoveOptions.DEFAULT.maxDistance(), PathPlanner.PATH_VARIANCE, new BoundingBox(0.6, 1.8, 0.6), true,
-                    new GroundNodeGenerator(), null);
+                    MoveOptions.DEFAULT.maxDistance(), PathPlanner.PATH_VARIANCE, boundingBox, true,
+                    new PlayerNodeGenerator(tags), null);
             assertEquals(PNode.Type.REPATH, path.getNodes().getLast().getType(), path::toString);
 
             var action = bot.moveTo(target);
@@ -537,6 +606,31 @@ class MovementBotTest {
             assertTrue(bot.view().player().position().x() <= 2.7 + 1e-6);
             assertThrows(IllegalArgumentException.class,
                     () -> bot.moveForward(1, MoveOptions.builder().direction(new Vec(0, 1, 0)).build()));
+        });
+    }
+
+    @Test
+    void slidingAlongAWallKeepsTheVanillaBoundingBoxOutOfTheWall() {
+        // 原版玩家包围盒的半宽为 float 的 0.6F / 2.0F（换成 double 是 0.30000001192092896）。斜着顶住 x = 3 的墙滑动时，
+        // 按这个半宽算出的包围盒也不能伸进墙内，否则 Paper 判定玩家卡进方块并把玩家传送回去
+        withBot(new Pos(0.5, 0, 0.5), (x, _, chunk) -> {
+            if (x == 0) {
+                for (int bz = 0; bz < 16; bz++) {
+                    for (int y = 0; y <= 1; y++) {
+                        chunk.set(3, y, bz, Block.STONE);
+                    }
+                }
+            }
+        }, (_, bot) -> {
+            var moves = bot.observe(Observers.observations(PlayerMoved.class));
+            var forward = bot.moveForward(6, MoveOptions.builder().direction(new Vec(0.9655535464053812, 0, -0.26020443697983164)).build());
+            assertTrue(forward.await(TIMEOUT), () -> forward.future().toString());
+            moves.close();
+            var positions = moves.observer().observations().stream().map(PlayerMoved::to).toList();
+            assertTrue(positions.stream().anyMatch(position -> position.x() > 2.69), positions::toString);
+            for (var position : positions) {
+                assertTrue(position.x() + (double) (0.6F / 2.0F) <= 3, () -> position + " in " + positions);
+            }
         });
     }
 
@@ -908,7 +1002,7 @@ class MovementBotTest {
             var finished = peer.awaitSent(mark, ServerboundPlayerActionPacket.class,
                     packet -> packet.getAction() == PlayerAction.FINISH_DIGGING, TIMEOUT);
             var rotation = sentRotation(peer.sentSince(mark).stream().filter(MovementBotTest::sendsRotation).findFirst().orElseThrow());
-            var expected = Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(2.5, -0.5, 0.5));
+            var expected = Rotation.lookAt(new Vec(0.5, 1.62F, 0.5), new Vec(2.5, -0.5, 0.5));
             assertEquals(expected.yaw(), rotation.yaw(), 1e-4);
             assertEquals(expected.pitch(), rotation.pitch(), 1e-4);
             peer.push(new ClientboundBlockChangedAckPacket(finished.getSequence()));

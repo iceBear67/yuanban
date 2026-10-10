@@ -334,3 +334,40 @@ reports `Unknown registry key in ResourceKey[minecraft:root / minecraft:map_deco
 **yuanban workaround:** `MapDecorationTypes` in `:dfu-codecs` lists the 35 ids of the vanilla 26.2 registry in
 registration order, and `RegistryLookup` checks `map_decoration_type` ids against this list (used by the
 `exploration_map` loot function of `:loot`). Only correct for 26.2.
+
+## M24. Play packets broadcast on a connection's read thread can follow Start Configuration
+
+`PlayerSocketConnection` processes `ClientKeepAlivePacket` immediately on the connection's read thread
+(`IMMEDIATE_PROCESS_PACKETS`, `PlayerSocketConnection.java:69`). `KeepAliveListener.listener` calls
+`Player.refreshLatency` (`KeepAliveListener.java:24`), which broadcasts `PlayerInfoUpdatePacket(UPDATE_LATENCY)` to
+`getOnlinePlayers()` on that thread (`Player.java:2306`). At the same time the tick thread moves a player to the
+configuration state in `ConnectionManager.updateWaitingPlayers` (`ConnectionManager.java:349-356`): it removes the player
+from `playPlayers`, calls `remove(false)` and sends `StartConfigurationPacket`. `playPlayers` is a `CopyOnWriteArraySet`
+(`ConnectionManager.java:74`), so a broadcast that started iterating before the removal still sends to this player, and
+the packet is queued after Start Configuration.
+
+The broadcast packet is a `CachedPacket` (`PacketSendingUtils.java:89`). What happens next depends on which write thread
+frames it first:
+
+- Another player's write thread framed it in the play state: the cached bytes are reused for the reconfiguring player
+  (`PlayerSocketConnection.java:415-418`). The client already decodes the configuration state, fails on the play packet
+  id (70, Player Info Update, in 26.2) and disconnects; the server records no exception.
+- The reconfiguring player's write thread frames it first: it throws
+  `IllegalStateException: Packet type class ...PlayerInfoUpdatePacket cannot be sent in state SERVER_CONFIGURATION!`.
+
+In yuanban this made a story that calls `Player.startConfigurationPhase` fail now and then: its bot disconnected with
+`Invalid packet id: 70` while the bots of stories running in parallel answered Keep Alive. The order can be reproduced
+on the tick thread: take `getOnlinePlayers()`, call `startConfigurationPhase()` and `updateWaitingPlayers()`, then send a
+grouped `PlayerInfoUpdatePacket` to the list taken before.
+
+`refreshLatency` is the only place in Minestom that broadcasts player info off the tick thread; on disconnect the player
+is removed in the next tick (`PlayerConnection.disconnect`).
+
+**Suggested fix:** broadcast the latency update on the tick thread, for example record the latency on the read thread and
+broadcast it from `ConnectionManager.tick`, so that it runs before or after `updateWaitingPlayers` and never during it.
+Independently, `CachedPacket` should only reuse cached bytes in the connection state they were framed for.
+
+**yuanban workaround:** the story module's `SharedServer` replaces the play and configuration listeners of
+`ClientKeepAlivePacket`. The replacement schedules Minestom's `KeepAliveListener.listener` for the start of the next tick
+(skipping players that are no longer online), which runs on the same thread as `updateWaitingPlayers`. Code under test
+that broadcasts play packets off the tick thread can still cause the same order.

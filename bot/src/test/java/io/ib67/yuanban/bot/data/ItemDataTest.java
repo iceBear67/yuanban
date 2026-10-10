@@ -5,6 +5,7 @@ import net.kyori.adventure.key.Key;
 import net.minestom.server.instance.block.Block;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.EquipmentSlot;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.AttackRange;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.ToolData;
@@ -93,6 +94,13 @@ class ItemDataTest {
         assertFalse(piercing.dismounts());
         assertEquals(BuiltinSound.ITEM_SPEAR_WOOD_ATTACK, piercing.sound());
         assertEquals(BuiltinSound.ITEM_SPEAR_WOOD_HIT, piercing.hitSound());
+    }
+
+    @Test
+    void attackRanges() {
+        assertEquals(new AttackRange(2.0f, 4.5f, 2.0f, 6.5f, 0.125f, 0.5f),
+                ItemData.prototype(ItemData.id(Key.key("wooden_spear")), DataComponentTypes.ATTACK_RANGE));
+        assertNull(ItemData.prototype(ItemData.id(Key.key("stick")), DataComponentTypes.ATTACK_RANGE));
     }
 
     @Test

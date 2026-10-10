@@ -107,17 +107,17 @@ void chatIsSent() {
 | `protocol.WorldPacketsTest` | 世界、实体、本地玩家、聊天、界面相关数据包的处理与 bot 因异常结束的情况（共 35 项，见方法名） |
 | `protocol.WorldTransitionTest` | Transfer、重新配置、时钟、`joined`/`loaded` 等待下一个世界、Respawn 的各项保留与重建、重复的 Login (play)、传送速度的旋转、乘坐状态的清除、实体移除与重新生成 |
 | `registry.SyncedRegistriesTest` | 注册表的顺序与编号；省略数据时取自原版；数据包中的维度类型数据优先；原版中没有的条目省略数据时失败；重新配置清空之前的注册表；编号换成名称；生物群系数量；标签的逐个替换与删除 |
-| `data.ItemDataTest` | 物品编号；四种默认组件按原版编解码器补全；其它组件被拒绝；补丁覆盖与移除默认组件；物品的比较 |
+| `data.ItemDataTest` | 物品编号；五种默认组件按原版编解码器补全；其它组件被拒绝；补丁覆盖与移除默认组件；物品的比较 |
 | `player.AttributeMapTest` | 默认值与取值范围；三种修饰符的顺序；Respawn 时的复制 |
 | `player.PlayerLoadTrackerTest` | 收到 Game Event 13 之前不发送也不超时；条件满足或超过 30 秒时发送；不在世界中时的 Game Event 13 被忽略 |
 | `view.EntityMetaIndexTest` | 各常量的下标、掩码与默认值与 Minestom 的 `MetadataDef` 相同；没有收到的条目读出默认值 |
 | `view.StateReaderTest` | 配置阶段的 brand、Server Links、Feature Flags；不在世界中时 `worldState()` 与 `biome` 抛出异常；`worldState()` 与 `clocks()` 在冻结与步进时的取值，世界边框插值中与静止时的各项；生物群系按名称读取；本地玩家的物品冷却与元数据 |
 | `world.ClientWorldTest` | 写入时复制；快照不受之后写入的影响；高度范围之外与未加载区块；加载区域的移动与半径；Chunk Biomes；世界边框插值期间使用上一 tick 的大小；方块实体单独读取 |
 | `movement.KinematicsTest` | wiki 的移动数值；飞行；使用物品时的减速；缓降、飘浮与 NoGravity；移动相关属性与起跳规则；`movement_efficiency`；支撑方块决定脚下方块 |
-| `movement.MovementBotTest` | `rotate` 与 `lookAt`；服务端设置的朝向；指向本地玩家的 Synchronize Vehicle Position 插值；`moveTo` 的平地、台阶、半砖与楼梯、高度比较、跳下、找不到路径、未加载区块、重新寻路、寻路期间的传送与方块改变；`moveForward` 被阻挡；`jumpTo`；着地停止飞行；疾跑条件；暂停移动；骑乘船、矿车、马与骆驼；马的人立动画；手部动作的朝向优先 |
+| `movement.MovementBotTest` | `rotate` 与 `lookAt`；服务端设置的朝向；指向本地玩家的 Synchronize Vehicle Position 插值；`moveTo` 的平地、台阶、半砖与楼梯、高度比较、跳下、穿过草、花、单层雪与 `cave_air`、避开流体、蜘蛛网、甜浆果丛与藤蔓、找不到路径、目标区块未加载、未加载区块、重新寻路、寻路期间的传送与方块改变；`moveForward` 被阻挡；斜着顶住墙滑动时按原版半宽 `(double) 0.3F` 算出的包围盒不伸进墙内；`jumpTo`；着地停止飞行；疾跑条件；暂停移动；骑乘船、矿车、马与骆驼；马的人立动画；手部动作的朝向优先 |
 | `interaction.DigSpeedTest` | wiki Breaking 页的公式与示例 |
 | `interaction.BlockPredicatesTest` | `can_break` 的方块集合、属性范围、NBT 部分匹配与组件条件 |
-| `interaction.InteractionBotTest` | 挖掘每个 tick 的数据包与挖掘延迟；更换手持物品时重新开始；穿刺武器；冒险模式；旁观模式；挖掘中变成瞬间破坏；`breakBlock` 的结论；`placeBlock`；目标在正北时的朝向比较；未加载区块上的挖掘、放置与 `breakBlock`，挖掘中目标所在区块被卸载，眼睛所在区块未加载；Inside block 与世界边框；`useItem` 的保持；`attack` 的目标 |
+| `interaction.InteractionBotTest` | 挖掘每个 tick 的数据包与挖掘延迟；更换手持物品时重新开始；穿刺武器；冒险模式；旁观模式；挖掘中变成瞬间破坏；`breakBlock` 的结论；`placeBlock`；目标在正北时的朝向比较；未加载区块上的挖掘、放置与 `breakBlock`，挖掘中目标所在区块被卸载，眼睛所在区块未加载；Inside block 与世界边框；`useItem` 的保持；`attack` 的目标；`attack` 的攻击距离（按视线进入包围盒的位置、实体交互距离属性、`attack_range` 组件、旁观模式、选取半径） |
 | `inventory.WindowLayoutTest` | 独有槽位数与 wiki 相同；打开窗口中玩家物品栏部分写入窗口 0 |
 | `inventory.InventoryBotTest` | 点击与关闭使用打开的窗口；打开的窗口中玩家物品栏部分取窗口 0 的物品；按键与模式不对应时拒绝；每个窗口各自的状态编号与光标；Close Container 不看编号；槽位越界时 bot 结束；身体护甲与鞍；马与鹦鹉螺的窗口；选择快捷栏 |
 | `chat.LastSeenTrackerTest` | Checksum 的计算；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending`；没有显示的消息 |

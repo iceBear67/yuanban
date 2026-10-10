@@ -235,7 +235,7 @@ class BuiltinObserversTest {
     void distanceObserversCancelTheAction() {
         withBot((_, bot) -> {
             var flag = new Vec(5.5, 0, 0.5);
-            assertTrue(bot.lookAt(flag.add(0, 1.62, 0)).await(TIMEOUT));
+            assertTrue(bot.lookAt(flag.add(0, 1.62F, 0)).await(TIMEOUT));
             var forward = bot.moveForward(20);
             var near = bot.observe(Observers.distanceWithIn(2, flag, forward));
             assertEquals(CloseReason.BY_OBSERVER, near.awaitClose(TIMEOUT));

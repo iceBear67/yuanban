@@ -13,6 +13,7 @@ public final class CancelReasons {
     public static final String BLOCKED = "BLOCKED";
     public static final String NO_ENTITY = "NO_ENTITY";
     public static final String CHUNK_NOT_LOADED = "CHUNK_NOT_LOADED";
+    public static final String OUT_OF_RANGE = "OUT_OF_RANGE";
     public static final String WORLD_REBUILT = "WORLD_REBUILT";
     public static final String PLAYER_DIED = "PLAYER_DIED";
 
@@ -22,6 +23,7 @@ public final class CancelReasons {
             ActionCancelledException.BLOCKED, BLOCKED,
             ActionCancelledException.NO_ENTITY, NO_ENTITY,
             ActionCancelledException.CHUNK_NOT_LOADED, CHUNK_NOT_LOADED,
+            ActionCancelledException.OUT_OF_RANGE, OUT_OF_RANGE,
             ActionCancelledException.WORLD_REBUILT, WORLD_REBUILT,
             ActionCancelledException.PLAYER_DIED, PLAYER_DIED);
 

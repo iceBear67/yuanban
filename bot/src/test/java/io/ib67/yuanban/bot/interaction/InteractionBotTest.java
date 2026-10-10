@@ -17,6 +17,8 @@ import net.minestom.server.coordinate.Vec;
 import net.minestom.server.instance.block.Block;
 import org.cloudburstmc.math.vector.Vector3i;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.Attribute;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeType;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
@@ -26,9 +28,13 @@ import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerAction;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.AttackRange;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
 import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockChangeEntry;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundUpdateAttributesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundBlockChangedAckPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
@@ -48,6 +54,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -336,7 +343,7 @@ class InteractionBotTest {
             var swing = sent.get(sent.indexOf(placement) + 1);
             assertEquals(new ServerboundSwingPacket(Hand.MAIN_HAND), swing);
             // 先看向光标：朝向在之前的 tick 由移动包发出，Use Item On 在之后的 tick 发出
-            assertAimedBefore(sent, placement, Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(1.5, 0, 0.5)));
+            assertAimedBefore(sent, placement, Rotation.lookAt(new Vec(0.5, 1.62F, 0.5), new Vec(1.5, 0, 0.5)));
             peer.push(new ClientboundBlockChangedAckPacket(placement.getSequence()));
             assertTrue(place.await(TIMEOUT));
         });
@@ -369,7 +376,7 @@ class InteractionBotTest {
         withBot(GameMode.SURVIVAL, (peer, bot) -> {
             // 光标为 (0, -1, -1) 顶面的中心 (0.5, 0, -0.5)，在眼睛 (0.5, 1.62, 0.5) 的正北：
             // Rotation.lookAt 的偏航角为 -180，本地玩家的位置把它规范为 180，两者按规范之后的值比较
-            var eye = new Vec(0.5, 1.62, 0.5);
+            var eye = new Vec(0.5, 1.62F, 0.5);
             var lookAt = Rotation.lookAt(eye, new Vec(0.5, 0, -0.5));
             assertEquals(-180f, lookAt.yaw());
             var mark = peer.mark();
@@ -504,7 +511,7 @@ class InteractionBotTest {
             assertEquals(100, attack.getEntityId());
             assertEquals(new ServerboundSwingPacket(Hand.MAIN_HAND), sent.get(sent.indexOf(attack) + 1));
             // 僵尸包围盒中心为 (3, 0.975, 0.5)：先看向它，服务端收到朝向之后再攻击（击退方向取攻击者的朝向）
-            assertAimedBefore(sent, attack, Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(3, 0.975, 0.5)));
+            assertAimedBefore(sent, attack, Rotation.lookAt(new Vec(0.5, 1.62F, 0.5), new Vec(3, 0.975F, 0.5)));
 
             // 幼年僵尸的包围盒为原版 Zombie.BABY_DIMENSIONS（0.49 × 0.98），中心为 (3, 0.49, 0.5)
             peer.push(zombie(101), new ClientboundSetEntityDataPacket(101, new EntityMetadata<?, ?>[]{
@@ -513,7 +520,109 @@ class InteractionBotTest {
             assertTrue(bot.attack(101).await(TIMEOUT));
             sent = peer.sentSince(mark);
             var babyAttack = sent.stream().filter(ServerboundAttackPacket.class::isInstance).findFirst().orElseThrow();
-            assertAimedBefore(sent, babyAttack, Rotation.lookAt(new Vec(0.5, 1.62, 0.5), new Vec(3, 0.49, 0.5)));
+            assertAimedBefore(sent, babyAttack, Rotation.lookAt(new Vec(0.5, 1.62F, 0.5), new Vec(3, 0.49F, 0.5)));
+        });
+    }
+
+    /**
+     * 提交 attack，等它结束并且之后发出的数据包都已到达
+     *
+     * @return 这期间发出的数据包；动作被取消时取消原因放在 reason 中
+     */
+    private static List<MinecraftPacket> attack(TestPeer peer, Bot bot, int entityId, String[] reason) {
+        var mark = peer.mark();
+        var action = bot.attack(entityId);
+        if (!action.await(TIMEOUT)) {
+            reason[0] = assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage();
+        } else {
+            reason[0] = null;
+        }
+        waitTicks(peer, 2);
+        return peer.sentSince(mark);
+    }
+
+    private static void assertAttacked(List<MinecraftPacket> sent, String reason, int entityId) {
+        assertNull(reason);
+        var attacks = sent.stream().filter(ServerboundAttackPacket.class::isInstance).map(ServerboundAttackPacket.class::cast).toList();
+        assertEquals(1, attacks.size(), sent::toString);
+        assertEquals(entityId, attacks.getFirst().getEntityId());
+    }
+
+    /**
+     * 原版 startAttack 没有选中实体：不攻击，只挥手；动作以 OUT_OF_RANGE 取消
+     */
+    private static void assertMissed(List<MinecraftPacket> sent, String reason) {
+        assertEquals(ActionCancelledException.OUT_OF_RANGE, reason);
+        assertTrue(sent.stream().noneMatch(ServerboundAttackPacket.class::isInstance), sent::toString);
+        assertEquals(List.of(new ServerboundSwingPacket(Hand.MAIN_HAND)),
+                sent.stream().filter(ServerboundSwingPacket.class::isInstance).toList());
+    }
+
+    @Test
+    void attackChecksTheVanillaReach() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            var reason = new String[1];
+            // 眼睛在 (0.5, 1.62, 0.5)。僵尸在 x = 6：视线进入包围盒的位置离眼睛约 5.3 格，超出实体交互距离 3
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.ZOMBIE, 6, 0, 0.5, 0, 0, 0));
+            assertMissed(attack(peer, bot, 100, reason), reason[0]);
+
+            // 僵尸在 x = 3.5：包围盒中心离眼睛约 3.07 格，视线进入包围盒的位置约 2.76 格，按进入的位置判断，照常攻击
+            peer.push(new ClientboundAddEntityPacket(101, UUID.randomUUID(), EntityType.ZOMBIE, 3.5, 0, 0.5, 0, 0, 0));
+            assertAttacked(attack(peer, bot, 101, reason), reason[0], 101);
+
+            // 服务端把实体交互距离改为 6 之后，x = 6 的僵尸照常攻击
+            peer.push(new ClientboundUpdateAttributesPacket(TestServer.ENTITY_ID,
+                    List.of(new Attribute(AttributeType.Builtin.ENTITY_INTERACTION_RANGE, 6))));
+            assertAttacked(attack(peer, bot, 100, reason), reason[0], 100);
+        });
+    }
+
+    @Test
+    void attackOutOfReachInSpectatorModeSendsSpectatorActionWithoutTarget() {
+        // 原版 startAttack：旁观模式下没有选中实体时调用 spectatorNoAction，发送不带实体编号的 Spectator Action
+        withBot(GameMode.SPECTATOR, (peer, bot) -> {
+            var reason = new String[1];
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.ZOMBIE, 6, 0, 0.5, 0, 0, 0));
+            var sent = attack(peer, bot, 100, reason);
+            assertEquals(ActionCancelledException.OUT_OF_RANGE, reason[0]);
+            assertEquals(List.of(new ServerboundSpectatorActionPacket(OptionalInt.empty())),
+                    sent.stream().filter(ServerboundSpectatorActionPacket.class::isInstance).toList());
+            assertTrue(sent.stream().noneMatch(packet -> packet instanceof ServerboundSwingPacket || packet instanceof ServerboundAttackPacket));
+        });
+    }
+
+    @Test
+    void attackRangeComponentOfTheMainHandLimitsTheReach() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            var reason = new String[1];
+            // 主手物品的 attack_range：最小 2、最大 3，hitboxMargin 为 0
+            var components = new DataComponents(new HashMap<>());
+            components.put(DataComponentTypes.ATTACK_RANGE, new AttackRange(2, 3, 2, 3, 0, 1));
+            peer.push(new ClientboundContainerSetSlotPacket(0, 1, 36, new ItemStack(ItemData.id(Key.key("stick")), 1, components)));
+            peer.barrier();
+            // 僵尸在 x = 1.5：先沿 attack_range 的距离（从 2 格起）选取不到，再按实体交互距离选中它，
+            // 但视线进入包围盒的位置离眼睛约 0.72 格，小于最小距离 2
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.ZOMBIE, 1.5, 0, 0.5, 0, 0, 0));
+            assertMissed(attack(peer, bot, 100, reason), reason[0]);
+            // 僵尸在 x = 3：进入的位置约 2.27 格，在 [2, 3] 之内
+            peer.push(new ClientboundAddEntityPacket(101, UUID.randomUUID(), EntityType.ZOMBIE, 3, 0, 0.5, 0, 0, 0));
+            assertAttacked(attack(peer, bot, 101, reason), reason[0], 101);
+        });
+    }
+
+    @Test
+    void pickableProjectilesHaveAPickRadiusOfOne() {
+        withBot(GameMode.SURVIVAL, (peer, bot) -> {
+            var reason = new String[1];
+            // 潜影贝子弹（0.3125 × 0.3125，中心与眼睛同高）在 x = 4：包围盒按选取半径 1 扩大之后，视线进入的位置约 2.34 格
+            peer.push(new ClientboundAddEntityPacket(100, UUID.randomUUID(), EntityType.SHULKER_BULLET, 4, 1.62 - 0.15625, 0.5, 0, 0, 0));
+            assertAttacked(attack(peer, bot, 100, reason), reason[0], 100);
+            // 火球（1 × 1）属于 minecraft:redirectable_projectile，同样可以选取：在 x = 4.5 时进入的位置约 2.5 格
+            peer.push(new ClientboundAddEntityPacket(101, UUID.randomUUID(), EntityType.FIREBALL, 4.5, 1.12, 0.5, 0, 0, 0));
+            assertAttacked(attack(peer, bot, 101, reason), reason[0], 101);
+            // 雪球（0.25 × 0.25）不可选取，选取半径为 0：在 x = 4 时进入的位置约 3.4 格
+            peer.push(new ClientboundAddEntityPacket(102, UUID.randomUUID(), EntityType.SNOWBALL, 4, 1.62 - 0.125, 0.5, 0, 0, 0));
+            assertMissed(attack(peer, bot, 102, reason), reason[0]);
         });
     }
 }

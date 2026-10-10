@@ -54,7 +54,8 @@ public interface Action {
 | 寻路找不到到达目标的路径（`NO_PATH`） | 同上 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（`BLOCKED`） | 同上 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（`NO_ENTITY`） | 同上 | 返回 false |
-| 移动范围涉及未加载的区块，或者手部交互动作读取的方块所在区块未加载（`CHUNK_NOT_LOADED`） | 同上 | 返回 false |
+| 移动范围涉及未加载的区块；`moveTo` 找不到路径（或者只能走到最近点）并且寻路时目标所在区块未加载；或者手部交互动作读取的方块所在区块未加载（`CHUNK_NOT_LOADED`） | 同上 | 返回 false |
+| `attack` 的目标不在原版客户端的攻击距离内（`OUT_OF_RANGE`） | 同上 | 返回 false |
 | 世界重建（`WORLD_REBUILT`）或玩家死亡（`PLAYER_DIED`），队列被清空 | 同上 | 返回 false |
 | 连接结束：服务端断开、`Bot.disconnect()`、`BotRuntime.close()` | 以 `BotDisconnectedException` 完成，异常信息为断开原因 | 抛出该异常 |
 | Transfer 关闭的旧连接在写出之前断开，这一批中写出即执行完毕的动作 | 以 `BotDisconnectedException` 完成，异常信息说明连接在写出之前关闭；bot 继续在新连接上登录 | 抛出该异常 |
@@ -115,7 +116,7 @@ public interface Action {
 
 | 动作 | 执行过程 | 执行完毕 | 取消 |
 |---|---|---|---|
-| `moveTo(target)` | 开始时在寻路线程上寻路，之后每 tick 沿路径节点移动，必要时起跳；连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路 | 玩家着地，与目标的水平距离不大于 `closeDistance`，并且脚部与目标的站立高度相差小于 1 | 找不到路径，或者只能走到最近点并且已经走完：`NO_PATH`；重新寻路超过 3 次：`BLOCKED`；移动范围涉及未加载区块：`CHUNK_NOT_LOADED` |
+| `moveTo(target)` | 开始时在寻路线程上寻路，之后每 tick 沿路径节点移动，必要时起跳；连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路 | 玩家着地，与目标的水平距离不大于 `closeDistance`，并且脚部与目标的站立高度相差小于 1 | 找不到路径，或者只能走到最近点并且已经走完：寻路时目标所在区块已加载为 `NO_PATH`，未加载为 `CHUNK_NOT_LOADED`；重新寻路超过 3 次：`BLOCKED`；移动范围涉及未加载区块：`CHUNK_NOT_LOADED` |
 | `moveForward(blocks)` | 方向取开始时的水平朝向，或 `MoveOptions.direction` 的水平分量；沿直线移动，不寻路、不跳跃 | 累计水平位移达到 `blocks` | 连续 20 tick 水平位移小于 0.05：`BLOCKED`；`CHUNK_NOT_LOADED` |
 | `jumpTo(target)` | 以落在目标方块的顶面为目标：着地时起跳，起跳前按水平距离选择行走或疾跑（未指定移动方式时超过 2 格选择疾跑）；空中朝目标顶面中心加速，水平距离小于 0.1 时不再加速 | 起跳后再次着地；起跳的 tick 移动之后仍然着地（起跳没有离开地面，例如跳跃力为 0 或者头顶有方块） | `CHUNK_NOT_LOADED` |
 | `rotate(yaw, pitch)` | 轮到它的那个 tick 设置朝向，单位为度，取值含义见 wiki Set Player Rotation | 设置朝向的 tick 结束时 | 无 |
@@ -232,10 +233,19 @@ Inside block 按原版准星选取方块时的计算：射线从眼睛出发，�
 ### 攻击与交互
 
 - `attack(entityId)`（`AttackTask`）：先看向目标实体包围盒的中心，朝向发出之后发送 Attack 与挥手，写出即执行完毕。发送时为旁观模式的，只发送带这个实体编号的 Spectator Action，不攻击、不挥手。
+- `attack` 发送之前按原版 26.2 客户端检查攻击距离（`AttackReach`，见下文）。不在距离内时按原版 `Minecraft.startAttack` 没有选中实体的处理，只发送挥手（旁观模式下发送不带实体编号的 Spectator Action，原版 `spectatorNoAction`），并以 `OUT_OF_RANGE` 取消。
 - `interact(entityId, hand)`（`InteractTask`）：先看向目标，朝向发出之后发送 `ServerboundInteractPacket(实体编号, 手, 目标偏移, Sneak Key Pressed)`，写出即执行完毕。目标偏移为包围盒中心相对实体位置的偏移 `(0, 高度 / 2, 0)`；Sneak Key Pressed 为当前正在运行的移动动作是否以 `SNEAK` 方式移动。
 - 两者开始时，或者到了发送数据包的 tick，目标实体不在模型中时以 `NO_ENTITY` 取消。
 
-wiki 记录了服务端对攻击、交互与挖掘的距离检查，本库不在客户端预先检查，结果由服务端决定。
+**攻击距离**（`AttackReach`）：原版客户端只攻击准星选中的实体（`LocalPlayer.raycastHitResult`），`startAttack` 再按主手物品的 `attack_range` 组件检查选中位置的距离。本库只对目标实体计算这两步，视线为发送时的朝向（`Rotation.viewVector`）：
+
+1. 当前物品有 `attack_range` 组件时，先沿它的距离选取（原版 `AttackRange.getClosesetHit`）：线段从 `眼睛 + 视线 × 最小距离` 到 `眼睛 + 视线 × (最大距离 + max(0, 速度 · 视线))`，创造模式取 creative 的最小与最大距离；线段起点在目标包围盒内时选中起点，否则取线段与包围盒的交点；都没有时，线段与按 `hitbox_margin` 扩大的包围盒相交，就从这个交点向包围盒中心取与包围盒的交点。手部队列一次运行一个动作，攻击时不在使用物品，当前物品就是主手物品（原版 `getActiveItem`；旁观模式为空）。
+2. 没有这个组件，或者第 1 步没有选中时（原版 `LocalPlayer.pick`）：线段从眼睛沿视线到 `block_interaction_range` 与 `entity_interaction_range` 中较大的一个，目标包围盒按选取半径扩大。眼睛在框内时选中线段与框的交点（没有时为眼睛），身体槽位有物品的硫磺立方不能从内部选取；否则取交点，目标与玩家骑乘同一个最下层载具时不选中。选中位置到眼睛的距离平方小于 `entity_interaction_range` 的平方才算选中（原版 `filterHitResult`）。
+3. 选中之后，非旁观模式下主手物品有 `attack_range` 组件时，选中位置到眼睛的距离还要在 `[最小距离 − hitbox_margin, 最大距离 + hitbox_margin]` 之内（原版 `AttackRange.isInRange`）。
+
+选取半径（原版 `getPickRadius`）：可选取的 `Projectile` 为 1，其余为 0。`Projectile.isPickable` 为实体类型属于服务端标签 `minecraft:redirectable_projectile`；潜影贝子弹总是可选取；箭、光灵箭、三叉戟还要求没有插在方块上（元数据 `IN_GROUND`）。线段与包围盒的交点移植原版 `AABB.clip`。
+
+本库不判断准星射线上的方块与其它实体，也不判断目标能否被选取（原版 `isPickable`）。wiki 记录了服务端对交互与挖掘的距离检查，本库不在客户端预先检查这两种距离，结果由服务端决定。
 
 ## 一次性请求
 

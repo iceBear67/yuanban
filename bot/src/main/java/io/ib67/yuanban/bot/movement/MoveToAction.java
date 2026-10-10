@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
  * {@code moveTo}：在寻路线程上寻路，然后沿路径移动。玩家着地，与目标的水平距离进入 closeDistance，并且脚部与目标的站立高度
  * （{@link PathPlanner#targetHeight}）相差小于 1 时执行完毕。
  * 连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路，最多 3 次。
+ * 找不到路径，或者只能走到最近点并且已经走完时取消：寻路时目标所在区块未加载为 CHUNK_NOT_LOADED，否则为 NO_PATH。
  */
 public final class MoveToAction extends MovementAction {
     public static final int MAX_REPATHS = 3;
@@ -39,6 +40,10 @@ public final class MoveToAction extends MovementAction {
      * 目标的站立高度（{@link PathPlanner#targetHeight}），每次寻路时用这次的世界快照重新计算
      */
     private double targetHeight;
+    /**
+     * 最近一次寻路时目标所在区块是否已加载：未加载时快照中没有目标的地形，找不到路径的原因为 CHUNK_NOT_LOADED
+     */
+    private boolean targetChunkLoaded;
     /**
      * 寻路期间被 Block Update 改变的方块
      */
@@ -99,7 +104,7 @@ public final class MoveToAction extends MovementAction {
         var intent = path.next(player, mode);
         if (path.finished()) {
             if (bestEffort) {
-                handle.cancelled(ActionCancelledException.NO_PATH);
+                handle.cancelled(noPathReason());
                 return MoveIntent.NONE;
             }
             return new MoveIntent(MoveIntent.horizontalDirection(position.x(), position.z(), target.x(), target.z()), mode, false);
@@ -121,7 +126,7 @@ public final class MoveToAction extends MovementAction {
     /**
      * 按寻路结果开始跟随（8.4 的路径判断）；寻路期间被改变的方块在这条路径上时请求重新寻路
      *
-     * @return 动作是否还在执行（找不到路径时以 NO_PATH 取消）
+     * @return 动作是否还在执行（找不到路径时以 {@link #noPathReason} 取消）
      */
     private boolean usePath(List<PNode> nodes) {
         // 搜索的节点数达到 maxDistance × 10 而开放列表不为空时，Minestom 在最近节点之后接一个坐标为 (0, 0, 0) 的 REPATH 节点，
@@ -131,7 +136,7 @@ public final class MoveToAction extends MovementAction {
             nodes = nodes.subList(0, repath);
         }
         if (nodes.isEmpty()) {
-            handle.cancelled(ActionCancelledException.NO_PATH);
+            handle.cancelled(noPathReason());
             return false;
         }
         var path = new PathFollower(nodes, Objects.requireNonNull(planningSnapshot), Objects.requireNonNull(planningBox));
@@ -185,6 +190,14 @@ public final class MoveToAction extends MovementAction {
     }
 
     /**
+     * 找不到路径（或者只能走到最近点）时的取消原因：最近一次寻路时目标所在区块未加载为 CHUNK_NOT_LOADED，否则为 NO_PATH。
+     * 目标在 maxDistance 之外时快照不包含它的区块，所以按寻路时 {@link io.ib67.yuanban.bot.world.ClientWorld} 中的状态判断
+     */
+    private String noPathReason() {
+        return targetChunkLoaded ? ActionCancelledException.NO_PATH : ActionCancelledException.CHUNK_NOT_LOADED;
+    }
+
+    /**
      * @return 第一个 REPATH 节点的下标；没有时为 -1
      */
     private static int repathIndex(List<PNode> nodes) {
@@ -204,8 +217,9 @@ public final class MoveToAction extends MovementAction {
         planningSnapshot = snapshot;
         planningBox = boundingBox;
         targetHeight = PathPlanner.targetHeight(snapshot, target, boundingBox);
+        targetChunkLoaded = controller.world().chunkLoaded(target.chunkX(), target.chunkZ());
         changedWhilePlanning.clear();
         planning = PathPlanner.plan(snapshot, player.position(), target, options.closeDistance(), options.maxDistance(),
-                boundingBox, player.onGround());
+                boundingBox, player.onGround(), controller.tags());
     }
 }

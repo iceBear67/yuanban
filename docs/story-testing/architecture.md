@@ -77,6 +77,7 @@ graph TD
 - 维护全局唯一的 `ServerOwner`（标识该服务端是属于通用模块还是属于某个 `@IsolatedJvm` 类）。
 - 启动 Minestom 进程并在回环地址（Loopback）绑定实际监听端口。
 - 在 `ServerTickMonitorEvent` 上挂载全局 Tick 结束钩子（`TickEnd`），驱动所有故事的 Tick 检查与暂停点。
+- 替换 `ClientKeepAlivePacket` 的监听器，把 Minestom 的 Keep Alive 处理交给下一个 Tick 开始时执行，避免读取线程上的延迟广播排在其它玩家的 Start Configuration 之后（Minestom 问题 M24）。
 
 ### 3. `StoryEnvImpl`
 - 代表一个具体 `@Story` 测试的隔离运行时环境。

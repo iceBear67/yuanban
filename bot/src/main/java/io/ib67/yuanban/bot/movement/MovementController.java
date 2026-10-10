@@ -8,6 +8,7 @@ import io.ib67.yuanban.bot.observe.Observation.PlayerMoved;
 import io.ib67.yuanban.bot.player.AttributeMap;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.protocol.Vectors;
+import io.ib67.yuanban.bot.registry.TagTable;
 import io.ib67.yuanban.bot.scheduler.BotState;
 import io.ib67.yuanban.bot.world.ClientWorld;
 import net.minestom.server.coordinate.Point;
@@ -85,6 +86,13 @@ public final class MovementController {
 
     public ClientWorld world() {
         return state.world();
+    }
+
+    /**
+     * 服务端的标签；不可变，可以交给寻路线程
+     */
+    public TagTable tags() {
+        return state.tags();
     }
 
     public RotationArbiter arbiter() {

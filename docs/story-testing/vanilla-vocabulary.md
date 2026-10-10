@@ -33,7 +33,7 @@
 
 原版动作严格校验客户端交互距离，避免由于「神仙操作」导致测试失去仿真意义：
 
-- **眼睛位置**：$\text{eye} = \text{position} + (0, 1.62 \times \text{scale}, 0)$。
+- **眼睛位置**：$\text{eye} = \text{position} + (0, 1.62 \times \text{scale}, 0)$，与原版相同以 float 计算（1.62F 乘以换成 float 的 scale）。
 - **方块交互上限**：读取客户端 `minecraft:block_interaction_range` 属性（默认 $4.5$ 格）。
 - **实体交互上限**：读取客户端 `minecraft:entity_interaction_range` 属性（默认 $3.0$ 格）。
 
@@ -110,7 +110,7 @@ world (0, 64, 10) 不在 alice 的交互距离之内：眼睛到方块的距离�
 
 ### 1. `attacks(entity: EntityActor)`
 - **先决条件**：目标实体在实体交互距离内。
-- **动作**：看向实体，随后发送左键攻击包。
+- **动作**：看向实体，随后发送左键攻击包。bot 发送之前按原版客户端判断攻击距离：视线进入目标包围盒的位置离眼睛不小于实体交互距离时只挥手，攻击以超出攻击距离取消，步骤失败。
 
 ### 2. `interactsWith(entity: EntityActor)`
 - **先决条件**：目标实体在实体交互距离内。

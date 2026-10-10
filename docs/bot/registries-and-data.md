@@ -93,7 +93,7 @@
 `ItemData`（`item.json`）：
 
 - `id(Key)`：物品编号；没有这个物品时抛出 `IllegalArgumentException`。
-- `prototype(物品编号, DataComponentType)`：物品的默认组件。只转换本库读取的四种：`tool`、`equippable`、`use_effects`、`piercing_weapon`，其它类型抛出 `IllegalArgumentException`。JSON 是原版编解码器的格式，取默认值的字段被省略，转换时按原版编解码器的默认值补上：
+- `prototype(物品编号, DataComponentType)`：物品的默认组件。只转换本库读取的五种：`tool`、`equippable`、`use_effects`、`piercing_weapon`、`attack_range`，其它类型抛出 `IllegalArgumentException`。JSON 是原版编解码器的格式，取默认值的字段被省略，转换时按原版编解码器的默认值补上：
 
 | 组件 | 省略的字段的默认值 |
 |---|---|
@@ -101,6 +101,7 @@
 | `equippable` | `equip_sound` 为 `item.armor.equip_generic`；`dispensable`、`swappable`、`damage_on_hurt` 为 true；`equip_on_interact`、`can_be_sheared` 为 false；`shearing_sound` 为 `item.shears.snip`；`asset_id`（MCProtocolLib 中的 model）、`camera_overlay`、`allowed_entities` 省略时为 null |
 | `use_effects` | `(false, true, 0.2F)`，与原版 `UseEffects.DEFAULT` 相同 |
 | `piercing_weapon` | `deals_knockback` true、`dismounts` false；两个声音省略时为 null |
+| `attack_range` | `min_reach` 0、`max_reach` 3、`min_creative_reach` 0、`max_creative_reach` 5、`hitbox_margin` 0.3、`mob_factor` 1 |
 
 JSON 内容的转换：
 
@@ -114,7 +115,7 @@ JSON 内容的转换：
 
 MCProtocolLib 的 `ItemStack` 只带有相对默认组件的补丁，空槽位为 null。`Items` 提供：
 
-- `component(物品, 类型)`：物品实际的组件。补丁中有这个类型时取补丁中的值（值为 null 表示补丁移除了它），否则取 `ItemData` 的默认组件；空槽位没有任何组件。只支持上面四种与 `can_break`（原版物品都没有这个默认组件，只在补丁中出现）。
+- `component(物品, 类型)`：物品实际的组件。补丁中有这个类型时取补丁中的值（值为 null 表示补丁移除了它），否则取 `ItemData` 的默认组件；空槽位没有任何组件。只支持上面五种与 `can_break`（原版物品都没有这个默认组件，只在补丁中出现）。
 - `has(物品, 类型)`：组件是否存在。
 - `sameItemSameComponents(a, b)`：原版 `ItemStack.isSameItemSameComponents`，同一物品并且组件相同，不比较数量；两个都为 null 时相同。
 - `sameStack(a, b)`：再要求数量相同。

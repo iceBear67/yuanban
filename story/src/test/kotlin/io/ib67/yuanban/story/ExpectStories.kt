@@ -13,7 +13,6 @@ import net.minestom.server.network.packet.server.play.BlockChangePacket
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration.Companion.milliseconds
 
 class ExpectStories {
     @Story
@@ -93,7 +92,7 @@ class ExpectStories {
         val target = spawn.north(2)
         val checks = recordChecks()
 
-        val failure = attempt { expect(within = 300.milliseconds) { target.block shouldBe Block.GOLD_BLOCK } }.failure.shouldNotBeNull()
+        val failure = attempt { expect(within = defaults.timeout) { target.block shouldBe Block.GOLD_BLOCK } }.failure.shouldNotBeNull()
 
         val message = failure.message.shouldNotBeNull()
         message shouldContain "最后一次检查（tick ${checks.last().tick}）"
