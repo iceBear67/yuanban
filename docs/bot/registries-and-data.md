@@ -17,7 +17,7 @@
   - [实体类型](#实体类型)
 - [协议枚举与注册表编号](#协议枚举与注册表编号)
 
-相关源码：[`registry`](../../bot/src/main/java/io/ib67/yuanban/bot/registry)、[`data`](../../bot/src/main/java/io/ib67/yuanban/bot/data)。
+相关源码：[`registry`](../../bot/data/src/main/java/io/ib67/yuanban/bot/registry)、[`data`](../../bot/data/src/main/java/io/ib67/yuanban/bot/data)。
 
 ## 同步注册表
 

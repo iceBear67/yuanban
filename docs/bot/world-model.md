@@ -32,7 +32,7 @@
   - [天气](#天气)
   - [难度、默认出生点与距离](#难度默认出生点与距离)
 
-相关源码：[`scheduler/BotState.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotState.java)、[`world`](../../bot/src/main/java/io/ib67/yuanban/bot/world)、[`entity`](../../bot/src/main/java/io/ib67/yuanban/bot/entity)、[`player`](../../bot/src/main/java/io/ib67/yuanban/bot/player)、[`inventory`](../../bot/src/main/java/io/ib67/yuanban/bot/inventory)、[`chat`](../../bot/src/main/java/io/ib67/yuanban/bot/chat)、[`hud`](../../bot/src/main/java/io/ib67/yuanban/bot/hud)。
+相关源码：[`state/BotState.java`](../../bot/control/src/main/java/io/ib67/yuanban/bot/state/BotState.java)、[`world`](../../bot/model/src/main/java/io/ib67/yuanban/bot/world)、[`entity`](../../bot/model/src/main/java/io/ib67/yuanban/bot/entity)、[`player`](../../bot/model/src/main/java/io/ib67/yuanban/bot/player)、[`inventory`](../../bot/model/src/main/java/io/ib67/yuanban/bot/inventory)、[`chat`](../../bot/model/src/main/java/io/ib67/yuanban/bot/chat)、[`hud`](../../bot/model/src/main/java/io/ib67/yuanban/bot/hud)。
 
 ## BotState
 

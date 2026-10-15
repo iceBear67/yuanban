@@ -1,9 +1,0 @@
-{
-  "entry": "main",
-  "description": "recovery：依次朝东、西、南、北直线移动 1.5 格，再尝试跳到东边的方块；位置变化超过 1 格即为脱困，返回 {kind: moved}；都不行时发出 fault(stuck) 并返回 {kind: stuck}。",
-  "roles": ["recovery"],
-  "messagesIn": ["stop"],
-  "messagesOut": ["progress", "fault"],
-  "capabilities": ["observe.*", "locomotion.moveForward", "locomotion.jumpTo"],
-  "fallback": "stop-on-unknown-fault"
-}

@@ -18,7 +18,7 @@
 - [聊天与命令](#聊天与命令)
 - [Bundle](#bundle)
 
-相关源码：[`protocol/ProtocolMachine.java`](../../bot/src/main/java/io/ib67/yuanban/bot/protocol/ProtocolMachine.java)、[`scheduler/BotInstance.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)、[`chat`](../../bot/src/main/java/io/ib67/yuanban/bot/chat)。
+相关源码：[`protocol/ProtocolMachine.java`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot/protocol/ProtocolMachine.java)、[`scheduler/BotInstance.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)、[`chat`](../../bot/model/src/main/java/io/ib67/yuanban/bot/chat)。
 
 ## 概述
 

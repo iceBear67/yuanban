@@ -16,7 +16,7 @@
 
 ## 依赖
 
-在模块的 `build.gradle` 中依赖 `project(":bot")`。`bot` 以 `api` 方式依赖 MCProtocolLib、Minestom 与 fastutil，公开接口中出现的类型（数据包、`ItemStack`、`EntityType`、`Point`、`Block`、adventure 的 `Component` 与 `Key`、Cloudburst 的 `NbtMap`）都随之可用。依赖的版本与理由见[架构参考 · 外部库的使用范围](architecture.md#外部库的使用范围)。
+在模块的 `build.gradle` 中依赖 `project(":bot:runtime")`。`:bot:runtime` 以 `api` 方式传递 `:bot:api`、`:bot:transport` 与 MCProtocolLib、Minestom、fastutil，公开接口中出现的类型（数据包、`ItemStack`、`EntityType`、`Point`、`Block`、adventure 的 `Component` 与 `Key`、Cloudburst 的 `NbtMap`）都随之可用。内部模块（`:bot:data`、`:bot:model`、`:bot:control`、`:bot:protocol`）不在使用者的编译类路径上，见[架构参考 · 公开接口与内部实现](architecture.md#公开接口与内部实现)。依赖的版本与理由见[架构参考 · 外部库的使用范围](architecture.md#外部库的使用范围)。
 
 ## 创建运行时与 bot
 
@@ -34,7 +34,7 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 }
 ```
 
-- `BotOptions` 中只有 `username` 与 `transport` 必须设置，其余选项的默认值见 [`BotOptions`](../../bot/src/main/java/io/ib67/yuanban/bot/BotOptions.java)：`transportResolver`（Transfer 时为新地址选择连接方式，默认 TCP）、`readTimeout`（默认 30 秒）、`loginPluginHandler`、`resourcePackPolicy`、`acceptCodeOfConduct`、`brand`、`chatLogSize`，以及 Client Information 的各项内容。
+- `BotOptions` 中只有 `username` 与 `transport` 必须设置，其余选项的默认值见 [`BotOptions`](../../bot/api/src/main/java/io/ib67/yuanban/bot/BotOptions.java)：`transportResolver`（Transfer 时为新地址选择连接方式，默认 TCP）、`readTimeout`（默认 30 秒）、`loginPluginHandler`、`resourcePackPolicy`、`acceptCodeOfConduct`、`brand`、`chatLogSize`，以及 Client Information 的各项内容。
 - `TcpTransport` 只支持离线模式的服务端，不支持加密。连接到同一进程中的服务端时，由外部模块实现 `Transport`，要求见[连接与解码 · 进程内连接](connection.md#进程内连接)。
 - `runtime.connect` 在调用线程上打开连接，建立 TCP 连接时阻塞；连接失败时抛出 `UncheckedIOException`。握手数据包在下一轮调度中发出。
 - `waitPump` 设置的推进函数只在阻塞等待期间执行，规则见[线程与调度 · 阻塞等待与推进函数](threading.md#阻塞等待与推进函数)。
@@ -68,9 +68,9 @@ boolean done = walk.await(Duration.ofSeconds(10));   // 执行完毕为 true，�
 ## 查询模型
 
 ```java
-Pos position = bot.view().player().position();
-Block below = bot.view().block(position.sub(0, 1, 0));
-NbtMap sign = bot.view().blockEntity(new Vec(3, 64, 3));   // 方块实体发给客户端的 NBT，没有时为 null
+Pos position = bot.inspect(StateReader::player).position();
+Block below = bot.inspect(state -> state.block(position.sub(0, 1, 0)));
+NbtMap sign = bot.inspect(state -> state.blockEntity(new Vec(3, 64, 3)));   // 方块实体发给客户端的 NBT，没有时为 null
 
 // 多项读取在同一时刻完成；返回值中不要包含 StateReader 给出的可变对象
 record Status(float health, @Nullable ItemStack firstHotbarSlot) {}
@@ -80,7 +80,7 @@ Status status = bot.inspect(state -> new Status(state.player().health(), state.i
 bot.await(state -> state.player().onGround(), Duration.ofSeconds(5));
 ```
 
-- `view()` 下的方法在其它线程调用时交给调度线程执行并等待结果，返回不可变的快照。
+- `inspect` 在其它线程调用时把函数交给调度线程执行并等待结果。`StateReader` 的方法返回不可变的快照。
 - 物品为 MCProtocolLib 的 `ItemStack`，空槽位为 null。`inventory()` 是窗口 0（玩家物品栏），槽位编号按 wiki Inventory。
 - `block` 与 `blockEntity` 在区块没有加载时抛出 `ChunkNotLoadedException`；bot 不在任何世界中时，`player`、`block`、`blockEntity` 抛出 `IllegalStateException`。
 
@@ -105,7 +105,7 @@ assertTrue(zombie.observer().met());
 
 // 只做记录的 observer 由句柄关闭，关闭之后任何线程都可以直接读取
 damage.close();
-assertTrue(damage.observer().damages().isEmpty());
+assertTrue(damage.observer().items().isEmpty());
 ```
 
 只观察一个动作执行期间的变化时使用 `observeDuring`，动作结束之后 observer 随之关闭：

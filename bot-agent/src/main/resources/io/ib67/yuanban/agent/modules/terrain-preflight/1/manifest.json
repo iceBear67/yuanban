@@ -1,9 +1,0 @@
-{
-  "entry": "main",
-  "description": "只读 preflight：检查 target（或 primaryInput.target）附近 5×7×5 的方块中的危险方块、目标是否被挡住、目标下方的落差，以及玩家到目标的直线上区块是否已加载。返回 {target, known, unknown, hazards, safe}；unknown 不等于安全。",
-  "roles": ["preflight"],
-  "messagesIn": ["stop"],
-  "messagesOut": [],
-  "capabilities": ["observe.*"],
-  "fallback": "continue"
-}

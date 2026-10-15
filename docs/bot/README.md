@@ -2,7 +2,7 @@
 
 `bot` 是 Minecraft: Java Edition 26.2（协议号 776）的客户端库。集成测试用它创建逻辑上的玩家，让玩家加入服务端、执行动作，并观察服务端的反应。数据包的编解码与 TCP 连接由 [MCProtocolLib](https://github.com/GeyserMC/MCProtocolLib) 完成；物理计算、寻路、坐标与静态方块数据使用 [Minestom](https://github.com/Minestom/Minestom)。
 
-源码位于 [`bot/src/main/java/io/ib67/yuanban/bot`](../../bot/src/main/java/io/ib67/yuanban/bot)，测试位于 [`bot/src/test/java/io/ib67/yuanban/bot`](../../bot/src/test/java/io/ib67/yuanban/bot)。
+源码分布在 `bot/` 下七个模块的目录中：[`bot/transport`](../../bot/transport/src/main/java/io/ib67/yuanban/bot)、[`bot/data`](../../bot/data/src/main/java/io/ib67/yuanban/bot)、[`bot/api`](../../bot/api/src/main/java/io/ib67/yuanban/bot)、[`bot/model`](../../bot/model/src/main/java/io/ib67/yuanban/bot)、[`bot/control`](../../bot/control/src/main/java/io/ib67/yuanban/bot)、[`bot/protocol`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot)、[`bot/runtime`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot)。各模块包含的包见[架构参考 · 包与职责](architecture.md#包与职责)。
 
 ## 目录
 
@@ -17,7 +17,7 @@
 | [世界模型](world-model.md) | `BotState` 的组成、区块与区段共享、世界快照、实体与包围盒、乘坐关系、本地玩家、物品栏、聊天日志、界面状态、时间与世界边框 |
 | [动作](actions.md) | `Action` 句柄、三类队列、取消原因、朝向的归属、各个移动动作、手部交互动作、一次性请求 |
 | [移动模拟与骑乘](movement.md) | 每 tick 的移动计算、疾跑与 Player Input、移动包、寻路与路径跟随、服务端施加的位置与速度、暂停移动、骑乘 |
-| [查询与观察](observation.md) | `BotView` 与 `inspect`、观察记录、`Observer` 与 `Subscription`、observer 的生命周期、`WorldBoundObserver`、内置 observer、`observeDuring`、等待方法 |
+| [查询与观察](observation.md) | `inspect`、观察记录、`Observer` 与 `Subscription`、observer 的生命周期、`WorldBoundObserver`、内置 observer、`observeDuring`、等待方法 |
 | [错误处理](errors.md) | 异常类型、bot 因异常结束的过程、连接结束的过程、不支持的输入 |
 | [测试](testing.md) | 测试方式、`TestPeer` 与 `TestServer`、各测试类的范围 |
 | [限制与待办](limitations.md) | 不实现的功能、不覆盖的移动、对 Minestom 的绕过方法、待办 T1 到 T4 |

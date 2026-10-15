@@ -22,7 +22,7 @@
 
 ```
 测试代码
-  │  BotRuntime.connect / Bot 的动作方法 / view() 与 inspect() / observe() / suspendMovement()
+  │  BotRuntime.connect / Bot 的动作方法 / inspect() / observe() / suspendMovement()
   ▼
 调度线程（每个 BotRuntime 一个，Scheduler.loop）
   │  每一轮按创建顺序处理每个 bot（BotInstance.round）：
@@ -51,40 +51,48 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 
 ## 包与职责
 
-根包为 `io.ib67.yuanban.bot`，源码目录 [`bot/src/main/java/io/ib67/yuanban/bot`](../../bot/src/main/java/io/ib67/yuanban/bot)。
+根包为 `io.ib67.yuanban.bot`。各包分布在七个 Gradle 模块中，它们都是 `:bot` 的子项目，目录为 `bot/` 下与模块同名的目录，每个模块的源码位于模块目录下的 `src/main/java/io/ib67/yuanban/bot`；`:bot` 本身没有源码。根包分布在 `:bot:api` 与 `:bot:runtime` 两个模块中。模块之间的依赖只从上层指向下层：
 
-| 包 | 主要类 | 职责 | 详细说明 |
-|---|---|---|---|
-| 根包 | `BotRuntime`、`RuntimeOptions`、`Bot`、`BotOptions`、`BotStatus`、`Action`、`ObservedAction`、`InventoryActions`、`MoveOptions`、`MovementMode`、`LoginPluginHandler`、`ResourcePackPolicy`、各异常类 | 公开入口与选项 | [快速上手](getting-started.md)、[动作](actions.md)、[错误处理](errors.md) |
-| [`scheduler`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler) | `Scheduler`、`BotInstance`、`BotState`、`BotTicker`、`ActionImpl`、`StateReaderImpl`、`BotViewImpl`、`ObserverHandleImpl`、`ObservedActionImpl`、`Waits`、`WaitPump` | 调度线程、`Bot` 的实现、tick 顺序、阻塞等待 | [线程与调度](threading.md) |
-| [`transport`](../../bot/src/main/java/io/ib67/yuanban/bot/transport) | `Transport`、`ClientConnection`、`InboundSink`、`TransportResolver`、`TcpTransport`、`TcpConnection`；包内可见的 `BotClientSession`、`LastReadHandler`、`NettyGroup` | 连接接口与 TCP 实现 | [连接与解码](connection.md) |
-| [`decode`](../../bot/src/main/java/io/ib67/yuanban/bot/decode) | `DecodeContext`、`SectionDecoder`、`SectionPool`、`DecodedChunk` | 数据包交给调度线程之前的处理 | [连接与解码](connection.md#解码上下文) |
-| [`protocol`](../../bot/src/main/java/io/ib67/yuanban/bot/protocol) | `ProtocolMachine`、`Outbox`、`InboundPacket`、`BundleBuffer`、`ChunkBatchTracker`、`CookieStore`、`PacketDirection`、`Vectors` | 协议状态机、自动应答、待发送数据包、数据包方向 | [协议状态机](protocol.md) |
-| [`registry`](../../bot/src/main/java/io/ib67/yuanban/bot/registry) | `SyncedRegistries`、`SyncedRegistriesBuilder`、`DimensionInfo`、`TagTable`、`VanillaNetworkCodec` | 服务端同步的注册表与标签 | [注册表与静态数据](registries-and-data.md) |
-| [`data`](../../bot/src/main/java/io/ib67/yuanban/bot/data) | `ItemData`、`Items`、`AttributeData`、`EntityTypeData`、`BlockStates`、`MinestomDataFiles` | 取自 `net.minestom:data` 的静态数据 | [注册表与静态数据](registries-and-data.md#静态数据) |
-| [`world`](../../bot/src/main/java/io/ib67/yuanban/bot/world) | `ClientWorld`、`ChunkColumn`、`SectionRef`、`SharedSection`、`WorldSnapshot`、`BlockEntityStore`、`WorldClocks`、`TickState`、`WorldBorderState`、`Weather` | 世界模型 | [世界模型](world-model.md) |
-| [`entity`](../../bot/src/main/java/io/ib67/yuanban/bot/entity) | `EntityStore`、`ClientEntity`、`EntityDimensions` | 世界中的其它实体与包围盒 | [世界模型 · 实体](world-model.md#实体) |
-| [`player`](../../bot/src/main/java/io/ib67/yuanban/bot/player) | `LocalPlayer`、`AttributeMap`、`EffectMap`、`Abilities`、`PlayerLoadTracker`、`Interpolation` | 本地玩家 | [世界模型 · 本地玩家](world-model.md#本地玩家) |
-| [`inventory`](../../bot/src/main/java/io/ib67/yuanban/bot/inventory) | `InventoryModel`、`Window`、`ContainerSlots`、`InventoryActionsImpl` | 物品栏模型与物品栏操作 | [世界模型 · 物品栏](world-model.md#物品栏)、[动作 · 一次性请求](actions.md#一次性请求) |
-| [`chat`](../../bot/src/main/java/io/ib67/yuanban/bot/chat) | `ChatModel`、`LastSeenTracker`、`SignatureCache`、`Signature` | 聊天日志、已读跟踪、签名缓存 | [协议状态机 · 聊天与命令](protocol.md#聊天与命令) |
-| [`hud`](../../bot/src/main/java/io/ib67/yuanban/bot/hud) | `HudModel` | Boss Bar、标题、动作栏、玩家列表、计分板 | [世界模型 · 界面状态](world-model.md#界面状态) |
-| [`movement`](../../bot/src/main/java/io/ib67/yuanban/bot/movement) | `MovementController`、`MovementAction` 与四个子类、`MoveIntent`、`Kinematics`、`PathPlanner`、`PlayerNodeGenerator`、`PathFollower`、`RotationArbiter`、`Rotation`、`MovementSender`、`SineTable`、`RidingSeat`、`VehicleControl` | 移动队列、移动模拟、寻路跟随、朝向、骑乘 | [移动模拟与骑乘](movement.md) |
-| [`interaction`](../../bot/src/main/java/io/ib67/yuanban/bot/interaction) | `HandController`、`HandAction` 与五个子类、`AttackReach`、`BlockSequence`、`DigSpeed`、`BlockPredicates`、`NbtCompare`、`Directions` | 手部交互队列 | [动作 · 手部交互动作](actions.md#手部交互动作) |
-| [`view`](../../bot/src/main/java/io/ib67/yuanban/bot/view) | `BotView`、`StateReader`、各快照 record、`ActiveEffect`、`EntityMeta`、`EntityMetaIndex`、`ChatLine`、`ChatKind` | 只读的查询接口与快照 | [查询与观察 · 查询](observation.md#查询) |
-| [`observe`](../../bot/src/main/java/io/ib67/yuanban/bot/observe) | `Observation`、`Observer`、`Subscription`、`ObserverContext`、`ObserverHandle`、`CloseReason`、`WorldBoundObserver`、`WorldInfo`、`WorldEntryCause`、`WorldRecord`、`WorldClosed`、`Region` | 观察的公开接口 | [查询与观察](observation.md) |
-| [`observe.builtin`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/builtin) | `Observers` 与各内置 observer、`MovementCriteria`、`Records`、各记录 record | 内置 observer | [查询与观察 · 内置 observer](observation.md#内置-observer) |
-| [`observe.dispatch`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost`、`RegistrationCheck` | 观察记录的投递与订阅索引 | [查询与观察 · 投递](observation.md#投递) |
+```
+:bot:runtime ──api───► :bot:api ──► :bot:transport
+  └──implementation──► :bot:protocol ──► :bot:control ──► :bot:model ──┬──► :bot:api
+                                                                        └──► :bot:data
+```
+
+| 包 | 模块 | 主要类 | 职责 | 详细说明 |
+|---|---|---|---|---|
+| 根包 | `:bot:api`；`BotRuntime` 位于 `:bot:runtime` | `BotRuntime`、`RuntimeOptions`、`Bot`、`BotOptions`、`BotStatus`、`Action`、`ObservedAction`、`InventoryActions`、`MoveOptions`、`MovementMode`、`LoginPluginHandler`、`ResourcePackPolicy`、各异常类 | 公开入口与选项 | [快速上手](getting-started.md)、[动作](actions.md)、[错误处理](errors.md) |
+| [`scheduler`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler) | `:bot:runtime` | `Scheduler`、`BotInstance`、`BotTicker`、`ActionImpl`、`StateReaderImpl`、`InventoryActionsImpl`、`ObserverHandleImpl`、`ObservedActionImpl`、`Waits`、`WaitPump` | 调度线程、`Bot` 的实现、tick 顺序、阻塞等待、物品栏操作 | [线程与调度](threading.md)、[动作 · 一次性请求](actions.md#一次性请求) |
+| [`transport`](../../bot/transport/src/main/java/io/ib67/yuanban/bot/transport) | `:bot:transport` | `Transport`、`ClientConnection`、`InboundSink`、`TransportResolver`、`TcpTransport`、`TcpConnection`、`PacketDirection`；包内可见的 `BotClientSession`、`LastReadHandler`、`NettyGroup` | 连接接口与 TCP 实现、数据包方向 | [连接与解码](connection.md) |
+| [`decode`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot/decode) | `:bot:protocol` | `DecodeContext`、`SectionDecoder`、`SectionPool`、`DecodedChunk` | 数据包交给调度线程之前的处理 | [连接与解码](connection.md#解码上下文) |
+| [`protocol`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot/protocol) | `:bot:protocol` | `ProtocolMachine`、`ProtocolHost`、`InboundPacket`、`BundleBuffer`、`ChunkBatchTracker` | 协议状态机、自动应答 | [协议状态机](protocol.md) |
+| [`registry`](../../bot/data/src/main/java/io/ib67/yuanban/bot/registry) | `:bot:data` | `SyncedRegistries`、`SyncedRegistriesBuilder`、`DimensionInfo`、`TagTable`、`VanillaNetworkCodec` | 服务端同步的注册表与标签 | [注册表与静态数据](registries-and-data.md) |
+| [`data`](../../bot/data/src/main/java/io/ib67/yuanban/bot/data) | `:bot:data` | `ItemData`、`Items`、`AttributeData`、`EntityTypeData`、`BlockStates`、`MinestomDataFiles` | 取自 `net.minestom:data` 的静态数据 | [注册表与静态数据](registries-and-data.md#静态数据) |
+| [`world`](../../bot/model/src/main/java/io/ib67/yuanban/bot/world) | `:bot:model` | `ClientWorld`、`ChunkColumn`、`SectionRef`、`SharedSection`、`WorldSnapshot`、`BlockEntityStore`、`WorldClocks`、`TickState`、`WorldBorderState`、`Weather` | 世界模型 | [世界模型](world-model.md) |
+| [`entity`](../../bot/model/src/main/java/io/ib67/yuanban/bot/entity) | `:bot:model` | `EntityStore`、`ClientEntity`、`EntityDimensions` | 世界中的其它实体与包围盒 | [世界模型 · 实体](world-model.md#实体) |
+| [`player`](../../bot/model/src/main/java/io/ib67/yuanban/bot/player) | `:bot:model` | `LocalPlayer`、`AttributeMap`、`EffectMap`、`Abilities`、`PlayerLoadTracker`、`Interpolation` | 本地玩家 | [世界模型 · 本地玩家](world-model.md#本地玩家) |
+| [`inventory`](../../bot/model/src/main/java/io/ib67/yuanban/bot/inventory) | `:bot:model` | `InventoryModel`、`Window`、`ContainerSlots` | 物品栏模型 | [世界模型 · 物品栏](world-model.md#物品栏) |
+| [`chat`](../../bot/model/src/main/java/io/ib67/yuanban/bot/chat) | `:bot:model` | `ChatModel`、`LastSeenTracker`、`SignatureCache`、`Signature` | 聊天日志、已读跟踪、签名缓存 | [协议状态机 · 聊天与命令](protocol.md#聊天与命令) |
+| [`hud`](../../bot/model/src/main/java/io/ib67/yuanban/bot/hud) | `:bot:model` | `HudModel` | Boss Bar、标题、动作栏、玩家列表、计分板 | [世界模型 · 界面状态](world-model.md#界面状态) |
+| [`state`](../../bot/control/src/main/java/io/ib67/yuanban/bot/state) | `:bot:control` | `BotState`、`Outbox`、`CookieStore`、`ActionHandle`、`Vectors` | 协议状态机与两个控制器共用的状态：全部模型、本轮待发送的数据包、Store Cookie 保存的数据、动作的结束与取消、MCProtocolLib 与 Minestom 的坐标转换 | [世界模型 · BotState](world-model.md#botstate) |
+| [`movement`](../../bot/control/src/main/java/io/ib67/yuanban/bot/movement) | `:bot:control` | `MovementController`、`MovementAction` 与四个子类、`MoveIntent`、`Kinematics`、`PathPlanner`、`PlayerNodeGenerator`、`PathFollower`、`RotationArbiter`、`Rotation`、`MovementSender`、`SineTable`、`RidingSeat`、`VehicleControl` | 移动队列、移动模拟、寻路跟随、朝向、骑乘 | [移动模拟与骑乘](movement.md) |
+| [`interaction`](../../bot/control/src/main/java/io/ib67/yuanban/bot/interaction) | `:bot:control` | `HandController`、`HandAction` 与五个子类、`AttackReach`、`BlockSequence`、`DigSpeed`、`BlockPredicates`、`NbtCompare`、`Directions` | 手部交互队列 | [动作 · 手部交互动作](actions.md#手部交互动作) |
+| [`view`](../../bot/api/src/main/java/io/ib67/yuanban/bot/view) | `:bot:api` | `StateReader`、各快照 record、`ActiveEffect`、`EntityMeta`、`EntityMetaIndex`、`ChatLine`、`ChatKind` | 只读的查询接口与快照 | [查询与观察 · 查询](observation.md#查询) |
+| [`observe`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe) | `:bot:api` | `Observation`、`Observer`、`Subscription`、`ObserverContext`、`ObserverHandle`、`CloseReason`、`WorldBoundObserver`、`WorldInfo`、`WorldEntryCause`、`WorldRecord`、`WorldClosed`、`Region` | 观察的公开接口 | [查询与观察](observation.md) |
+| [`observe.builtin`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/builtin) | `:bot:api` | `Observers`、`RecordingObserver`、`WorldRecordingObserver`、`FirstMatchObserver` 与其余内置 observer、`MovementCriteria`、`Records`、各记录 record | 内置 observer | [查询与观察 · 内置 observer](observation.md#内置-observer) |
+| [`observe.dispatch`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `:bot:api` | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost`、`RegistrationCheck`、`RegisteredObservers`、`SubmittedAction` | 观察记录的投递与订阅索引、已注册 observer 的记录 | [查询与观察 · 投递](observation.md#投递) |
 
 ## 公开接口与内部实现
 
-- 公开的包：根包、`view`、`observe`、`observe.builtin`、`transport`。
-- 其余包（`scheduler`、`decode`、`protocol`、`registry`、`data`、`world`、`entity`、`player`、`inventory`、`chat`、`hud`、`movement`、`interaction`、`observe.dispatch`）在 `package-info.java` 中整体标注 `@ApiStatus.Internal`。其中的类大多是 `public`，因为包之间互相调用。
+- 公开的包：根包、`view`、`observe`、`observe.builtin`、`transport`。`transport` 中的 `PacketDirection` 在类上标注 `@ApiStatus.Internal`。
+- 其余包（`scheduler`、`decode`、`protocol`、`registry`、`data`、`world`、`entity`、`player`、`inventory`、`chat`、`hud`、`state`、`movement`、`interaction`、`observe.dispatch`）在 `package-info.java` 中整体标注 `@ApiStatus.Internal`。其中的类大多是 `public`，因为包之间互相调用。
+- 使用者依赖 `:bot:runtime`。`:bot:runtime` 以 `api` 依赖 `:bot:api`（`:bot:api` 以 `api` 依赖 `:bot:transport`），以 `implementation` 依赖 `:bot:protocol`。内部包中的 `registry`、`data`、`world`、`entity`、`player`、`inventory`、`chat`、`hud`、`state`、`movement`、`interaction`、`decode`、`protocol` 位于 `:bot:runtime` 以 `implementation` 依赖的模块中（`:bot:data`、`:bot:model`、`:bot:control`、`:bot:protocol`），不在使用者的编译类路径上，引用它们是编译错误。`scheduler` 位于 `:bot:runtime` 本身，`observe.dispatch` 位于 `:bot:api`，两者在使用者的编译类路径上；`scheduler` 的公开方法中出现的 `BotState`、`MovementController` 等类型对使用者不可见。
 - 值类型使用 record，选项类使用 Lombok `@Builder`（`BotOptions`、`RuntimeOptions`、`MoveOptions`），可空性使用 JetBrains annotations 标注。
 - 公开接口直接使用 MCProtocolLib 与 Minestom 的类型，本库不包装它们，见[外部库的使用范围](#外部库的使用范围)。
 
 ## 核心对象
 
-一个 `BotRuntime` 持有一个 `Scheduler`；`Scheduler` 持有调度线程与按创建顺序排列的 `BotInstance` 列表。每个 `BotInstance`（`Bot` 的实现，同时实现 `ObservationHost`）持有：
+一个 `BotRuntime` 持有一个 `Scheduler`；`Scheduler` 持有调度线程与按创建顺序排列的 `BotInstance` 列表。每个 `BotInstance`（`Bot` 的实现，同时实现 `ObservationHost` 与 `ProtocolHost`）持有：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -93,7 +101,7 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 | `movement` | `MovementController` | 移动队列与移动步骤 |
 | `hand` | `HandController` | 手部交互队列与手部步骤 |
 | `dispatcher` | `ObservationDispatcher` | 观察记录的投递 |
-| `reader`、`view` | `StateReaderImpl`、`BotViewImpl` | 调度线程上直接读取的 `StateReader`；跨线程查询的 `BotView` |
+| `reader` | `StateReaderImpl` | 调度线程上直接读取的 `StateReader` |
 | `inbound` | `ConcurrentLinkedQueue<Object>` | 入站队列，元素为 `Received(generation, InboundPacket)` 或 `Closed(generation, error)` |
 | `observerTasks`、`requests` | `ConcurrentLinkedQueue<Runnable>` | 其它线程交来的 observer 注册与关闭、其余请求（动作入队、取消、查询、新连接的接入） |
 | `oneShots` | `ArrayDeque<OneShot>` | 一次性请求队列 |
@@ -101,7 +109,7 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 | `connection`、`generation` | `ClientConnection`、`int` | 当前连接与连接的代数；每打开一条连接代数加一，旧连接交来的数据包与关闭通知按代数丢弃 |
 | `bundles` | `BundleBuffer` | 当前连接的 bundle 缓存 |
 
-`BotState` 持有 `Outbox`（本轮待发送的数据包）与 `ObservationDispatcher` 的引用，所以 `ProtocolMachine`、两个控制器、`InventoryActionsImpl` 都只依赖 `BotState` 写入数据包与产生观察记录。
+`BotState` 持有 `Outbox`（本轮待发送的数据包）与 `ObservationDispatcher` 的引用，所以 `ProtocolMachine`、两个控制器、`scheduler` 包中的 `InventoryActionsImpl` 都只依赖 `BotState` 写入数据包与产生观察记录。`ProtocolMachine` 只通过 `ProtocolHost` 调用 `BotInstance`：取得模型、两个控制器与用户名，以及由数据包触发的连接状态变化、进入世界、Transfer 与断开。
 
 ## 线程
 
@@ -117,7 +125,7 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 ## 入站数据流
 
 1. **连接线程**（TCP 为 Netty 事件循环）：MCProtocolLib 的管线按当前入站阶段分帧、解压、解码，得到 `MinecraftPacket`（[连接与解码 · 入站](connection.md#入站)）。
-2. `InboundSink.accept`（[`BotInstance.Sink`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)）调用这条连接的 `DecodeContext.process`，得到附加数据：Chunk Data 附带解码出的 `DecodedChunk`，Update Tags 附带更新后的 `TagTable`，Finish Configuration 附带 `ConfigurationFinished(SyncedRegistries, TagTable)`，其余为 null（[连接与解码 · 解码上下文](connection.md#解码上下文)）。
+2. `InboundSink.accept`（[`BotInstance.Sink`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)）调用这条连接的 `DecodeContext.process`，得到附加数据：Chunk Data 附带解码出的 `DecodedChunk`，Update Tags 附带更新后的 `TagTable`，Finish Configuration 附带 `ConfigurationFinished(SyncedRegistries, TagTable)`，其余为 null（[连接与解码 · 解码上下文](connection.md#解码上下文)）。
 3. `Sink` 把 `Received(代数, InboundPacket)` 放进 bot 的入站队列，唤醒调度线程。
 4. **调度线程**在一轮调度中取出入站队列的全部内容，丢弃旧代数的条目，交给 `BundleBuffer`：bundle 之外的数据包单独成批，bundle 在结束分隔符处整批交出。
 5. `ProtocolMachine.handle` 逐个应用数据包：修改 `BotState`，在 `Outbox` 中写入应答，按变化的顺序产生模型层的观察记录，最后产生 `PacketReceived`。
@@ -148,7 +156,7 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 
 ## 一次 tick
 
-[`BotTicker.tick`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotTicker.java) 的顺序与原版客户端 `Minecraft.tick` 对应：
+[`BotTicker.tick`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/BotTicker.java) 的顺序与原版客户端 `Minecraft.tick` 对应：
 
 1. tick 计数加一；物品冷却与药水效果的剩余时间减一；`TickState` 决定这个 tick 是否正常运行。
 2. 快捷栏同步：本地的快捷栏槽位与已经发送的不同时发送 Set Held Item。
@@ -206,15 +214,27 @@ BotState（调度线程独占）
 
 ## 外部库的使用范围
 
-依赖声明在 [`bot/build.gradle`](../../bot/build.gradle)：
+依赖声明在各模块的 `build.gradle` 中：
 
-| 依赖 | 方式 | 用途 |
-|---|---|---|
-| `org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19` | `api`，排除 `com.nukkitx.fastutil` | 数据包的编解码、分帧、压缩与 Netty 连接；数据包、`ItemStack`、`DataComponents`、各种协议枚举（`EntityType`、`GameMode`、`Hand`、`EquipmentSlot`、`Direction`、`Pose`、`Effect`、`AttributeType`、`ContainerType` 等）。排除的 jar 中的类与 fastutil 同名 |
-| `net.minestom:minestom:2026.10.05-26.2` | `api` | 只使用物理（`PhysicsUtils`、`CollisionUtils`、`BoundingBox`、`Shape`、`WorldBorder`、`Aerodynamics`、`PhysicsResult`）、寻路（`PathGenerator`、`GroundNodeGenerator`、`PNode`）、坐标（`Point`、`Pos`、`Vec`、`CoordConversion`）与静态方块数据（`Block`、`Block.Getter`）。不使用它的网络代码、注册表、`MinecraftServer` 的进程状态与物品系统 |
-| `it.unimi.dsi:fastutil:8.5.19` | `api` | MCProtocolLib 的公开类型使用 fastutil |
-| `net.minestom:data:26.2-rv3` | `implementation` | 原版 26.2 导出的 JSON：物品编号与默认组件、属性的取值范围、实体类型的尺寸与乘客挂点 |
-| `com.github.ben-manes.caffeine:caffeine:3.3.0` | `implementation` | 区段池与已注册 observer 的弱引用缓存 |
+| 模块 | 依赖声明 |
+|---|---|
+| [`:bot:transport`](../../bot/transport/build.gradle) | `api`：MCProtocolLib（排除 `com.nukkitx.fastutil`）、fastutil |
+| [`:bot:data`](../../bot/data/build.gradle) | `api`：MCProtocolLib（排除 `com.nukkitx.fastutil`）、Minestom、fastutil；`implementation`：`net.minestom:data` |
+| [`:bot:api`](../../bot/api/build.gradle) | `api`：`:bot:transport`、Minestom；`implementation`：caffeine |
+| [`:bot:model`](../../bot/model/build.gradle) | `api`：`:bot:api`、`:bot:data` |
+| [`:bot:control`](../../bot/control/build.gradle) | `api`：`:bot:model` |
+| [`:bot:protocol`](../../bot/protocol/build.gradle) | `api`：`:bot:control`；`implementation`：caffeine |
+| [`:bot:runtime`](../../bot/runtime/build.gradle) | `api`：`:bot:api`；`implementation`：`:bot:protocol` |
+
+各外部库的用途：
+
+| 依赖 | 声明的模块 | 方式 | 用途 |
+|---|---|---|---|
+| `org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19` | `:bot:transport`、`:bot:data` | `api`，排除 `com.nukkitx.fastutil` | 数据包的编解码、分帧、压缩与 Netty 连接；数据包、`ItemStack`、`DataComponents`、各种协议枚举（`EntityType`、`GameMode`、`Hand`、`EquipmentSlot`、`Direction`、`Pose`、`Effect`、`AttributeType`、`ContainerType` 等）。排除的 jar 中的类与 fastutil 同名 |
+| `net.minestom:minestom:2026.10.05-26.2` | `:bot:data`、`:bot:api` | `api` | 只使用物理（`PhysicsUtils`、`CollisionUtils`、`BoundingBox`、`Shape`、`WorldBorder`、`Aerodynamics`、`PhysicsResult`）、寻路（`PathGenerator`、`GroundNodeGenerator`、`PNode`）、坐标（`Point`、`Pos`、`Vec`、`CoordConversion`）与静态方块数据（`Block`、`Block.Getter`）。不使用它的网络代码、注册表、`MinecraftServer` 的进程状态与物品系统 |
+| `it.unimi.dsi:fastutil:8.5.19` | `:bot:transport`、`:bot:data` | `api` | MCProtocolLib 的公开类型使用 fastutil |
+| `net.minestom:data:26.2-rv3` | `:bot:data` | `implementation` | 原版 26.2 导出的 JSON：物品编号与默认组件、属性的取值范围、实体类型的尺寸与乘客挂点 |
+| `com.github.ben-manes.caffeine:caffeine:3.3.0` | `:bot:api`、`:bot:protocol` | `implementation` | 已注册 observer 的记录（`:bot:api` 的 `RegisteredObservers`）与区段池（`:bot:protocol` 的 `SectionPool`）的弱引用缓存 |
 
 其余约定：
 

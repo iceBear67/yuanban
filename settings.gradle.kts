@@ -1,2 +1,2 @@
 rootProject.name = "yuanban"
-include("bot", "bot-agent", "crafting", "datapack-loader", "dfu-codecs", "enchant", "item-recipe", "item-tag", "loot", "loot-table-parser", "story")
+include("bot:api", "bot:control", "bot:data", "bot:model", "bot:protocol", "bot:runtime", "bot:transport", "crafting", "datapack-loader", "dfu-codecs", "enchant", "item-recipe", "item-tag", "loot", "loot-table-parser", "story")

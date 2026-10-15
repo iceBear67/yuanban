@@ -25,11 +25,11 @@
 
 动作是 bot 的输出；服务端发来的数据包和由此引起的模型变化是 bot 的输入。查询读取某一时刻的模型；观察接收一段时间内发生的变化。接收变化只有 `observe` 一种方式，没有单独的事件接口。
 
-相关源码：[`view`](../../bot/src/main/java/io/ib67/yuanban/bot/view)、[`observe`](../../bot/src/main/java/io/ib67/yuanban/bot/observe)、[`observe/builtin`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/builtin)、[`observe/dispatch`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/dispatch)。
+相关源码：[`view`](../../bot/api/src/main/java/io/ib67/yuanban/bot/view)、[`observe`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe)、[`observe/builtin`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/builtin)、[`observe/dispatch`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/dispatch)。
 
 ## 查询
 
-`StateReader` 是只读接口，方法在调度线程上执行，返回不可变的值。`BotView extends StateReader`：`Bot.view()` 返回的实现把每个方法作为查询任务交给调度线程并等待结果；在调度线程上调用时直接执行。需要在同一时刻完成多项读取时使用 `Bot.inspect(Function<StateReader, T>)`，函数返回值不应包含 `StateReader` 给出的可变对象。observer 回调中的 `context.state()` 也是 `StateReader`，只能在回调中使用。
+`StateReader` 是只读接口，方法在调度线程上执行，返回不可变的值。`Bot.inspect(Function<StateReader, T>)` 把函数作为查询任务交给调度线程并等待结果；在调度线程上调用时直接执行。函数中的多项读取在同一时刻完成，函数返回值不应包含 `StateReader` 给出的可变对象。observer 回调中的 `context.state()` 也是 `StateReader`，只能在回调中使用。
 
 | 方法 | 结果 |
 |---|---|
@@ -248,19 +248,20 @@ observer 没有自己的时限，等多久由测试代码决定；「某件事�
 
 | 工厂方法 | 按世界 | 订阅 | 读取方法 |
 |---|---|---|---|
-| `particlesWithin(Region[, Predicate<Particle>])` | 是 | `ClientboundLevelParticlesPacket` | `particles()`：`ParticleRecord(particle, center, offset, speed, count, longDistance)`；按数据包中的中心坐标判断范围 |
-| `sounds(Region[, Predicate<Sound>])` | 是 | `ClientboundSoundPacket`、`ClientboundSoundEntityPacket` | `sounds()`：`SoundRecord(sound, category, position, volume, pitch, entityId)`；实体音效按收到时该实体在模型中的位置判断范围，实体不在模型中时不记录 |
-| `blockChanges(Region)` | 是 | `BlockChanged` | `changes()` |
+| `particlesWithin(Region[, Predicate<Particle>])` | 是 | `ClientboundLevelParticlesPacket` | `items()`：`ParticleRecord(particle, center, offset, speed, count, longDistance)`；按数据包中的中心坐标判断范围 |
+| `sounds(Region[, Predicate<Sound>])` | 是 | `ClientboundSoundPacket`、`ClientboundSoundEntityPacket` | `items()`：`SoundRecord(sound, category, position, volume, pitch, entityId)`；实体音效按收到时该实体在模型中的位置判断范围，实体不在模型中时不记录 |
+| `blockChanges(Region)` | 是 | `BlockChanged` | `items()`：`BlockChanged` |
 | `blockAt(Point)` | 是 | `BlockChanged` | `current()`：当前方块（进入世界时区块未加载、之后也没有变化时为 null）；`history()`：该位置的每次变化 |
 | `movementOf(Predicate<EntitySnapshot>)` | 是 | `EntitySpawned`、`EntityMoved`、`EntityRemoved` | `tracks()`：`MovementTrack(entityId, type, start, current, removed)`，`displacement()` 为位移向量 |
-| `chatMessages([Predicate<ChatLine>])` | 否 | `ChatReceived` | `lines()` |
-| `actionBars()` | 否 | `ActionBarShown` | `texts()` |
-| `damageTaken()` | 否 | `EntityDamaged`（目标为自己）、`HealthChanged`（生命值下降） | `damages()`：`DamageRecord.Event` 或 `DamageRecord.HealthDrop` |
-| `packets(Class<P>[, Predicate<P>])` | 否 | `received(P)` | `packets()` |
-| `sentPackets(Class<P>[, Predicate<P>])` | 否 | `sent(P)` | `packets()` |
-| `observations(Class<O>[, Predicate<O>])` | 否 | `of(O)` | `observations()` |
+| `chatMessages([Predicate<ChatLine>])` | 否 | `ChatReceived` | `items()`：`ChatLine` |
+| `actionBars()` | 否 | `ActionBarShown` | `items()`：`Component` |
+| `damageTaken()` | 否 | `EntityDamaged`（目标为自己）、`HealthChanged`（生命值下降） | `items()`：`DamageRecord.Event` 或 `DamageRecord.HealthDrop` |
+| `packets(Class<P>[, Predicate<P>])` | 否 | `received(P)` | `items()`：`P` |
+| `sentPackets(Class<P>[, Predicate<P>])` | 否 | `sent(P)` | `items()`：`P` |
+| `observations(Class<O>[, Predicate<O>])` | 否 | `of(O)` | `items()`：`O` |
 
-- 记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。按世界的 observer 对每个世界分别计数，每个世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。注册之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写。`blockAt`、`movementOf` 没有 `limit`。
+- `particlesWithin`、`sounds`、`blockChanges` 返回 `WorldRecordingObserver<T>`，`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations` 返回 `RecordingObserver<T>`，`T` 为表中 `items()` 列表的元素类型。工厂方法构造它们时给出订阅与提取规则：提取规则接收观察记录与 `ObserverContext`，返回一条记录，返回 null 时不记录。
+- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，每个世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。注册之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写。`blockAt`、`movementOf` 没有 `limit`。
 - `Region(min, max)` 为各边与坐标轴平行的长方体，两端包含在内；`Region.around(center, radius)`、`contains(point)`。
 - `movementOf` 跟踪的实体：开始跟踪时（注册时以及每次进入新世界时）模型中已有的、满足条件的实体，以及之后 `EntitySpawned` 中满足条件的实体；条件只在开始跟踪时判断一次。实体被移除时 `removed` 变为 true，记录保留。
 
@@ -279,6 +280,7 @@ observer 没有自己的时限，等多久由测试代码决定；「某件事�
 | `distanceWithIn(range, target, action)` | 否 | 玩家位置（脚部）与目标的直线距离不大于 `range` 时取消 `action` 并关闭；`action` 先结束时关闭 | `met()` |
 | `distanceOutOf(range, target, action)` | 否 | 距离大于 `range` 时取消 `action` 并关闭；`action` 先结束时关闭 | `met()` |
 
+- `first`、`firstPacket`、`firstChat`、`firstTranslatedChat` 返回 `FirstMatchObserver<T>`，`T` 为表中 `matched()` 的元素类型。工厂方法构造它时给出订阅与提取规则，提取规则返回的第一个非 null 的值即为匹配，记下之后关闭自己。
 - 在得出结论之前被句柄关闭、因连接断开而关闭或以 `ACTION_COMPLETED` 关闭时，`met()`、`broken()` 为 false，`matched()` 为空，关闭原因见 `handle.closeReason()`。
 - 只记录的 `movementOf`、`blockAt` 没有结论，调用 `met()`、`metBy()` 抛出 `IllegalStateException`。
 - `first`、`observations`、`listener` 的类型为 `PacketReceived` 或 `PacketSent` 时，调用工厂方法时就在调用线程上抛出 `IllegalArgumentException`；`packets`、`sentPackets`、`firstPacket`、`packetListener` 的数据包类方向不对时同样如此。bot 不受影响。

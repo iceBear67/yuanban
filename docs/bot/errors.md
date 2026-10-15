@@ -13,7 +13,7 @@
 - [结束 bot 的输入](#结束-bot-的输入)
 - [调用线程上抛出的异常](#调用线程上抛出的异常)
 
-相关源码：[`scheduler/BotInstance.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java) 中的 `fail`、`disconnected`、`end`。
+相关源码：[`scheduler/BotInstance.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java) 中的 `fail`、`disconnected`、`end`。
 
 ## 原则
 
@@ -51,7 +51,7 @@
 
 ## observer 回调中的异常
 
-相关源码：[`observe/dispatch/ObservationDispatcher.java`](../../bot/src/main/java/io/ib67/yuanban/bot/observe/dispatch/ObservationDispatcher.java) 中的 `register`、`call`、`close`。
+相关源码：[`observe/dispatch/ObservationDispatcher.java`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/dispatch/ObservationDispatcher.java) 中的 `register`、`call`、`close`。
 
 observer 的 `subscription()`、`onStart`、`onObservation`、`onClose` 抛出异常时，只有这个 observer 以 `FAILED` 关闭：从订阅索引中移除，不调用它的 `onClose`（`onClose` 本身抛出异常的除外），异常记在 `ObserverHandle.failure()` 中。bot 与其余 observer 不受影响，同一条观察记录照常交给其余 observer。异常交给持有这个 observer 的一方，以下方法抛出 `ObserverFailureException`，`getCause()` 为回调抛出的异常：
 
@@ -84,7 +84,7 @@ observer 在动作之前关闭，所以等待动作的线程得到结果时，ob
 | 调用 | 连接正常结束之后 | bot 因异常结束之后 |
 |---|---|---|
 | 提交动作、`observe`、`observeDuring`、`joined`、`loaded` | 抛出 `BotDisconnectedException` | 抛出 `BotFailureException` |
-| 查询（`view()`、`inspect`） | 照常读取断开时的模型 | 抛出 `BotFailureException` |
+| 查询（`inspect`） | 照常读取断开时的模型 | 抛出 `BotFailureException` |
 | `status()`、`disconnectReason()`、`failure()` | 可以调用 | 可以调用 |
 | 读取 observer（`handle.observer()`、`handle.read`） | observer 都已关闭，直接读取 | 同左 |
 

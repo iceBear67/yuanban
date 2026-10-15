@@ -13,7 +13,7 @@
 - [阻塞等待与推进函数](#阻塞等待与推进函数)
 - [BotRuntime 的关闭](#botruntime-的关闭)
 
-相关源码：[`scheduler/Scheduler.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/Scheduler.java)、[`scheduler/BotInstance.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)、[`scheduler/Waits.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/Waits.java)、[`scheduler/WaitPump.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/WaitPump.java)。
+相关源码：[`scheduler/Scheduler.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/Scheduler.java)、[`scheduler/BotInstance.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/BotInstance.java)、[`scheduler/Waits.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/Waits.java)、[`scheduler/WaitPump.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/WaitPump.java)。
 
 ## 线程一览
 
@@ -87,7 +87,7 @@
 |---|---|---|
 | 动作方法 | 检查参数，创建 `ActionImpl`，把入队任务放进 `requests`，立即返回 | 直接入队 |
 | `Action.cancel()` | 取消请求放进 `requests`，下一轮处理 | 立即处理 |
-| `view()` 下的方法、`inspect` | 作为查询任务放进 `requests`，等待结果（`Waits.join`，不执行推进函数） | 直接执行 |
+| `inspect` | 作为查询任务放进 `requests`，等待结果（`Waits.join`，不执行推进函数） | 直接执行 |
 | `observe`、`observeDuring` | 放进 `observerTasks`，等到注册完成才返回（不执行推进函数） | 立即注册 |
 | `ObserverHandle.read` | observer 还在观察时作为查询任务执行；已经关闭时直接执行 | 直接执行 |
 | `ObserverHandle.close` | 放进 `observerTasks`，等到调度线程处理完才返回 | 立即关闭 |

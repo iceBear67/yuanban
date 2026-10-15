@@ -60,9 +60,26 @@
 
 ## 第一部分：需要修改的已有内容
 
-**1. `bot/build.gradle`**
+**1. 七个模块的 `build.gradle`**
+
+本库分为七个 Gradle 模块，都是 `:bot` 的子项目，目录为 `bot/` 下与模块同名的目录；`:bot` 本身没有 `build.gradle` 与源码。依赖只从上层指向下层（各模块包含的包见第二部分 2）：
+
+```
+:bot:runtime ──api───► :bot:api ──► :bot:transport
+  └──implementation──► :bot:protocol ──► :bot:control ──► :bot:model ──┬──► :bot:api
+                                                                        └──► :bot:data
+```
 
 ```groovy
+// bot/transport/build.gradle
+dependencies {
+    api("org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19") {
+        exclude group: "com.nukkitx.fastutil"
+    }
+    api("it.unimi.dsi:fastutil:8.5.19")
+}
+
+// bot/data/build.gradle
 dependencies {
     api("org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19") {
         exclude group: "com.nukkitx.fastutil"
@@ -70,15 +87,46 @@ dependencies {
     api("net.minestom:minestom:2026.10.05-26.2")
     api("it.unimi.dsi:fastutil:8.5.19")
     implementation("net.minestom:data:26.2-rv3")
+}
+
+// bot/api/build.gradle
+dependencies {
+    api(project(":bot:transport"))
+    api("net.minestom:minestom:2026.10.05-26.2")
     implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+}
+
+// bot/model/build.gradle
+dependencies {
+    api(project(":bot:api"))
+    api(project(":bot:data"))
+}
+
+// bot/control/build.gradle
+dependencies {
+    api(project(":bot:model"))
+}
+
+// bot/protocol/build.gradle
+dependencies {
+    api(project(":bot:control"))
+    implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+}
+
+// bot/runtime/build.gradle
+dependencies {
+    api(project(":bot:api"))
+    implementation(project(":bot:protocol"))
 }
 ```
 
-- **MCProtocolLib 与 Minestom 用 `api`**：公开接口直接使用 MCProtocolLib 的数据包、物品与各种枚举类型，以及 Minestom 的坐标与 `Block`；adventure 的 `Component`、`Key` 与 Cloudburst 的 `NbtMap` 随 MCProtocolLib 带入。MCProtocolLib 的仓库 `repo.opencollab.dev/main/` 已在根目录 `build.gradle.kts` 中声明。
+- **MCProtocolLib 与 Minestom 用 `api`**：公开接口直接使用 MCProtocolLib 的数据包、物品与各种枚举类型，以及 Minestom 的坐标与 `Block`；adventure 的 `Component`、`Key` 与 Cloudburst 的 `NbtMap` 随 MCProtocolLib 带入。MCProtocolLib 由 `:bot:transport` 与 `:bot:data` 声明；Minestom 由 `:bot:api` 与 `:bot:data`（`EntityTypeData.passengerAttachments` 返回 Minestom 的 `Vec`）声明。MCProtocolLib 的仓库 `repo.opencollab.dev/main/` 已在根目录 `build.gradle.kts` 中声明。
 - **排除 `com.nukkitx.fastutil`**：MCProtocolLib 依赖的这些 jar 中的类位于 `it.unimi.dsi.fastutil` 包，与 fastutil 8.5.19 同名。
 - **fastutil 用 `api`**：MCProtocolLib 的公开类型使用 fastutil（`HolderSet.getHolders()` 返回 `IntList`，点击窗口的数据包使用 `Int2ObjectMap`），排除上面的 jar 之后使用者要从本库得到它。
-- **显式声明 `net.minestom:data`**：Minestom 以 `implementation` 依赖它，它不在本库的编译类路径上。
-- **caffeine**：区段共享使用弱引用缓存。
+- **显式声明 `net.minestom:data`**：Minestom 以 `implementation` 依赖它，它不在 `:bot:data` 的编译类路径上。
+- **caffeine**：区段共享（`:bot:protocol` 的 `SectionPool`）与已注册 observer 的记录（`:bot:api` 的 `RegisteredObservers`）使用弱引用缓存。
+- **模块之间用 `api`**：`:bot:api` 的 `BotOptions` 使用 `:bot:transport` 的 `Transport` 与 `TransportResolver`，`Subscription` 使用 `PacketDirection`；`:bot:model` 产生 `view` 中的快照，世界模型抛出 `ChunkNotLoadedException`；`:bot:control` 的 `BotState` 汇总 `:bot:model` 中的全部模型；`:bot:protocol` 的 `ProtocolHost` 返回 `BotState`、`MovementController` 与 `HandController`。
+- **`:bot:runtime` 以 `implementation` 依赖内部模块**：`:bot:runtime` 以 `api` 依赖 `:bot:api`，以 `implementation` 依赖 `:bot:protocol`。使用者依赖 `:bot:runtime`，编译类路径上只有 `:bot:api`、`:bot:transport`、`:bot:runtime` 自己的类（`BotRuntime` 与 `scheduler` 包），以及随它们以 `api` 传递的 MCProtocolLib、Minestom、fastutil；`:bot:data`、`:bot:model`、`:bot:control`、`:bot:protocol` 不在使用者的编译类路径上，引用其中的类是编译错误。`:bot:runtime` 通过 `:bot:protocol` 以 `api` 传递的依赖得到模型、控制器与 MCProtocolLib、Minestom，不直接使用 `net.minestom:data` 与 caffeine。
 - Minestom 要求 Java 25，与根项目的工具链一致。
 
 **2. 根目录 `README.md` 与 `MINESTOM-BUG-REPORT.md`**
@@ -117,14 +165,25 @@ dependencies {
 
 ### 2. 包结构
 
-根包 `io.ib67.yuanban.bot`。
+根包 `io.ib67.yuanban.bot` 分布在 `:bot:api` 与 `:bot:runtime` 两个模块中，其余每个包只属于一个模块（第一部分 1）。
 
-- 公开类型位于根包、`view`、`observe`、`observe.builtin`、`transport`，其余包整体标注 `@ApiStatus.Internal`。
+- 公开类型位于根包、`view`、`observe`、`observe.builtin`、`transport`（`PacketDirection` 除外），其余包整体标注 `@ApiStatus.Internal`。
 - 值类型使用 record，选项类使用 Lombok `@Builder`，可空性使用 JetBrains annotations 标注。
 
 ```
+:bot:transport
 io.ib67.yuanban.bot
-├── BotRuntime, RuntimeOptions          调度线程、全部 bot 的生命周期、全局 movement suspension
+└── transport/   Transport、ClientConnection、InboundSink、TransportResolver、TcpTransport、TcpConnection、
+                 PacketDirection（数据包类的方向，11.3）；包内可见的 BotClientSession、LastReadHandler、NettyGroup（4.2）
+
+:bot:data
+io.ib67.yuanban.bot
+├── registry/    SyncedRegistries、SyncedRegistriesBuilder、DimensionInfo、VanillaNetworkCodec、TagTable
+└── data/        ItemData、Items、AttributeData、EntityTypeData、BlockStates、MinestomDataFiles（6.1）
+
+:bot:api
+io.ib67.yuanban.bot
+├── RuntimeOptions                      BotRuntime 的选项
 ├── Bot, BotOptions, BotStatus          单个 bot 的公开入口
 ├── LoginPluginHandler, ResourcePackPolicy
 │                                       BotOptions 中的 Login Plugin Request 回应与资源包回应方式
@@ -134,36 +193,49 @@ io.ib67.yuanban.bot
 ├── 异常                                ActionCancelledException（含各取消原因的常量）、BotFailureException、
 │                                       BotDisconnectedException、BotTimeoutException、ChunkNotLoadedException、
 │                                       ObserverFailureException
-├── view/        BotView、StateReader、各类快照 record、ActiveEffect、EntityMeta、EntityMetaIndex（7.4）
+├── view/        StateReader、各类快照 record、ActiveEffect、EntityMeta、EntityMetaIndex（7.4）
 ├── observe/     Observation（sealed）及其子类型、Observer、Subscription、ObserverContext、
 │                ObserverHandle、CloseReason、WorldBoundObserver、WorldInfo、WorldEntryCause、
 │                WorldRecord、WorldClosed、Region
 ├── observe/builtin/
-│                Observers（内置 observer 的工厂方法）、各内置 observer、MovementCriteria 及各记录 record
-├── observe/dispatch/
-│                ObservationDispatcher、SubscriptionIndex、ObserverEntry、ObserverContextImpl、
-│                ObservationHost、RegistrationCheck
-├── transport/   Transport、ClientConnection、InboundSink、TransportResolver、TcpTransport、TcpConnection；
-│                包内可见的 BotClientSession、LastReadHandler、NettyGroup（4.2）
-├── scheduler/   Scheduler、BotInstance（Bot 的实现）、BotState、BotTicker、ActionImpl、StateReaderImpl、
-│                BotViewImpl、ObserverHandleImpl、ObservedActionImpl、Waits、WaitPump
-├── protocol/    ProtocolMachine、Outbox、InboundPacket、BundleBuffer、ChunkBatchTracker、CookieStore、
-│                PacketDirection（数据包类的方向，11.3）、Vectors（MCProtocolLib 与 Minestom 的坐标转换）
-├── decode/      DecodeContext、SectionDecoder、SectionPool、DecodedChunk
-├── registry/    SyncedRegistries、SyncedRegistriesBuilder、DimensionInfo、VanillaNetworkCodec、TagTable
-├── data/        ItemData、Items、AttributeData、EntityTypeData、BlockStates、MinestomDataFiles（6.1）
+│                Observers（内置 observer 的工厂方法）、RecordingObserver、WorldRecordingObserver、
+│                FirstMatchObserver、BlockAtObserver、BlockBrokenObserver、MovementObserver、ConditionObserver、
+│                DistanceObserver、MovementCriteria 及各记录 record
+└── observe/dispatch/
+                 ObservationDispatcher、SubscriptionIndex、ObserverEntry、ObserverContextImpl、
+                 ObservationHost、RegistrationCheck、RegisteredObservers、SubmittedAction
+
+:bot:model
+io.ib67.yuanban.bot
 ├── world/       ClientWorld、ChunkColumn、SectionRef、SharedSection、WorldSnapshot、
 │                BlockEntityStore、WorldClocks、TickState、WorldBorderState、Weather
 ├── entity/      EntityStore、ClientEntity、EntityDimensions
 ├── player/      LocalPlayer、AttributeMap、EffectMap、Abilities、PlayerLoadTracker、Interpolation
+├── inventory/   InventoryModel、Window、ContainerSlots（7.6）
+├── chat/        ChatModel、LastSeenTracker、SignatureCache、Signature
+└── hud/         HudModel
+
+:bot:control
+io.ib67.yuanban.bot
+├── state/       BotState、Outbox、CookieStore、ActionHandle（动作的结束与取消，由 ActionImpl 实现）、
+│                Vectors（MCProtocolLib 与 Minestom 的坐标转换）
 ├── movement/    MovementController、MovementAction 及 MoveToAction、MoveForwardAction、JumpToAction、
 │                RotateAction、MoveIntent、Rotation、Kinematics、PathPlanner、PlayerNodeGenerator、PathFollower、
 │                RotationArbiter、MovementSender、SineTable、RidingSeat、VehicleControl
-├── interaction/ HandController、HandAction、DigTask、DigSpeed、UseItemOnTask、UseItemTask、
-│                AttackTask、AttackReach、InteractTask、BlockSequence、Directions、BlockPredicates、NbtCompare（8.5）
-├── inventory/   InventoryModel、Window、InventoryActionsImpl、ContainerSlots（7.6）
-├── chat/        ChatModel、LastSeenTracker、SignatureCache、Signature
-└── hud/         HudModel
+└── interaction/ HandController、HandAction、DigTask、DigSpeed、UseItemOnTask、UseItemTask、
+                 AttackTask、AttackReach、InteractTask、BlockSequence、Directions、BlockPredicates、NbtCompare（8.5）
+
+:bot:protocol
+io.ib67.yuanban.bot
+├── protocol/    ProtocolMachine、ProtocolHost（BotInstance 提供给协议状态机的方法）、InboundPacket、
+│                BundleBuffer、ChunkBatchTracker
+└── decode/      DecodeContext、SectionDecoder、SectionPool、DecodedChunk
+
+:bot:runtime
+io.ib67.yuanban.bot
+├── BotRuntime                          调度线程、全部 bot 的生命周期、全局 movement suspension
+└── scheduler/   Scheduler、BotInstance（Bot 的实现）、BotTicker、ActionImpl、StateReaderImpl、
+                 InventoryActionsImpl、ObserverHandleImpl、ObservedActionImpl、Waits、WaitPump
 ```
 
 ### 3. 线程与调度
@@ -214,7 +286,7 @@ io.ib67.yuanban.bot
 - 世界模型、动作队列、协议状态只在调度线程上读写；修改模型的入口（`ProtocolMachine` 的数据包处理与登录开始，两个控制器的入队、tick、全部取消，方块交互确认）检查当前线程，在其它线程调用时立即抛出 `IllegalStateException`。
 - 调度线程退出之后（`BotRuntime.close()` 返回之后）模型不再变化，查询与读取 observer 状态直接在调用线程上执行。
 - 调度线程退出时还在队列中的任务，以及在它最后一轮之后才入队的任务（查询、注册与关闭 observer、动作请求、Transfer 线程打开的新连接），由调度线程在退出时、或者由之后提交任务的线程在调用线程上执行：这时 bot 都已经结束，等待这些任务的线程得到结果或者异常，之后才打开的连接被关闭。`BotRuntime.connect` 在打开连接期间 runtime 开始关闭时，断开这个 bot 并抛出 `IllegalStateException`。
-- 查询方法（`Bot.view()` 下的方法）在其它线程调用时，作为查询任务提交给调度线程并等待结果，返回不可变快照；在调度线程上调用时直接执行。
+- 查询（`Bot.inspect`）在其它线程调用时，作为查询任务提交给调度线程并等待结果，返回函数的结果；在调度线程上调用时直接执行。
 - 动作方法只把请求放进队列，立即返回 `Action`。
 - 会阻塞的方法（`Action.await`、`ObservedAction.await`、`Bot.await`、`ObserverHandle.awaitClose`、跨线程查询）在调度线程上调用时抛出 `IllegalStateException`：调度线程等待自己永远等不到结果。
 - observer 的回调在调度线程上执行。回调阻塞会让同一 `BotRuntime` 中的全部 bot 停住，这是使用约定，本库无法检测。
@@ -1160,7 +1232,8 @@ wiki 记录了服务端对交互（4 格）与挖掘（6 格）的距离检查�
 
 #### 11.1 查询
 
-- `Bot.view()` 返回 `BotView`，方法返回不可变快照：
+- `Bot.inspect(Function<StateReader, T>)` 在调度线程上执行函数，多项读取在同一时刻完成。`StateReader` 是只读接口，函数返回值不应包含它给出的可变对象。
+- `StateReader` 的方法返回不可变快照：
   - `PlayerSnapshot`（位置、朝向、速度、生命、饥饿、游戏模式为 MCProtocolLib 的 `GameMode`、属性为 `Map<AttributeType, Double>`、效果为 `Map<Effect, ActiveEffect>`、物品冷却为 `Map<Key, Integer>`、元数据为 `Map<Integer, EntityMetadata<?, ?>>`，命名的元数据条目用 `meta(EntityMeta<T>)` 读取）
   - `WorldStateSnapshot`（World Age、难度为 MCProtocolLib 的 `Difficulty`、默认出生点、服务端视距与模拟距离、tick 状态、世界边框、雨量与雷暴强度）；不在任何世界中时 `worldState()` 抛出 `IllegalStateException`
   - 生物群系：`biome(x, y, z)` 或 `biome(Point)` 返回 `worldgen/biome` 注册表中的名称（`Key`），受待办 T1 影响
@@ -1171,7 +1244,6 @@ wiki 记录了服务端对交互（4 格）与挖掘（6 格）的距离检查�
   - `@Nullable ItemStack`：光标物品，以及窗口 0 中没有槽位的身体护甲与鞍（`equipment(EquipmentSlot)`，7.6）；空时为 null
   - `ChatLine`
   - `HudSnapshot`（显示位置为 `Map<ScoreboardPosition, String>`，目标的显示类型为 `ScoreType`，玩家列表的游戏模式为 MCProtocolLib 的 `GameMode`，Boss Bar 为 `BossBarSnapshot`，7.7）
-- `Bot.inspect(Function<StateReader, T>)` 在调度线程上执行函数，多项读取在同一时刻完成。`StateReader` 是只读接口，函数返回值不应包含它给出的可变对象。
 
 #### 11.2 观察记录
 
@@ -1400,19 +1472,20 @@ public sealed interface WorldClosed {
 
 | 工厂方法 | 按世界 | 订阅 | 状态读取方法 |
 |---|---|---|---|
-| `particlesWithin(Region region[, Predicate<Particle> filter])` | 是 | `received(ClientboundLevelParticlesPacket.class)` | `particles()`：`List<ParticleRecord>`，每项含粒子（MCProtocolLib 的 `Particle`）、中心坐标、偏移、速度、数量、是否远距离。范围判断使用数据包中的中心坐标；实际的粒子由客户端在中心附近按偏移随机生成（原版客户端行为） |
-| `sounds(Region region[, Predicate<Sound> filter])` | 是 | `received(ClientboundSoundPacket.class, ClientboundSoundEntityPacket.class)` | `sounds()`：`List<SoundRecord>`，每项为 `SoundRecord(Sound sound, SoundCategory category, Point position, float volume, float pitch, @Nullable Integer entityId)`（MCProtocolLib 的 `Sound` 与 `SoundCategory`）；位置音效的坐标由 MCProtocolLib 除以 8；实体音效按收到时该实体在模型中的位置判断范围 |
-| `blockChanges(Region region)` | 是 | `BlockChanged` | `changes()`：`List<BlockChanged>` |
+| `particlesWithin(Region region[, Predicate<Particle> filter])` | 是 | `received(ClientboundLevelParticlesPacket.class)` | `items()`：`List<ParticleRecord>`，每项含粒子（MCProtocolLib 的 `Particle`）、中心坐标、偏移、速度、数量、是否远距离。范围判断使用数据包中的中心坐标；实际的粒子由客户端在中心附近按偏移随机生成（原版客户端行为） |
+| `sounds(Region region[, Predicate<Sound> filter])` | 是 | `received(ClientboundSoundPacket.class, ClientboundSoundEntityPacket.class)` | `items()`：`List<SoundRecord>`，每项为 `SoundRecord(Sound sound, SoundCategory category, Point position, float volume, float pitch, @Nullable Integer entityId)`（MCProtocolLib 的 `Sound` 与 `SoundCategory`）；位置音效的坐标由 MCProtocolLib 除以 8；实体音效按收到时该实体在模型中的位置判断范围 |
+| `blockChanges(Region region)` | 是 | `BlockChanged` | `items()`：`List<BlockChanged>` |
 | `blockAt(Point pos)` | 是 | `BlockChanged` | `current()`：当前方块（进入世界时所在区块未加载、之后也没有变化时为 null）；`history()`：该位置的每次变化 |
 | `movementOf(Predicate<EntitySnapshot> who)` | 是 | `EntitySpawned`、`EntityMoved`、`EntityRemoved` | `tracks()`：每个被跟踪实体一条 `MovementTrack(int entityId, EntityType type, Point start, Point current, boolean removed)`（MCProtocolLib 的 `EntityType`），`displacement()` 返回位移向量 |
-| `chatMessages([Predicate<ChatLine> filter])` | 否 | `ChatReceived` | `lines()`：`List<ChatLine>` |
-| `actionBars()` | 否 | `ActionBarShown` | `texts()`：`List<Component>` |
-| `damageTaken()` | 否 | `EntityDamaged`（目标为自己）、`HealthChanged` | `damages()`：`List<DamageRecord>`，`DamageRecord.Event`（伤害事件）或 `DamageRecord.HealthDrop`（生命值下降） |
-| `packets(Class<P> type[, Predicate<P> filter])` | 否 | `received(type)` | `packets()`：`List<P>` |
-| `sentPackets(Class<P> type[, Predicate<P> filter])` | 否 | `sent(type)` | `packets()`：`List<P>` |
-| `observations(Class<O> type[, Predicate<O> filter])` | 否 | `of(type)` | `observations()`：`List<O>` |
+| `chatMessages([Predicate<ChatLine> filter])` | 否 | `ChatReceived` | `items()`：`List<ChatLine>` |
+| `actionBars()` | 否 | `ActionBarShown` | `items()`：`List<Component>` |
+| `damageTaken()` | 否 | `EntityDamaged`（目标为自己）、`HealthChanged` | `items()`：`List<DamageRecord>`，`DamageRecord.Event`（伤害事件）或 `DamageRecord.HealthDrop`（生命值下降） |
+| `packets(Class<P> type[, Predicate<P> filter])` | 否 | `received(type)` | `items()`：`List<P>` |
+| `sentPackets(Class<P> type[, Predicate<P> filter])` | 否 | `sent(type)` | `items()`：`List<P>` |
+| `observations(Class<O> type[, Predicate<O> filter])` | 否 | `of(type)` | `items()`：`List<O>` |
 
-- 记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。按世界的 observer 对每个世界分别计数，各世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。observer 交给 `observe` 或 `observeDuring` 之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写，在其它线程修改会与它形成数据竞争。
+- `particlesWithin`、`sounds`、`blockChanges` 返回 `WorldRecordingObserver<T>`，`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations` 返回 `RecordingObserver<T>`，`T` 为表中 `items()` 的元素类型。工厂方法构造它们时给出订阅与提取规则：提取规则接收观察记录与 `ObserverContext`，返回一条记录，返回 null 时不记录；表中的过滤条件与范围判断都在提取规则中。
+- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，各世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。observer 交给 `observe` 或 `observeDuring` 之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写，在其它线程修改会与它形成数据竞争。
 - `sounds` 的实体音效在实体不在模型中时不记录。
 - `Region` 是 record `Region(Point min, Point max)`，提供 `Region.around(Point center, double radius)` 与 `contains(Point)`。
 - `movementOf` 跟踪的实体：注册时（以及每次进入新世界时）模型中已有的、满足 `who` 的实体，以及之后 `EntitySpawned` 中满足 `who` 的实体。`who` 只在开始跟踪时判断一次。`start` 为开始跟踪时的位置；实体被移除时 `removed` 变为 true，记录保留。进入新世界时按 11.5 重新开始跟踪。
@@ -1432,6 +1505,7 @@ public sealed interface WorldClosed {
 | `distanceWithIn(double range, Point target, Action action)` | 否 | 玩家与 `target` 的距离不大于 `range` 时，取消 `action` 并关闭；`action` 先结束时关闭 | `met()`：是否因满足距离条件而关闭 |
 | `distanceOutOf(double range, Point target, Action action)` | 否 | 玩家与 `target` 的距离大于 `range` 时，取消 `action` 并关闭；`action` 先结束时关闭 | `met()`：是否因满足距离条件而关闭 |
 
+- `first`、`firstPacket`、`firstChat`、`firstTranslatedChat` 返回 `FirstMatchObserver<T>`，`T` 为表中 `matched()` 的元素类型。工厂方法构造它时给出订阅与提取规则，提取规则返回的第一个非 null 的值即为匹配，记下之后关闭自己；表中的匹配条件都在提取规则中。
 - 这些 observer 在得出结论之前被句柄关闭、因连接断开而关闭或以 `ACTION_COMPLETED` 关闭（11.8）时，`met()`、`broken()` 为 false，`matched()` 为空，关闭原因见 `handle.closeReason()`。
 - `blockBroken`：
   - 订阅 `BlockChanged`、`ChunkLoaded` 与 `WorldEntered`。
@@ -1538,10 +1612,10 @@ assertTrue(zombie.observer().met());
 
 // 测试代码检查 observer 的状态
 particles.close();
-assertFalse(particles.observer().particles().isEmpty());
+assertFalse(particles.observer().items().isEmpty());
 
 damage.close();
-assertTrue(damage.observer().damages().isEmpty());
+assertTrue(damage.observer().items().isEmpty());
 ```
 
 #### 11.11 开销

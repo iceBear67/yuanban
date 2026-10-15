@@ -24,7 +24,7 @@
 - [一次性请求](#一次性请求)
 - [快捷栏同步](#快捷栏同步)
 
-相关源码：[`Bot.java`](../../bot/src/main/java/io/ib67/yuanban/bot/Bot.java)、[`scheduler/ActionImpl.java`](../../bot/src/main/java/io/ib67/yuanban/bot/scheduler/ActionImpl.java)、[`movement`](../../bot/src/main/java/io/ib67/yuanban/bot/movement)、[`interaction`](../../bot/src/main/java/io/ib67/yuanban/bot/interaction)、[`inventory/InventoryActionsImpl.java`](../../bot/src/main/java/io/ib67/yuanban/bot/inventory/InventoryActionsImpl.java)。
+相关源码：[`Bot.java`](../../bot/api/src/main/java/io/ib67/yuanban/bot/Bot.java)、[`scheduler/ActionImpl.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/ActionImpl.java)、[`movement`](../../bot/control/src/main/java/io/ib67/yuanban/bot/movement)、[`interaction`](../../bot/control/src/main/java/io/ib67/yuanban/bot/interaction)、[`scheduler/InventoryActionsImpl.java`](../../bot/runtime/src/main/java/io/ib67/yuanban/bot/scheduler/InventoryActionsImpl.java)。
 
 ## Action 句柄
 

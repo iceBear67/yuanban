@@ -49,7 +49,7 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 | 手部交互 | `attemptBreakBlock`、`placeBlock`、`useItemOn`、`useItem`、`attack`、`interact` | 先进先出，一次运行一个，按 tick 推进；与移动队列同时运行 |
 | 一次性请求 | `chat`、`command`、`selectHotbar`、`swapHands`、`drop`、`respawn`、`inventory()` 下的物品栏操作、`send`（发送任意客户端发往服务端的数据包，其它数据包立即抛出 `IllegalArgumentException`） | 按提交顺序在下一轮调度中执行 |
 
-- bot 加载完成（`view().loaded()` 为 true）之前，三类请求都不开始执行。bot 不在任何世界中时（进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）提交的请求同样等待，进入世界并加载之后执行。
+- bot 加载完成（`inspect(StateReader::loaded)` 为 true）之前，三类请求都不开始执行。bot 不在任何世界中时（进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）提交的请求同样等待，进入世界并加载之后执行。
 - 离开世界（重新配置、Transfer）、在世界中收到 Login (play) 或 Respawn、玩家死亡时，移动与手部交互队列中在这个世界里提交的动作全部被取消（`WORLD_REBUILT`、`PLAYER_DIED`）；离开世界与 Login (play) 引起的取消不发送清理数据包（与原版客户端相同）。
 - 移动范围涉及未加载的区块，或者手部交互动作读取的方块所在区块未加载（`attemptBreakBlock` 的目标与眼睛所在的区块，`useItemOn`、`placeBlock` 的目标所在区块）时，这个动作以 `CHUNK_NOT_LOADED` 取消，bot 继续运行；挖掘中取消时发送 Cancelled digging。
 - Transfer 之前已经交给旧连接、还没有写出的数据包，因为旧连接断开而没有写出时，在写出时执行完毕的动作以 `BotDisconnectedException` 结束，bot 继续在新连接上登录。
@@ -58,8 +58,8 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 ### 查询
 
 ```java
-Pos position = bot.view().player().position();
-Block below = bot.view().block(position.sub(0, 1, 0));
+Pos position = bot.inspect(StateReader::player).position();
+Block below = bot.inspect(state -> state.block(position.sub(0, 1, 0)));
 
 // 多项读取在同一时刻完成；返回值中不要包含 StateReader 给出的可变对象。空槽位为 null
 record Status(float health, @Nullable ItemStack firstHotbarSlot) {}
@@ -69,7 +69,7 @@ Status status = bot.inspect(state -> new Status(state.player().health(), state.i
 bot.await(state -> state.player().onGround(), Duration.ofSeconds(5));
 ```
 
-- `view()` 下的方法在其它线程调用时，交给调度线程执行并等待结果，返回不可变的快照。
+- `inspect` 在其它线程调用时，把函数交给调度线程执行并等待结果。`StateReader` 的方法返回不可变的快照。
 - `block` 返回不带 NBT 的方块，方块实体发给客户端的 NBT 用 `blockEntity` 读取（Cloudburst 的 `NbtMap`，没有方块实体数据时为 null）。两者在所在区块没有加载时抛出 `ChunkNotLoadedException`；`player`、`block` 与 `blockEntity` 在 bot 不在任何世界中时（进入第一个世界之前，以及重新配置、Transfer 之后到下一次 Login (play) 之前）抛出 `IllegalStateException`，这时 `world()` 为 null。
 - 物品为 MCProtocolLib 的 `ItemStack`，空槽位、空光标与空装备为 null。`inventory()` 为窗口 0（玩家物品栏）；身体护甲与鞍在窗口 0 中没有槽位，用 `equipment(EquipmentSlot.BODY)` 与 `equipment(EquipmentSlot.SADDLE)` 读取。
 - 实体的元数据为 MCProtocolLib 的 `EntityMetadata`，按下标保存；`EntitySnapshot.meta(EntityMetaIndex.POSE)` 等读取本库用到的条目，没有收到时为默认值。
@@ -94,7 +94,7 @@ assertTrue(zombie.observer().met());
 
 // 只做记录的 observer 由句柄关闭，关闭之后可以在任何线程上直接读取
 damage.close();
-assertTrue(damage.observer().damages().isEmpty());
+assertTrue(damage.observer().items().isEmpty());
 ```
 
 - 读取状态：observer 关闭之后，任何线程都可以通过 `handle.observer()` 直接读取。观察期间使用 `handle.read(o -> ...)`，读取函数在调度线程上执行；内置 observer 在观察期间被其它线程直接读取时抛出 `IllegalStateException`。

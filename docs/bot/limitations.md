@@ -56,7 +56,7 @@
 
 | 位置 | 原因 | 绕过方法 | 限制 |
 |---|---|---|---|
-| [`movement/RidingSeat.java`](../../bot/src/main/java/io/ib67/yuanban/bot/movement/RidingSeat.java)、[`entity/EntityDimensions.java`](../../bot/src/main/java/io/ib67/yuanban/bot/entity/EntityDimensions.java)（M12） | 实体类型数据只有成年实体默认姿态的尺寸与挂点，没有幼年、坐下姿态与玩家各姿势的尺寸和挂点 | 骑乘位置内置原版 26.2 各载具（马、骷髅马、僵尸马、驴、骡、羊驼、猪、炽足兽、鹦鹉螺、鸡、骆驼、快乐恶魂）的幼年与坐下姿态的取值；实体包围盒内置原版 26.2 全部可以是幼年的实体的幼年尺寸，以及玩家与人体模型各姿势的尺寸 | 只对 26.2 正确；骑乘位置只识别这些载具类型的幼年状态；包围盒不覆盖其它随状态变化的尺寸 |
+| [`movement/RidingSeat.java`](../../bot/control/src/main/java/io/ib67/yuanban/bot/movement/RidingSeat.java)、[`entity/EntityDimensions.java`](../../bot/model/src/main/java/io/ib67/yuanban/bot/entity/EntityDimensions.java)（M12） | 实体类型数据只有成年实体默认姿态的尺寸与挂点，没有幼年、坐下姿态与玩家各姿势的尺寸和挂点 | 骑乘位置内置原版 26.2 各载具（马、骷髅马、僵尸马、驴、骡、羊驼、猪、炽足兽、鹦鹉螺、鸡、骆驼、快乐恶魂）的幼年与坐下姿态的取值；实体包围盒内置原版 26.2 全部可以是幼年的实体的幼年尺寸，以及玩家与人体模型各姿势的尺寸 | 只对 26.2 正确；骑乘位置只识别这些载具类型的幼年状态；包围盒不覆盖其它随状态变化的尺寸 |
 
 ## 待办
 
@@ -64,9 +64,9 @@
 
 | 编号 | 位置 | 问题 | 现在的处理 |
 |---|---|---|---|
-| T1 | [`world/SectionRef.java`](../../bot/src/main/java/io/ib67/yuanban/bot/world/SectionRef.java) 的 `biome` | MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标：用 `y << 3 \| z << 1 \| x`，应为 `y << 4 \| z << 2 \| x` | 不处理，生物群系照常用 `DataPalette.get` 读取，`StateReader.biome` 的结果同样受影响。一个区段中只有一种生物群系时结果正确 |
-| T2 | [`protocol/ProtocolMachine.java`](../../bot/src/main/java/io/ib67/yuanban/bot/protocol/ProtocolMachine.java) 的 `playerChat` | MCProtocolLib 的 `ClientboundPlayerChatPacket` 在过滤类型为 PARTIALLY_FILTERED 时不读取过滤标记的 BitSet，之后的聊天类型、发送者名称与目标名称都从错误的位置读出 | 不支持。收到部分过滤的玩家聊天时抛出 `UnsupportedOperationException`，bot 以这个异常结束 |
-| T3 | [`data/Items.java`](../../bot/src/main/java/io/ib67/yuanban/bot/data/Items.java) 的 `sameItemSameComponents` | 原版解码物品时去掉补丁中与默认组件相同的条目，MCProtocolLib 保留原始补丁 | 物品按原始补丁比较，null 补丁与空补丁视为相同；服务端发来与默认值相同的补丁条目时，比较结果与原版不同。影响挖掘中判断主手物品是否改变，以及物品栏判断槽位是否改变 |
-| T4 | [`interaction/BlockPredicates.java`](../../bot/src/main/java/io/ib67/yuanban/bot/interaction/BlockPredicates.java) | `can_break` 中针对方块实体组件的条件（exact components 与 component predicates） | 不支持。该位置有方块实体时，遇到带有组件条件的谓词抛出 `UnsupportedOperationException`；没有方块实体时与原版相同，直接不匹配 |
+| T1 | [`world/SectionRef.java`](../../bot/model/src/main/java/io/ib67/yuanban/bot/world/SectionRef.java) 的 `biome` | MCProtocolLib 的 `DataPalette.index` 对 4×4×4 的生物群系调色板算错下标：用 `y << 3 \| z << 1 \| x`，应为 `y << 4 \| z << 2 \| x` | 不处理，生物群系照常用 `DataPalette.get` 读取，`StateReader.biome` 的结果同样受影响。一个区段中只有一种生物群系时结果正确 |
+| T2 | [`protocol/ProtocolMachine.java`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot/protocol/ProtocolMachine.java) 的 `playerChat` | MCProtocolLib 的 `ClientboundPlayerChatPacket` 在过滤类型为 PARTIALLY_FILTERED 时不读取过滤标记的 BitSet，之后的聊天类型、发送者名称与目标名称都从错误的位置读出 | 不支持。收到部分过滤的玩家聊天时抛出 `UnsupportedOperationException`，bot 以这个异常结束 |
+| T3 | [`data/Items.java`](../../bot/data/src/main/java/io/ib67/yuanban/bot/data/Items.java) 的 `sameItemSameComponents` | 原版解码物品时去掉补丁中与默认组件相同的条目，MCProtocolLib 保留原始补丁 | 物品按原始补丁比较，null 补丁与空补丁视为相同；服务端发来与默认值相同的补丁条目时，比较结果与原版不同。影响挖掘中判断主手物品是否改变，以及物品栏判断槽位是否改变 |
+| T4 | [`interaction/BlockPredicates.java`](../../bot/control/src/main/java/io/ib67/yuanban/bot/interaction/BlockPredicates.java) | `can_break` 中针对方块实体组件的条件（exact components 与 component predicates） | 不支持。该位置有方块实体时，遇到带有组件条件的谓词抛出 `UnsupportedOperationException`；没有方块实体时与原版相同，直接不匹配 |
 
 [目录](README.md) · 上一篇：[测试](testing.md)

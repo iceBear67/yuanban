@@ -26,7 +26,7 @@
   - [控制载具](#控制载具)
   - [座位位置](#座位位置)
 
-相关源码：[`movement`](../../bot/src/main/java/io/ib67/yuanban/bot/movement)、[`player/Interpolation.java`](../../bot/src/main/java/io/ib67/yuanban/bot/player/Interpolation.java)。
+相关源码：[`movement`](../../bot/control/src/main/java/io/ib67/yuanban/bot/movement)、[`player/Interpolation.java`](../../bot/model/src/main/java/io/ib67/yuanban/bot/player/Interpolation.java)。
 
 ## 移动步骤
 

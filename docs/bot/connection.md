@@ -18,7 +18,7 @@
 - [区段解码](#区段解码)
 - [区段池](#区段池)
 
-相关源码：[`transport`](../../bot/src/main/java/io/ib67/yuanban/bot/transport)、[`decode`](../../bot/src/main/java/io/ib67/yuanban/bot/decode)。
+相关源码：[`transport`](../../bot/transport/src/main/java/io/ib67/yuanban/bot/transport)、[`decode`](../../bot/protocol/src/main/java/io/ib67/yuanban/bot/decode)。
 
 ## 连接接口
 
