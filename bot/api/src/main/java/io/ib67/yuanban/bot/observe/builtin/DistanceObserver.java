@@ -1,15 +1,12 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
 import io.ib67.yuanban.bot.Action;
-import io.ib67.yuanban.bot.Bot;
 import io.ib67.yuanban.bot.observe.Observation;
 import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
 import io.ib67.yuanban.bot.observe.Observation.PlayerMoved;
 import io.ib67.yuanban.bot.observe.Observation.PlayerTeleported;
 import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.Subscription;
-import io.ib67.yuanban.bot.observe.dispatch.RegistrationCheck;
-import io.ib67.yuanban.bot.observe.dispatch.SubmittedAction;
 import net.minestom.server.coordinate.Point;
 
 /**
@@ -17,7 +14,7 @@ import net.minestom.server.coordinate.Point;
  * 动作先结束时关闭自己。注册时先检查一次距离条件，之后在每条 {@link PlayerMoved}、{@link PlayerTeleported} 之后检查。
  * 不在任何世界中时注册不做注册时的检查（没有玩家位置），进入世界之后照常在每条 {@link PlayerMoved}、{@link PlayerTeleported} 之后检查。
  */
-public final class DistanceObserver extends BuiltinObserver implements RegistrationCheck {
+public final class DistanceObserver extends BuiltinObserver {
     private final double range;
     private final Point target;
     private final Action action;
@@ -37,16 +34,6 @@ public final class DistanceObserver extends BuiltinObserver implements Registrat
     public boolean met() {
         checkReadable();
         return met;
-    }
-
-    /**
-     * @throws IllegalArgumentException 动作不是由这个 bot 提交的
-     */
-    @Override
-    public void checkRegistration(Bot bot) {
-        if (!(action instanceof SubmittedAction submitted) || submitted.bot() != bot) {
-            throw new IllegalArgumentException("the action " + action + " was not submitted by " + bot);
-        }
     }
 
     @Override

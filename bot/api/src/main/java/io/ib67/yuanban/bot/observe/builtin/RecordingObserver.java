@@ -6,6 +6,7 @@ import io.ib67.yuanban.bot.observe.Subscription;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiFunction;
 
 /**
@@ -16,6 +17,7 @@ import java.util.function.BiFunction;
 public final class RecordingObserver<T> extends BuiltinObserver {
     private final Subscription subscription;
     private final BiFunction<Observation, ObserverContext, @Nullable T> extractor;
+    private final AtomicBoolean registered = new AtomicBoolean(false);
     private Records<T> records = new Records<>(Integer.MAX_VALUE);
 
     RecordingObserver(Subscription subscription, BiFunction<Observation, ObserverContext, @Nullable T> extractor) {
@@ -29,7 +31,9 @@ public final class RecordingObserver<T> extends BuiltinObserver {
      * @throws IllegalStateException 已经注册过
      */
     public RecordingObserver<T> limit(int limit) {
-        checkNotRegistered(this);
+        if(!this.registered.compareAndExchange(false, true)) {
+            throw new IllegalStateException("limit must be set before the recording observer is registered");
+        }
         this.records = new Records<>(limit);
         return this;
     }

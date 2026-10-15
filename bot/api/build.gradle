@@ -5,4 +5,5 @@ dependencies {
     api("net.minestom:minestom:2026.10.05-26.2")
     // 已注册 observer 的弱引用缓存（RegisteredObservers）
     implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+    api("io.ib67.kiwi:event:1.2.3-SNAPSHOT")
 }

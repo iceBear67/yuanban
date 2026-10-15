@@ -7,5 +7,5 @@ import org.jetbrains.annotations.Nullable;
  *
  * @param closed 这个世界的观察结束的方式；仍在观察时为 null
  */
-public record WorldRecord<W>(WorldInfo world, W state, @Nullable WorldClosed closed) {
+public record WorldRecord<W>(WorldInfo world, W state, @Nullable WorldBoundObserver.WorldClosed closed) {
 }

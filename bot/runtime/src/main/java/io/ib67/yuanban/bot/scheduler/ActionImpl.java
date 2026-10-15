@@ -2,7 +2,6 @@ package io.ib67.yuanban.bot.scheduler;
 
 import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.ActionCancelledException;
-import io.ib67.yuanban.bot.observe.dispatch.SubmittedAction;
 import io.ib67.yuanban.bot.state.ActionHandle;
 import org.jetbrains.annotations.Nullable;
 
@@ -13,7 +12,7 @@ import java.util.function.Consumer;
 /**
  * {@link Action} 的实现。内部 future 只在调度线程上完成。
  */
-public final class ActionImpl implements Action, SubmittedAction, ActionHandle {
+public final class ActionImpl implements Action, ActionHandle {
     private final BotInstance bot;
     private final String name;
     private final long sequence;

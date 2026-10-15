@@ -42,8 +42,6 @@ import io.ib67.yuanban.bot.observe.builtin.Observers;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationDispatcher;
 import io.ib67.yuanban.bot.observe.dispatch.ObservationHost;
 import io.ib67.yuanban.bot.observe.dispatch.ObserverEntry;
-import io.ib67.yuanban.bot.observe.dispatch.RegisteredObservers;
-import io.ib67.yuanban.bot.observe.dispatch.RegistrationCheck;
 import io.ib67.yuanban.bot.player.LocalPlayer;
 import io.ib67.yuanban.bot.protocol.BundleBuffer;
 import io.ib67.yuanban.bot.protocol.InboundPacket;
@@ -853,14 +851,12 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
     @Override
     public <O extends Observer> ObserverHandle<O> observe(O observer) {
         ensureUsable();
-        markRegistered(observer);
         if (onSchedulerThread()) {
             return new ObserverHandleImpl<>(this, registerNow(observer), observer);
         }
         var result = new CompletableFuture<ObserverHandle<O>>();
         submit(observerTasks, () -> {
             if (ended()) {
-                RegisteredObservers.unmark(observer);
                 result.completeExceptionally(endException());
                 return;
             }
@@ -896,24 +892,15 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
         }
     }
 
-    private void markRegistered(Observer observer) {
-        if (observer instanceof RegistrationCheck check) {
-            check.checkRegistration(this);
-        }
-        RegisteredObservers.mark(observer);
-    }
-
     @Override
     public <O extends Observer> ObservedAction<O> observeDuring(O observer, Function<Bot, Action> submit) {
         ensureUsable();
-        markRegistered(observer);
         if (onSchedulerThread()) {
             return registerDuring(observer, submit);
         }
         var result = new CompletableFuture<ObservedAction<O>>();
         submit(observerTasks, () -> {
             if (ended()) {
-                RegisteredObservers.unmark(observer);
                 result.completeExceptionally(endException());
                 return;
             }

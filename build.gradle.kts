@@ -24,6 +24,10 @@ allprojects {
         maven("https://libraries.minecraft.net") {
             name = "minecraft"
         }
+        // kiwi 只发布在这个仓库，bot:api 的观察记录投递依赖它
+        maven("https://repo.sfclub.cc/snapshots") {
+            name = "kiwi"
+        }
         mavenLocal()
     }
 
