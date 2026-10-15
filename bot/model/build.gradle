@@ -1,0 +1,5 @@
+dependencies {
+    // 模型产生 view 中的快照，世界模型抛出 ChunkNotLoadedException
+    api(project(":bot:api"))
+    api(project(":bot:data"))
+}

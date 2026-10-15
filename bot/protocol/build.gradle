@@ -1,0 +1,6 @@
+dependencies {
+    // ProtocolHost 返回 BotState、MovementController 与 HandController
+    api(project(":bot:control"))
+    // 区段池的弱引用缓存（SectionPool）
+    implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+}

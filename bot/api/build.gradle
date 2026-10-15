@@ -1,0 +1,8 @@
+dependencies {
+    // BotOptions 的 transport 与 transportResolver；Subscription 使用 PacketDirection
+    api(project(":bot:transport"))
+    // 公开接口使用 Minestom 的坐标与 Block
+    api("net.minestom:minestom:2026.10.05-26.2")
+    // 已注册 observer 的弱引用缓存（RegisteredObservers）
+    implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+}

@@ -1,0 +1,6 @@
+dependencies {
+    // 公开接口：使用者经过 :bot:runtime 得到 :bot:api 与 :bot:transport
+    api(project(":bot:api"))
+    // 内部实现：不出现在使用者的编译类路径上
+    implementation(project(":bot:protocol"))
+}
