@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.state;
 
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.function.Consumer;
@@ -21,20 +22,24 @@ public interface ActionHandle {
     /**
      * 调度线程：请求取消
      */
+    @ApiStatus.Internal
     void requestCancel(String reason);
 
     /**
      * 调度线程：执行完毕
      */
+    @ApiStatus.Internal
     void succeed();
 
     /**
      * 调度线程：以取消结束
      */
+    @ApiStatus.Internal
     void cancelled(String reason);
 
     /**
      * 调度线程：连接结束或 bot 因异常结束
      */
+    @ApiStatus.Internal
     void terminate(RuntimeException exception);
 }
