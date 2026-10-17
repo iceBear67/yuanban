@@ -1,3 +1,6 @@
 dependencies {
     api(project(":bot:model"))
+    // KinematicsTest 使用直接构造区段的世界；DigSpeedTest、BlockPredicatesTest 使用原版标签
+    testImplementation(testFixtures(project(":bot:model")))
+    testImplementation(testFixtures(project(":bot:data")))
 }

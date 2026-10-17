@@ -3,4 +3,7 @@ dependencies {
     api(project(":bot:api"))
     // 内部实现：不出现在使用者的编译类路径上
     implementation(project(":bot:protocol"))
+    // 运行 bot 的测试使用 TestPeer、原版注册表数据与区块构造
+    testImplementation(testFixtures(project(":bot:transport")))
+    testImplementation(testFixtures(project(":bot:data")))
 }

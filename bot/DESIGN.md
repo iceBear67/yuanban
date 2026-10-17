@@ -1711,14 +1711,14 @@ try (BotRuntime runtime = BotRuntime.create(RuntimeOptions.builder()
 
 ### 15. 测试
 
-README 规定本库只编写单元测试，不编写端到端测试。进程内连接由外部模块提供（4.3），TCP 连接接入真实服务端的验证同样不在本库测试中。测试使用真实输入：
+README 规定本库只编写单元测试，不编写端到端测试。进程内连接由外部模块提供（4.3），TCP 连接接入真实服务端的验证同样不在本库测试中。测试分散在各模块中，只有模块针对性很强的单元测试留在对应的模块，其余全部写在 `:bot:runtime`（`docs/bot/testing.md` 列出每个测试类所在的模块）。测试使用真实输入：
 
 - 数据包为 MCProtocolLib 的数据包对象；需要字节时用 MCProtocolLib 的 `serialize`、`MinecraftTypes` 与 `MinecraftCodec` 生成，区块数据用 MCProtocolLib 的 `DataPalette` 与 `MinecraftTypes.writeChunkSection` 生成（`ChunkBuilder`，方块数按非空气状态计数，方块实体为 `BlockEntityInfo`）；
-- 同步注册表与标签取自 MCProtocolLib 自带的原版数据（`MinecraftProtocol.loadNetworkCodec()`、`loadNetworkTags()`），`TestServer` 按 MCProtocolLib `ServerListener` 的方法把它们转换为 Registry Data 与 Update Tags；省略数据时条目的数据为 null；
+- 同步注册表、标签与世界数据包取自 MCProtocolLib 自带的原版数据（`MinecraftProtocol.loadNetworkCodec()`、`loadNetworkTags()`），`VanillaServer` 按 MCProtocolLib `ServerListener` 的方法把它们转换为 Registry Data 与 Update Tags；省略数据时条目的数据为 null；
 - 静态数据取自 Minestom 的方块数据与 `net.minestom:data`，与运行时相同；
 - 档案为 MCProtocolLib 的 `GameProfile`。
 
-组件（解码、注册表、世界模型、移动计算、挖掘速度、已读跟踪、窗口布局、bundle 与批次、物品数据、属性、方块谓词、数据包方向、元数据下标）直接构造并检查。需要运行 bot 的测试由测试代码扮演服务端一侧：`TestPeer` 实现 `Transport`，测试线程串行地把数据包对象交给 bot 的 `InboundSink`，并按顺序记录 bot 交给连接的数据包，测试检查这些数据包；`TestPeer.holdWrites()` 让之后交出的数据包推迟写出，用来检查写出之前连接断开的情况。Keep Alive 作为屏障：收到它的应答时，之前交给 bot 的数据包都已经应用并投递了观察记录。`TcpConnection` 的测试在回环地址上打开 `ServerSocketChannel`，由测试代码扮演服务端，用 MCProtocolLib 的 `MinecraftCodec` 与 `MinecraftTypes` 按阶段与压缩阈值读写帧。
+组件（解码、注册表、世界模型、移动计算、挖掘速度、已读跟踪、窗口布局、bundle 与批次、物品数据、属性、方块谓词、数据包方向、元数据下标）直接构造并检查。需要运行 bot 的测试由测试代码扮演服务端一侧：`TestPeer` 实现 `Transport`，测试线程串行地把数据包对象交给 bot 的 `InboundSink`，并按顺序记录 bot 交给连接的数据包，测试检查这些数据包；`TestPeer.holdWrites()` 让之后交出的数据包推迟写出，用来检查写出之前连接断开的情况。Keep Alive 作为屏障：收到它的应答时，之前交给 bot 的数据包都已经应用并投递了观察记录。`TcpConnection` 的测试在回环地址上打开 `ServerSocketChannel`，由测试代码扮演服务端，用 MCProtocolLib 的 `MinecraftCodec` 与 `MinecraftTypes` 按阶段与压缩阈值读写帧。`TestPeer`、`VanillaServer` 与 `ChunkBuilder` 通过 Gradle 的测试夹具（`java-test-fixtures`）提供给其它模块的测试，`TestServer` 与 `TestViews` 放在 `:bot:runtime` 的测试源码中。
 
 | 测试对象 | 内容 |
 |---|---|

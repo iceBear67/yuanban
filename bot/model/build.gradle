@@ -1,5 +1,12 @@
+plugins {
+    // 直接构造区段的世界由 control 模块的测试复用
+    id("java-test-fixtures")
+}
+
 dependencies {
     // 模型产生 view 中的快照，世界模型抛出 ChunkNotLoadedException
     api(project(":bot:api"))
     api(project(":bot:data"))
+    // ClientWorldTest 使用原版注册表数据与区块构造
+    testImplementation(testFixtures(project(":bot:data")))
 }

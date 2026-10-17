@@ -3,4 +3,6 @@ dependencies {
     api(project(":bot:control"))
     // 区段池的弱引用缓存（SectionPool）
     implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
+    // DecodeTest 使用原版注册表数据与区块构造
+    testImplementation(testFixtures(project(":bot:data")))
 }

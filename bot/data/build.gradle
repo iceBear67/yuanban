@@ -1,3 +1,8 @@
+plugins {
+    // 原版注册表数据与区块构造由其它模块的测试复用
+    id("java-test-fixtures")
+}
+
 dependencies {
     api("org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19") {
         // 这些 jar 中的类位于 it.unimi.dsi.fastutil 包，与下面的 fastutil 同名
