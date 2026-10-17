@@ -148,7 +148,7 @@ int picked = counter.read(PickupCounter::picked);
 
 - 订阅数据包使用 `Subscription.NONE.received(...)` 与 `sent(...)`，多个订阅用 `and` 合并。
 - 状态与实体编号、方块坐标有关的 observer 继承 `WorldBoundObserver`，bot 进入新世界时它自动结束旧世界的状态、创建新世界的状态。
-- 每个 observer 实例只能注册一次。
+- 同一个 observer 实例可以多次注册，每次注册各自投递观察记录。
 
 ## 暂停移动
 

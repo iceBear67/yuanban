@@ -845,8 +845,8 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
     }
 
     /**
-     * bot 已经结束时抛出 {@link BotDisconnectedException} 或 {@link BotFailureException}，这时 observer 不算注册过；
-     * 注册时 observer 的回调抛出异常时抛出 {@link ObserverFailureException}，这时 observer 算作注册过
+     * bot 已经结束时抛出 {@link BotDisconnectedException} 或 {@link BotFailureException}；
+     * 注册时 observer 的回调抛出异常时抛出 {@link ObserverFailureException}
      */
     @Override
     public <O extends Observer> ObserverHandle<O> observe(O observer) {

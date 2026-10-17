@@ -93,7 +93,6 @@ dependencies {
 dependencies {
     api(project(":bot:transport"))
     api("net.minestom:minestom:2026.10.05-26.2")
-    implementation("com.github.ben-manes.caffeine:caffeine:3.3.0")
 }
 
 // bot/model/build.gradle
@@ -124,7 +123,7 @@ dependencies {
 - **排除 `com.nukkitx.fastutil`**：MCProtocolLib 依赖的这些 jar 中的类位于 `it.unimi.dsi.fastutil` 包，与 fastutil 8.5.19 同名。
 - **fastutil 用 `api`**：MCProtocolLib 的公开类型使用 fastutil（`HolderSet.getHolders()` 返回 `IntList`，点击窗口的数据包使用 `Int2ObjectMap`），排除上面的 jar 之后使用者要从本库得到它。
 - **显式声明 `net.minestom:data`**：Minestom 以 `implementation` 依赖它，它不在 `:bot:data` 的编译类路径上。
-- **caffeine**：区段共享（`:bot:protocol` 的 `SectionPool`）与已注册 observer 的记录（`:bot:api` 的 `RegisteredObservers`）使用弱引用缓存。
+- **caffeine**：区段共享（`:bot:protocol` 的 `SectionPool`）使用弱引用缓存。
 - **模块之间用 `api`**：`:bot:api` 的 `BotOptions` 使用 `:bot:transport` 的 `Transport` 与 `TransportResolver`，`Subscription` 使用 `PacketDirection`；`:bot:model` 产生 `view` 中的快照，世界模型抛出 `ChunkNotLoadedException`；`:bot:control` 的 `BotState` 汇总 `:bot:model` 中的全部模型；`:bot:protocol` 的 `ProtocolHost` 返回 `BotState`、`MovementController` 与 `HandController`。
 - **`:bot:runtime` 以 `implementation` 依赖内部模块**：`:bot:runtime` 以 `api` 依赖 `:bot:api`，以 `implementation` 依赖 `:bot:protocol`。使用者依赖 `:bot:runtime`，编译类路径上只有 `:bot:api`、`:bot:transport`、`:bot:runtime` 自己的类（`BotRuntime` 与 `scheduler` 包），以及随它们以 `api` 传递的 MCProtocolLib、Minestom、fastutil；`:bot:data`、`:bot:model`、`:bot:control`、`:bot:protocol` 不在使用者的编译类路径上，引用其中的类是编译错误。`:bot:runtime` 通过 `:bot:protocol` 以 `api` 传递的依赖得到模型、控制器与 MCProtocolLib、Minestom，不直接使用 `net.minestom:data` 与 caffeine。
 - Minestom 要求 Java 25，与根项目的工具链一致。
@@ -195,15 +194,15 @@ io.ib67.yuanban.bot
 │                                       ObserverFailureException
 ├── view/        StateReader、各类快照 record、ActiveEffect、EntityMeta、EntityMetaIndex（7.4）
 ├── observe/     Observation（sealed）及其子类型、Observer、Subscription、ObserverContext、
-│                ObserverHandle、CloseReason、WorldBoundObserver、WorldInfo、WorldEntryCause、
-│                WorldRecord、WorldClosed、Region
+│                ObserverHandle、CloseReason、WorldBoundObserver（含嵌套的 WorldClosed）、WorldInfo、
+│                WorldEntryCause、WorldRecord、Region
 ├── observe/builtin/
 │                Observers（内置 observer 的工厂方法）、RecordingObserver、WorldRecordingObserver、
 │                FirstMatchObserver、BlockAtObserver、BlockBrokenObserver、MovementObserver、ConditionObserver、
 │                DistanceObserver、MovementCriteria 及各记录 record
 └── observe/dispatch/
                  ObservationDispatcher、SubscriptionIndex、ObserverEntry、ObserverContextImpl、
-                 ObservationHost、RegistrationCheck、RegisteredObservers、SubmittedAction
+                 ObservationHost
 
 :bot:model
 io.ib67.yuanban.bot
@@ -1359,7 +1358,7 @@ public enum CloseReason { BY_HANDLE, BY_OBSERVER, ACTION_COMPLETED, DISCONNECTED
 
 **注册**
 
-- 每个 observer 实例只能注册一次，并且只属于一个 bot。重复注册（包括关闭之后再次注册）抛出 `IllegalStateException`。
+- 库不记录 observer 实例是否已经注册过：同一个实例可以多次注册，交给同一个 bot、交给不同的 bot、关闭之后再注册都可以。每次注册各自投递观察记录，observer 自己的字段由这些注册共用。
 - 在其它线程调用 `observe` 时：
   - 注册请求交给调度线程，在下一轮处理该 bot 的第一步完成（见 3.2）；
   - `observe` 等到注册完成才返回。这一步不依赖服务端，所以不执行推进函数；
@@ -1367,10 +1366,8 @@ public enum CloseReason { BY_HANDLE, BY_OBSERVER, ACTION_COMPLETED, DISCONNECTED
 
   所以「先注册 observer，再提交动作」可以保证动作引起的全部变化都被观察到。
 - 在调度线程上（例如另一个 observer 的回调中）调用时立即注册。在 observer 的回调（`onStart`、`onObservation`、`onClose`）中调用时，从这个回调返回之后产生的观察记录开始投递，同一个回调中注册之后产生的记录（例如在回调中取消动作产生的 `ActionCompleted`）不投递给它；在调度线程上的其它代码中（例如 `Action.future()` 不带 async 的后续回调在 observer 的回调以外执行时）调用时，从注册时开始投递。
-- 注册完成时调用 `onStart`。注册时调用的 `subscription()`（`WorldBoundObserver` 中为 `worldSubscription()`）或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭（下文的关闭表），`observe` 抛出 `ObserverFailureException`，原因为回调抛出的异常，bot 不受影响；在其它线程调用时同样如此，不会一直等待。这时 observer 算作注册过。
-- bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`（见 12）。这两种情况下 observer 不算注册过（包括在其它线程调用、注册请求交给调度线程之后 bot 才结束的情况），可以再交给其它 bot；`observeDuring` 相同。
-- 实现了内部接口 `RegistrationCheck` 的内置 observer（11.7 的 `distanceWithIn`、`distanceOutOf`）在调用 `observe` 的线程上先做检查；检查失败时 `observe` 抛出异常，bot 不受影响，observer 也不算注册过。
-- 「只能注册一次」按对象身份判断（以弱引用记录已经注册过的 observer）。
+- 注册完成时调用 `onStart`。注册时调用的 `subscription()`（`WorldBoundObserver` 中为 `worldSubscription()`）或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭（下文的关闭表），`observe` 抛出 `ObserverFailureException`，原因为回调抛出的异常，bot 不受影响；在其它线程调用时同样如此，不会一直等待。
+- bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`（见 12）。这两种情况下可以再交给其它 bot；`observeDuring` 相同。
 
 **观察中**
 
@@ -1425,7 +1422,8 @@ public abstract class WorldBoundObserver<W> implements Observer {
 
 public record WorldInfo(long epoch, Key dimension, int dimensionTypeId, WorldEntryCause cause) {}
 public enum WorldEntryCause { JOIN, RECONFIGURATION, RESPAWN, TRANSFER }
-public record WorldRecord<W>(WorldInfo world, W state, @Nullable WorldClosed closed) {}
+public record WorldRecord<W>(WorldInfo world, W state, @Nullable WorldBoundObserver.WorldClosed closed) {}
+// WorldBoundObserver 中嵌套：
 public sealed interface WorldClosed {
     record Left(WorldInfo next) implements WorldClosed {}
     record ObserverClosed(CloseReason reason) implements WorldClosed {}
@@ -1485,7 +1483,7 @@ public sealed interface WorldClosed {
 | `observations(Class<O> type[, Predicate<O> filter])` | 否 | `of(type)` | `items()`：`List<O>` |
 
 - `particlesWithin`、`sounds`、`blockChanges` 返回 `WorldRecordingObserver<T>`，`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations` 返回 `RecordingObserver<T>`，`T` 为表中 `items()` 的元素类型。工厂方法构造它们时给出订阅与提取规则：提取规则接收观察记录与 `ObserverContext`，返回一条记录，返回 null 时不记录；表中的过滤条件与范围判断都在提取规则中。
-- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，各世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。observer 交给 `observe` 或 `observeDuring` 之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写，在其它线程修改会与它形成数据竞争。
+- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 设置上限，应在注册之前调用，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，各世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。`limit` 只能调用一次，再次调用抛出 `IllegalStateException`。
 - `sounds` 的实体音效在实体不在模型中时不记录。
 - `Region` 是 record `Region(Point min, Point max)`，提供 `Region.around(Point center, double radius)` 与 `contains(Point)`。
 - `movementOf` 跟踪的实体：注册时（以及每次进入新世界时）模型中已有的、满足 `who` 的实体，以及之后 `EntitySpawned` 中满足 `who` 的实体。`who` 只在开始跟踪时判断一次。`start` 为开始跟踪时的位置；实体被移除时 `removed` 变为 true，记录保留。进入新世界时按 11.5 重新开始跟踪。
@@ -1520,7 +1518,6 @@ public sealed interface WorldClosed {
   - 注册时先检查一次距离条件，之后在每条 `PlayerMoved`、`PlayerTeleported` 之后检查。条件满足时在回调中调用 `action.cancel()`（在调度线程上立即处理，见 8.1），然后关闭自己，`met()` 为 true。
   - 不在任何世界中时注册（5.1）没有玩家位置，不做注册时的检查；这期间提交的 `action` 等待进入世界（8.2），进入世界之后照常在每条 `PlayerMoved`、`PlayerTeleported`（包括进入世界之后服务端传送玩家到出生位置）之后检查。
   - 注册时距离条件不满足（或者不在任何世界中）并且 `action` 已经结束，或者之后收到 `action` 的 `ActionCompleted` 时，关闭自己，`met()` 为 false。
-  - `action` 必须由同一个 bot 提交，否则注册时（在调用 `observe` 的线程上，11.4）抛出 `IllegalArgumentException`。
   - 这两个 observer 只能在提交动作之后构造，注册时的检查保证注册之前已经发生的移动不会被漏掉。世界重建时移动与手部队列中的动作被取消（8.2），observer 随之关闭，所以它们不需要按世界切换状态。
 - 只记录的 `movementOf`、`blockAt` 没有结论，调用 `met()` 抛出 `IllegalStateException`。
 
@@ -1739,6 +1736,6 @@ README 规定本库只编写单元测试，不编写端到端测试。进程内�
 | `chat` | Checksum 与 wiki 描述的计算方法一致；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending` 只去掉还没有告知服务端的条目；没有显示的消息只计入新增消息数，不计入已读 |
 | `player` | `PlayerLoadTracker`：收到 Game Event 13 之前不发送 Player Loaded，也不超时；之后条件满足，或者自开始等待起超过 30 秒时发送；Respawn 重新开始计时；开始等待之前的 Game Event 13 被忽略 |
 | `scheduler` | 连接状态只允许 5.1 表中的转移；两个线程同时等待时推进函数不并发执行，开始时间至少相隔 50 毫秒；不 tick 的阶段中暂停状态改变时产生 `StateUpdated`，`condition` 随之检查；三类队列的执行规则（一次性请求等到 Player Loaded 之后执行；没有收到 Game Event 13 时一直不发送 Player Loaded，请求不执行；进入第一个世界之前提交的移动与手部动作不被第一次 Login (play) 取消；移动队列先进先出；两条队列互相独立）；8.1 每种结束情况下 `await` 的返回值或异常与 `future()` 的结果；取消（排队中、执行中、在调度线程上调用）；世界重建与玩家死亡时取消移动与手部队列中的动作；进入世界之前查询本地玩家与方块抛出 `IllegalStateException`；在调度线程上调用阻塞方法时抛出异常；模型入口在其它线程调用时抛出异常；某个 bot 抛出异常时其它 bot 继续运行；关闭之后不能再连接；runtime 关闭之后 Transfer 线程才打开的连接被关闭，关闭期间连接的 bot 被断开，最后一轮之后才入队的查询得到结果 |
-| `observe` | 注册后应用的数据包全部被观察到、注册前的不补发；投递顺序（含 bundle）；只投递订阅的类型；`Subscription` 拒绝方向不对的数据包类；五种关闭原因各自的时机与 `onClose` 调用；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，不调用它的 `onClose`，同一条记录照常交给之后的 observer，bot 继续运行；`subscription()` 或 `onStart` 抛出异常时，在其它线程与调度线程上调用的 `observe` 以及 `observeDuring` 都抛出 `ObserverFailureException`，`observeDuring` 不调用 `submit`，这个 observer 算作注册过；`Bot.await` 的条件抛出异常时抛出 `ObserverFailureException`；`ObservedAction.await` 在 observer 失败时立即抛出，动作仍在执行；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；重复注册抛出异常；bot 已经结束时 `observe` 失败的 observer 不算注册过（包括注册请求交给调度线程之后 bot 才结束的情况），可以交给其它 bot；在回调中注册的 observer 收不到同一个回调中注册之后产生的记录，回调返回之后的照常收到；在其它线程调用 `handle.close()` 时 `onClose` 抛出异常，observer 以 `FAILED` 关闭，`close()` 抛出 `ObserverFailureException`；连接结束时 `onClose` 抛出异常，只有这个 observer 以 `FAILED` 关闭，bot 按断开结束，断开原因保留；观察中跨线程读取状态抛出异常；`observeDuring` 的注册先于动作提交，`ACTION_COMPLETED` 在该动作的 `ActionCompleted` 投递之后关闭（含确认与 Block Update 在同一个 bundle 中的情况，已经发生过的 `loaded()`，以及在 `submit` 中就已经取消、没有 observer 订阅 `ActionCompleted` 的动作），`submit` 返回其它动作时抛出异常 |
+| `observe` | 注册后应用的数据包全部被观察到、注册前的不补发；投递顺序（含 bundle）；只投递订阅的类型；`Subscription` 拒绝方向不对的数据包类；五种关闭原因各自的时机与 `onClose` 调用；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，不调用它的 `onClose`，同一条记录照常交给之后的 observer，bot 继续运行；`subscription()` 或 `onStart` 抛出异常时，在其它线程与调度线程上调用的 `observe` 以及 `observeDuring` 都抛出 `ObserverFailureException`，`observeDuring` 不调用 `submit`；`Bot.await` 的条件抛出异常时抛出 `ObserverFailureException`；`ObservedAction.await` 在 observer 失败时立即抛出，动作仍在执行；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；同一个实例多次注册；bot 已经结束时 `observe` 失败（包括注册请求交给调度线程之后 bot 才结束的情况）时这个实例可以交给其它 bot；在回调中注册的 observer 收不到同一个回调中注册之后产生的记录，回调返回之后的照常收到；在其它线程调用 `handle.close()` 时 `onClose` 抛出异常，observer 以 `FAILED` 关闭，`close()` 抛出 `ObserverFailureException`；连接结束时 `onClose` 抛出异常，只有这个 observer 以 `FAILED` 关闭，bot 按断开结束，断开原因保留；观察中跨线程读取状态抛出异常；`observeDuring` 的注册先于动作提交，`ACTION_COMPLETED` 在该动作的 `ActionCompleted` 投递之后关闭（含确认与 Block Update 在同一个 bundle 中的情况，已经发生过的 `loaded()`，以及在 `submit` 中就已经取消、没有 observer 订阅 `ActionCompleted` 的动作），`submit` 返回其它动作时抛出异常 |
 | `observe` 中的 `WorldBoundObserver` | 进入新世界时的 `closeWorld` / `openWorld` 顺序；进入第一个世界之前的记录被丢弃；关闭时关闭当前世界 |
-| `observe` 中的内置 observer | 范围判断（粒子的中心坐标、实体音效的实体位置）；`limit` 与 `truncated()`，注册之后调用 `limit` 抛出异常；`first`、`observations`、`listener` 的类型为 `PacketReceived` 或 `PacketSent` 时在调用工厂方法时抛出异常，`packets`、`firstPacket`、`packetListener`、`sentPackets` 的数据包类方向不对时同样如此；`movementOf` 的跟踪、关闭条件、实体移除与换世界后的重新跟踪；`blockAt` 注册时先检查当前方块；`distanceWithIn` 在移动后满足距离条件时取消动作，`distanceOutOf` 在动作先结束时关闭且 `met()` 为 false，动作属于其它 bot 时注册失败；`condition`、`firstChat`、`damageTaken`；`firstTranslatedChat` 按子组件与翻译参数中的翻译键匹配；`blockBroken` 进入新世界时关闭；进入第一个世界之前注册的 `breakBlock` 与 `distanceWithIn` 观察下一个世界 |
+| `observe` 中的内置 observer | 范围判断（粒子的中心坐标、实体音效的实体位置）；`limit` 与 `truncated()`，重复调用 `limit` 抛出异常；`first`、`observations`、`listener` 的类型为 `PacketReceived` 或 `PacketSent` 时在调用工厂方法时抛出异常，`packets`、`firstPacket`、`packetListener`、`sentPackets` 的数据包类方向不对时同样如此；`movementOf` 的跟踪、关闭条件、实体移除与换世界后的重新跟踪；`blockAt` 注册时先检查当前方块；`distanceWithIn` 在移动后满足距离条件时取消动作，`distanceOutOf` 在动作先结束时关闭且 `met()` 为 false；`condition`、`firstChat`、`damageTaken`；`firstTranslatedChat` 按子组件与翻译参数中的翻译键匹配；`blockBroken` 进入新世界时关闭；进入第一个世界之前注册的 `breakBlock` 与 `distanceWithIn` 观察下一个世界 |

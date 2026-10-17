@@ -5,8 +5,6 @@ import io.ib67.yuanban.bot.observe.ObserverContext;
 import io.ib67.yuanban.bot.observe.dispatch.ObserverContextImpl;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 /**
  * 不按世界切换状态的内置 observer 的基类：记录收到的上下文，状态读取方法在观察中被调度线程以外的线程调用时抛出异常。
  */

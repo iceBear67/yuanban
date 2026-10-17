@@ -122,7 +122,7 @@ void chatIsSent() {
 | `inventory.InventoryBotTest` | 点击与关闭使用打开的窗口；打开的窗口中玩家物品栏部分取窗口 0 的物品；按键与模式不对应时拒绝；每个窗口各自的状态编号与光标；Close Container 不看编号；槽位越界时 bot 结束；身体护甲与鞍；马与鹦鹉螺的窗口；选择快捷栏 |
 | `chat.LastSeenTrackerTest` | Checksum 的计算；结果为 0 时改为 1；已读窗口与新增消息数；`ignorePending`；没有显示的消息 |
 | `scheduler.SchedulerTest` | 连接状态只允许协议规定的转移；一次性请求等到 Player Loaded；没有 Game Event 13 时不加载；不 tick 时暂停状态改变也更新状态；等待线程共用推进函数；两条队列互相独立；各种取消的结果；世界重建与玩家死亡取消队列；进入世界之前的请求；`BotRuntime` 关闭期间的连接与查询；在调度线程上阻塞时抛出异常；一个 bot 失败不影响其它 bot；模型入口拒绝其它线程 |
-| `observe.ObserveTest` | 只投递注册之后的记录；模型记录排在数据包之前，bundle 先整体应用；在回调中注册的 observer；只投递订阅的类型；`Subscription` 的检查；关闭原因；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，bot 继续运行；`onClose`、`subscription()`、`onStart` 与 `Bot.await` 的条件抛出异常的各种情况；`ObservedAction.await` 在 observer 失败时立即抛出；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；`observeDuring` 的关闭时机；只能注册一次；跨线程读取内置 observer；`WorldBoundObserver` 切换世界 |
+| `observe.ObserveTest` | 只投递注册之后的记录；模型记录排在数据包之前，bundle 先整体应用；在回调中注册的 observer；只投递订阅的类型；`Subscription` 的检查；关闭原因；回调抛出异常时只有这个 observer 以 `FAILED` 关闭，bot 继续运行；`onClose`、`subscription()`、`onStart` 与 `Bot.await` 的条件抛出异常的各种情况；`ObservedAction.await` 在 observer 失败时立即抛出；回调期间被自己的句柄关闭之后又抛出异常时 bot 结束；`observeDuring` 的关闭时机；同一个实例多次注册；跨线程读取内置 observer；`WorldBoundObserver` 切换世界 |
 | `observe.builtin.BuiltinObserversTest` | 粒子与音效的范围；`limit`；数据包类型在构造时拒绝；`movementOf`；`blockAt`；`blockBroken` 换世界时关闭；距离 observer；不在世界中时注册的 observer 观察下一个世界；`condition`、`firstChat`、`damageTaken`、`firstTranslatedChat` |
 
 [目录](README.md) · 上一篇：[错误处理](errors.md) · 下一篇：[限制与待办](limitations.md)

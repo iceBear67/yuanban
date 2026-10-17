@@ -175,12 +175,11 @@ public interface ObserverHandle<O extends Observer> extends AutoCloseable {
 
 ### 注册
 
-- 每个 observer 实例只能注册一次，并且只属于一个 bot。重复注册（包括关闭之后再次注册）抛出 `IllegalStateException`。按对象身份判断，以弱引用记录已经注册过的 observer（Caffeine 的弱键缓存）。
+- 库不记录 observer 实例是否已经注册过：同一个实例可以多次注册（交给同一个 bot、交给不同的 bot、关闭之后再注册都可以）。每次注册各自投递观察记录，observer 自己的字段由这些注册共用。
 - 在其它线程调用 `observe` 时，注册请求交给调度线程，在下一轮处理该 bot 的第一步完成；`observe` 等到注册完成才返回。`observe` 返回之后应用的数据包和发生的变化都会被观察到，之前发生的不补发。所以「先注册 observer，再提交动作」可以保证动作引起的全部变化都被观察到。
 - 在调度线程上调用时立即注册，在回调中注册的规则见[投递](#投递)。
-- 注册完成时调用 `onStart`。注册时调用的 `subscription()` 或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭，`observe` 抛出 `ObserverFailureException`，bot 不受影响；这时 observer 算作注册过。
-- bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`。这两种情况下 observer 不算注册过，可以再交给其它 bot。
-- 实现了内部接口 `RegistrationCheck` 的内置 observer（`distanceWithIn`、`distanceOutOf`）在调用 `observe` 的线程上先做检查；检查失败时 `observe` 抛出异常，bot 不受影响，observer 也不算注册过。
+- 注册完成时调用 `onStart`。注册时调用的 `subscription()` 或 `onStart` 抛出异常时，这个 observer 以 `FAILED` 关闭，`observe` 抛出 `ObserverFailureException`，bot 不受影响；这个实例可以再次注册。
+- bot 已经断开时，`observe` 抛出 `BotDisconnectedException`；bot 因异常结束时抛出 `BotFailureException`。这两种情况下可以再交给其它 bot。
 
 ### 关闭
 
@@ -227,7 +226,7 @@ public abstract class WorldBoundObserver<W> implements Observer {
 | 收到其它记录 | 交给 `observe(当前世界状态, ...)`；还没有打开任何世界时丢弃。bot 离开世界之后、进入下一个世界之前的记录交给最后打开的世界 |
 | `onClose`（final） | 对当前世界调用 `closeWorld(..., ObserverClosed(原因))` |
 
-相关类型：`WorldInfo(epoch, dimension, dimensionTypeId, cause)`（`epoch` 每个 bot 从 1 开始，每进入一个世界加一）、`WorldEntryCause`（`JOIN`、`RECONFIGURATION`、`RESPAWN`、`TRANSFER`）、`WorldRecord<W>(world, state, closed)`、`WorldClosed`（`Left(next)` 或 `ObserverClosed(reason)`）。
+相关类型：`WorldInfo(epoch, dimension, dimensionTypeId, cause)`（`epoch` 每个 bot 从 1 开始，每进入一个世界加一）、`WorldEntryCause`（`JOIN`、`RECONFIGURATION`、`RESPAWN`、`TRANSFER`）、`WorldRecord<W>(world, state, closed)`、`WorldBoundObserver` 中嵌套的 `WorldClosed`（`Left(next)` 或 `ObserverClosed(reason)`）。
 
 ## 判断结果
 
@@ -261,7 +260,7 @@ observer 没有自己的时限，等多久由测试代码决定；「某件事�
 | `observations(Class<O>[, Predicate<O>])` | 否 | `of(O)` | `items()`：`O` |
 
 - `particlesWithin`、`sounds`、`blockChanges` 返回 `WorldRecordingObserver<T>`，`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations` 返回 `RecordingObserver<T>`，`T` 为表中 `items()` 列表的元素类型。工厂方法构造它们时给出订阅与提取规则：提取规则接收观察记录与 `ObserverContext`，返回一条记录，返回 null 时不记录。
-- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 在注册之前设置上限，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，每个世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。注册之后再调用 `limit` 抛出 `IllegalStateException`：注册之后 observer 的字段由调度线程读写。`blockAt`、`movementOf` 没有 `limit`。
+- `RecordingObserver` 与 `WorldRecordingObserver` 的记录默认不限制数量。`limit(int)` 设置上限，应在注册之前调用，超出的记录只计数不保存，`truncated()` 返回 true。`WorldRecordingObserver` 对每个世界分别计数，每个世界的记录为 `Records`（`items()`、`truncated()`、`count()`）。`limit` 只能调用一次，再次调用抛出 `IllegalStateException`。`blockAt`、`movementOf` 没有 `limit`。
 - `Region(min, max)` 为各边与坐标轴平行的长方体，两端包含在内；`Region.around(center, radius)`、`contains(point)`。
 - `movementOf` 跟踪的实体：开始跟踪时（注册时以及每次进入新世界时）模型中已有的、满足条件的实体，以及之后 `EntitySpawned` 中满足条件的实体；条件只在开始跟踪时判断一次。实体被移除时 `removed` 变为 true，记录保留。
 
@@ -289,7 +288,7 @@ observer 没有自己的时限，等多久由测试代码决定；「某件事�
   - 在世界中注册时，`original()` 在 `onStart` 中读取；该位置所在区块未加载时，`original()` 为之后该区块第一次加载时的方块，在这之前为 null。所以在未加载区块上调用 `breakBlock` 时，动作以 `CHUNK_NOT_LOADED` 取消，observer 随之以 `ACTION_COMPLETED` 关闭，`broken()` 为 false，`original()` 为 null。
   - 不在任何世界中时注册：坐标属于下一个世界。收到的第一条 `WorldEntered` 不关闭；`original()` 为进入之后该位置所在区块第一次加载时的方块，在这之前为 null；之后的 `WorldEntered` 照常关闭。
 - `distanceWithIn`、`distanceOutOf`：
-  - 订阅 `PlayerMoved`、`PlayerTeleported`、`ActionCompleted`。在提交动作之后构造并注册；`action` 必须由同一个 bot 提交，否则注册时抛出 `IllegalArgumentException`。
+  - 订阅 `PlayerMoved`、`PlayerTeleported`、`ActionCompleted`。在提交动作之后构造并注册。
   - 注册时先检查一次距离条件（不在任何世界中时没有玩家位置，不做这次检查），之后在每条 `PlayerMoved`、`PlayerTeleported` 之后检查。条件满足时在回调中调用 `action.cancel()`（调度线程上立即处理），然后关闭自己。
   - 注册时条件不满足并且 `action` 已经结束，或者之后收到 `action` 的 `ActionCompleted` 时，关闭自己，`met()` 为 false。
   - 世界重建时动作被取消，observer 随之关闭，所以它们不需要按世界切换状态。

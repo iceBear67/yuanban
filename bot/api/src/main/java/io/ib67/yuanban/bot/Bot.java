@@ -45,10 +45,9 @@ public interface Bot {
      * 注册 observer。在其它线程调用时等到注册完成才返回，之后应用的数据包和发生的变化都会被观察到；
      * 在调度线程上调用时立即注册，在 observer 的回调中调用时，从这个回调返回之后产生的观察记录开始投递。
      *
-     * @throws IllegalStateException    observer 已经注册过
      * @throws ObserverFailureException observer 的 {@code subscription()} 或 {@code onStart} 抛出异常，observer 以 FAILED 关闭，bot 不受影响
-     * @throws BotDisconnectedException bot 已经断开；这时 observer 不算注册过
-     * @throws BotFailureException      bot 因异常结束；在注册之前已经结束的，observer 不算注册过
+     * @throws BotDisconnectedException bot 已经断开
+     * @throws BotFailureException      bot 因异常结束
      */
     <O extends Observer> ObserverHandle<O> observe(O observer);
 

@@ -20,7 +20,7 @@ import java.util.function.BiFunction;
 public final class WorldRecordingObserver<T> extends WorldBoundObserver<Records<T>> {
     private final Subscription subscription;
     private final BiFunction<Observation, ObserverContext, @Nullable T> extractor;
-    private final AtomicBoolean registered = new AtomicBoolean(false);
+    private final AtomicBoolean limitSet = new AtomicBoolean(false);
     private int limit = Integer.MAX_VALUE;
 
     WorldRecordingObserver(Subscription subscription, BiFunction<Observation, ObserverContext, @Nullable T> extractor) {
@@ -29,13 +29,13 @@ public final class WorldRecordingObserver<T> extends WorldBoundObserver<Records<
     }
 
     /**
-     * 每个世界最多保存的记录数，在注册之前设置
+     * 每个世界最多保存的记录数，只能调用一次
      *
-     * @throws IllegalStateException 已经注册过
+     * @throws IllegalStateException 已经调用过
      */
     public WorldRecordingObserver<T> limit(int limit) {
-        if(!this.registered.compareAndExchange(false, true)) {
-            throw new IllegalStateException("limit must be set before the world recording observer is registered");
+        if (!this.limitSet.compareAndSet(false, true)) {
+            throw new IllegalStateException("limit was already set for " + this);
         }
         this.limit = limit;
         return this;

@@ -29,7 +29,7 @@
 | `ObserverFailureException` | observer 的回调抛出了异常，这个 observer 以 `FAILED` 关闭，bot 不受影响；`getCause()` 为回调抛出的异常 | `observe`、`observeDuring`（注册时）、`ObserverHandle.awaitClose`、`ObserverHandle.close`（这次关闭中 `onClose` 抛出异常时）、`ObservedAction.await`、`Bot.await` |
 | `BotTimeoutException` | 阻塞等待超过时限 | 各个 `await`、`awaitClose` |
 | `ChunkNotLoadedException` | 读取了没有加载的区块；`chunkX()`、`chunkZ()` 给出区块坐标 | `StateReader.block`、`blockEntity`；动作读到未加载的区块时不抛出它，以 `CHUNK_NOT_LOADED` 取消 |
-| `IllegalStateException` | 状态不允许这个调用，例如不在任何世界中时读取玩家、在调度线程上阻塞、重复注册 observer | 调用线程 |
+| `IllegalStateException` | 状态不允许这个调用，例如不在任何世界中时读取玩家、在调度线程上阻塞、重复调用 `limit` | 调用线程 |
 | `IllegalArgumentException` | 参数不合法 | 调用线程 |
 | `UncheckedIOException` | TCP 连接失败 | `BotRuntime.connect` |
 
@@ -57,7 +57,7 @@ observer 的 `subscription()`、`onStart`、`onObservation`、`onClose` 抛出�
 
 | 方法 | 情况 |
 |---|---|
-| `observe`、`observeDuring` | 注册时 `subscription()` 或 `onStart` 抛出异常；`observeDuring` 这时不调用 `submit`。observer 算作注册过 |
+| `observe`、`observeDuring` | 注册时 `subscription()` 或 `onStart` 抛出异常；`observeDuring` 这时不调用 `submit` |
 | `ObserverHandle.awaitClose` | observer 以 `FAILED` 关闭，包括调用之前已经这样关闭的情况 |
 | `ObserverHandle.close` | 这次关闭中 `onClose` 抛出异常；在这之前已经关闭的（包括已经以 `FAILED` 关闭的）什么都不做 |
 | `ObservedAction.await` | observer 以 `FAILED` 关闭：立即抛出，不等动作结束，也不取消动作 |
@@ -88,7 +88,7 @@ observer 在动作之前关闭，所以等待动作的线程得到结果时，ob
 | `status()`、`disconnectReason()`、`failure()` | 可以调用 | 可以调用 |
 | 读取 observer（`handle.observer()`、`handle.read`） | observer 都已关闭，直接读取 | 同左 |
 
-`observe` 因 bot 已经结束而失败时，observer 不算注册过，可以交给其它 bot。
+`observe` 因 bot 已经结束而失败时，这个实例可以交给其它 bot。
 
 ## 结束 bot 的输入
 
@@ -118,7 +118,7 @@ observer 在动作之前关闭，所以等待动作的线程得到结果时，ob
 
 - 参数检查失败（[动作 · 参数检查](actions.md#参数检查)）；
 - `Subscription` 中数据包类的方向不对，或者直接订阅 `PacketReceived`、`PacketSent`；内置 observer 的工厂方法收到这样的类型；
-- 重复注册 observer；注册之后调用 `limit`；`distanceWithIn`、`distanceOutOf` 的动作不属于这个 bot；`observeDuring` 的 `submit` 返回了其它动作；
+- 重复调用 `limit`；`observeDuring` 的 `submit` 返回了其它动作；
 - 在调度线程上调用阻塞方法；在调度线程以外调用 `ObserverContext.close()`；观察中跨线程读取内置 observer；
 - 不在任何世界中时读取玩家、方块、方块实体；读取未加载的区块；`equipment` 传入窗口 0 中有槽位的装备槽位；
 - 在调度线程以外调用修改模型的内部入口（`BotState.checkThread`）；

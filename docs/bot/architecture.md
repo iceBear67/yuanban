@@ -78,9 +78,9 @@ bot 的全部状态只在调度线程上修改。连接一侧的线程只负责�
 | [`movement`](../../bot/control/src/main/java/io/ib67/yuanban/bot/movement) | `:bot:control` | `MovementController`、`MovementAction` 与四个子类、`MoveIntent`、`Kinematics`、`PathPlanner`、`PlayerNodeGenerator`、`PathFollower`、`RotationArbiter`、`Rotation`、`MovementSender`、`SineTable`、`RidingSeat`、`VehicleControl` | 移动队列、移动模拟、寻路跟随、朝向、骑乘 | [移动模拟与骑乘](movement.md) |
 | [`interaction`](../../bot/control/src/main/java/io/ib67/yuanban/bot/interaction) | `:bot:control` | `HandController`、`HandAction` 与五个子类、`AttackReach`、`BlockSequence`、`DigSpeed`、`BlockPredicates`、`NbtCompare`、`Directions` | 手部交互队列 | [动作 · 手部交互动作](actions.md#手部交互动作) |
 | [`view`](../../bot/api/src/main/java/io/ib67/yuanban/bot/view) | `:bot:api` | `StateReader`、各快照 record、`ActiveEffect`、`EntityMeta`、`EntityMetaIndex`、`ChatLine`、`ChatKind` | 只读的查询接口与快照 | [查询与观察 · 查询](observation.md#查询) |
-| [`observe`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe) | `:bot:api` | `Observation`、`Observer`、`Subscription`、`ObserverContext`、`ObserverHandle`、`CloseReason`、`WorldBoundObserver`、`WorldInfo`、`WorldEntryCause`、`WorldRecord`、`WorldClosed`、`Region` | 观察的公开接口 | [查询与观察](observation.md) |
+| [`observe`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe) | `:bot:api` | `Observation`、`Observer`、`Subscription`、`ObserverContext`、`ObserverHandle`、`CloseReason`、`WorldBoundObserver`（含嵌套的 `WorldClosed`）、`WorldInfo`、`WorldEntryCause`、`WorldRecord`、`Region` | 观察的公开接口 | [查询与观察](observation.md) |
 | [`observe.builtin`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/builtin) | `:bot:api` | `Observers`、`RecordingObserver`、`WorldRecordingObserver`、`FirstMatchObserver` 与其余内置 observer、`MovementCriteria`、`Records`、各记录 record | 内置 observer | [查询与观察 · 内置 observer](observation.md#内置-observer) |
-| [`observe.dispatch`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `:bot:api` | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost`、`RegistrationCheck`、`RegisteredObservers`、`SubmittedAction` | 观察记录的投递与订阅索引、已注册 observer 的记录 | [查询与观察 · 投递](observation.md#投递) |
+| [`observe.dispatch`](../../bot/api/src/main/java/io/ib67/yuanban/bot/observe/dispatch) | `:bot:api` | `ObservationDispatcher`、`SubscriptionIndex`、`ObserverEntry`、`ObserverContextImpl`、`ObservationHost` | 观察记录的投递与订阅索引 | [查询与观察 · 投递](observation.md#投递) |
 
 ## 公开接口与内部实现
 
@@ -220,7 +220,7 @@ BotState（调度线程独占）
 |---|---|
 | [`:bot:transport`](../../bot/transport/build.gradle) | `api`：MCProtocolLib（排除 `com.nukkitx.fastutil`）、fastutil |
 | [`:bot:data`](../../bot/data/build.gradle) | `api`：MCProtocolLib（排除 `com.nukkitx.fastutil`）、Minestom、fastutil；`implementation`：`net.minestom:data` |
-| [`:bot:api`](../../bot/api/build.gradle) | `api`：`:bot:transport`、Minestom；`implementation`：caffeine |
+| [`:bot:api`](../../bot/api/build.gradle) | `api`：`:bot:transport`、Minestom |
 | [`:bot:model`](../../bot/model/build.gradle) | `api`：`:bot:api`、`:bot:data` |
 | [`:bot:control`](../../bot/control/build.gradle) | `api`：`:bot:model` |
 | [`:bot:protocol`](../../bot/protocol/build.gradle) | `api`：`:bot:control`；`implementation`：caffeine |
@@ -234,7 +234,7 @@ BotState（调度线程独占）
 | `net.minestom:minestom:2026.10.05-26.2` | `:bot:data`、`:bot:api` | `api` | 只使用物理（`PhysicsUtils`、`CollisionUtils`、`BoundingBox`、`Shape`、`WorldBorder`、`Aerodynamics`、`PhysicsResult`）、寻路（`PathGenerator`、`GroundNodeGenerator`、`PNode`）、坐标（`Point`、`Pos`、`Vec`、`CoordConversion`）与静态方块数据（`Block`、`Block.Getter`）。不使用它的网络代码、注册表、`MinecraftServer` 的进程状态与物品系统 |
 | `it.unimi.dsi:fastutil:8.5.19` | `:bot:transport`、`:bot:data` | `api` | MCProtocolLib 的公开类型使用 fastutil |
 | `net.minestom:data:26.2-rv3` | `:bot:data` | `implementation` | 原版 26.2 导出的 JSON：物品编号与默认组件、属性的取值范围、实体类型的尺寸与乘客挂点 |
-| `com.github.ben-manes.caffeine:caffeine:3.3.0` | `:bot:api`、`:bot:protocol` | `implementation` | 已注册 observer 的记录（`:bot:api` 的 `RegisteredObservers`）与区段池（`:bot:protocol` 的 `SectionPool`）的弱引用缓存 |
+| `com.github.ben-manes.caffeine:caffeine:3.3.0` | `:bot:protocol` | `implementation` | 区段池（`:bot:protocol` 的 `SectionPool`）的弱引用缓存 |
 
 其余约定：
 

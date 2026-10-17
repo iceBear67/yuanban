@@ -101,7 +101,7 @@ assertTrue(damage.observer().items().isEmpty());
 - `ObserverHandle` 实现了 `AutoCloseable`，`closeReason()` 给出关闭原因（`CloseReason`）。连接结束时全部 observer 以 `DISCONNECTED` 关闭。
 - observer 的回调（`subscription()`、`onStart`、`onObservation`、`onClose`）抛出异常时，只有这个 observer 以 `FAILED` 关闭（不调用它的 `onClose`），bot 与其余 observer 不受影响。异常由 `handle.failure()` 给出，等待它的方法抛出 `ObserverFailureException`（原因为回调抛出的异常）：注册时失败的 `observe` 与 `observeDuring`（不提交动作），`awaitClose`，这次关闭中 `onClose` 抛出异常的 `handle.close()`，`ObservedAction.await`（立即抛出，不等动作结束，也不取消动作），以及条件抛出异常的 `bot.await`。回调期间这个 observer 已经被关闭（在自己的回调中调用 `handle.close()`，或者连接在回调中结束）时，异常无法再交给持有者，bot 以这个异常结束。
 - `Observers` 提供内置 observer：
-  - 只做记录：`particlesWithin`、`sounds`、`blockChanges`、`blockAt`、`movementOf`、`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations`；除 `blockAt`、`movementOf` 以外都可以用 `limit(n)` 限制保存的记录数，必须在注册之前调用，注册之后调用抛出 `IllegalStateException`；
+  - 只做记录：`particlesWithin`、`sounds`、`blockChanges`、`blockAt`、`movementOf`、`chatMessages`、`actionBars`、`damageTaken`、`packets`、`sentPackets`、`observations`；除 `blockAt`、`movementOf` 以外都可以用 `limit(n)` 限制保存的记录数，只能调用一次，再次调用抛出 `IllegalStateException`；
   - 得出结论时关闭自己：带关闭条件的 `movementOf` 与 `blockAt`，以及 `blockBroken`、`first`、`firstPacket`、`firstChat`、`firstTranslatedChat`、`condition`；
   - `first`、`observations`、`listener` 接收 `Observation` 中的观察记录类型，传入 `PacketReceived` 或 `PacketSent` 时立即抛出 `IllegalArgumentException`，数据包使用 `firstPacket`、`packets`、`sentPackets`、`packetListener`；
   - `ChatLine.plainText()` 不翻译翻译组件（翻译组件与它的参数都不出现在文本中），加入消息、死亡消息等由翻译键组成的消息用 `firstTranslatedChat(翻译键)` 匹配：消息的组件中（包括子组件与翻译参数）有这个翻译键的翻译组件即为匹配；
