@@ -3,8 +3,8 @@ dependencies {
     api(project(":crafting"))
     implementation(project(":dfu-codecs"))
     // 与 Minestom 运行时使用的版本相同，用于移植原版 ShapedRecipePattern 中的 CharArraySet
-    implementation("it.unimi.dsi:fastutil:8.5.19")
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    implementation(libs.fastutil)
+    testImplementation(libs.minestom.testing)
     testImplementation(testFixtures(project(":item-tag")))
     testImplementation(testFixtures(project(":crafting")))
 }

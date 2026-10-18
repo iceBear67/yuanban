@@ -1,6 +1,6 @@
 dependencies {
-    api("net.kyori:adventure-key:5.2.0")
-    api("com.google.code.gson:gson:2.14.0")
+    api(libs.adventure.key)
+    api(libs.gson)
     implementation(project(":dfu-codecs"))
 }
 

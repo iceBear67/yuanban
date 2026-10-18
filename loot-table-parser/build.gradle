@@ -3,7 +3,7 @@ dependencies {
     api(project(":item-tag"))
     implementation(project(":dfu-codecs"))
     implementation(project(":enchant"))
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    testImplementation(libs.minestom.testing)
     testImplementation(testFixtures(project(":item-tag")))
     testImplementation(testFixtures(project(":loot")))
 }

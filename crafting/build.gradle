@@ -3,10 +3,10 @@ plugins {
 }
 
 dependencies {
-    api("net.minestom:minestom:2026.10.05-26.2")
+    api(libs.minestom)
     // 与 Minestom 运行时使用的版本相同
-    implementation("it.unimi.dsi:fastutil:8.5.19")
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    implementation(libs.fastutil)
+    testImplementation(libs.minestom.testing)
     // 测试中的配方经过 item-recipe 的真实解码流程得到
     testImplementation(project(":item-recipe"))
     // 测试直接使用 item-recipe 的解码器，解码需要 dfu-codecs 的 RegistryOps，结果类型来自 DataFixerUpper

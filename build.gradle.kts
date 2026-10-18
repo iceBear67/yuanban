@@ -1,15 +1,18 @@
 import de.undercouch.gradle.tasks.download.Download
 import de.undercouch.gradle.tasks.download.Verify
+import org.gradle.api.artifacts.VersionCatalogsExtension
 
 plugins {
     id("java-library")
-    id("io.freefair.lombok") version "9.7.0"
-    id("de.undercouch.download") version "5.7.0"
-    kotlin("jvm") version "2.4.20" apply false
+    alias(libs.plugins.freefair.lombok)
+    alias(libs.plugins.download)
+    alias(libs.plugins.kotlin.jvm) apply false
 }
 
 group = "io.ib67"
 version = property("version")!!
+
+val catalog = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
 allprojects {
     plugins.apply("java-library")
@@ -24,10 +27,6 @@ allprojects {
         maven("https://libraries.minecraft.net") {
             name = "minecraft"
         }
-        // kiwi 只发布在这个仓库，bot:api 的观察记录投递依赖它
-        maven("https://repo.sfclub.cc/snapshots") {
-            name = "kiwi"
-        }
         mavenLocal()
     }
 
@@ -36,12 +35,12 @@ allprojects {
     }
 
     dependencies {
-        testImplementation(platform("org.junit:junit-bom:6.0.0"))
-        testImplementation("org.junit.jupiter:junit-jupiter")
-        testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+        testImplementation(platform(catalog.findLibrary("junit-bom").get()))
+        testImplementation(catalog.findLibrary("junit-jupiter").get())
+        testRuntimeOnly(catalog.findLibrary("junit-platform-launcher").get())
         // 测试使用 Kotlin 编写
-        testImplementation(kotlin("stdlib"))
-        compileOnly("org.jetbrains:annotations:26.1.0")
+        testImplementation(catalog.findLibrary("kotlin-stdlib").get())
+        compileOnly(catalog.findLibrary("annotations").get())
     }
 
     tasks.test {

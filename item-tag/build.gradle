@@ -4,11 +4,11 @@ plugins {
 
 dependencies {
     api(project(":datapack-loader"))
-    api("net.minestom:minestom:2026.10.05-26.2")
-    implementation("com.google.guava:guava:33.6.0-jre")
-    testFixturesApi(platform("org.junit:junit-bom:6.0.0"))
-    testFixturesApi("org.junit.jupiter:junit-jupiter-api")
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    api(libs.minestom)
+    implementation(libs.guava)
+    testFixturesApi(platform(libs.junit.bom))
+    testFixturesApi(libs.junit.jupiter.api)
+    testImplementation(libs.minestom.testing)
 }
 
 tasks.test {

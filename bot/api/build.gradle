@@ -2,6 +2,5 @@ dependencies {
     // BotOptions 的 transport 与 transportResolver；Subscription 使用 PacketDirection
     api(project(":bot:transport"))
     // 公开接口使用 Minestom 的坐标与 Block
-    api("net.minestom:minestom:2026.10.05-26.2")
-    api("io.ib67.kiwi:event:1.2.3-SNAPSHOT")
+    api(libs.minestom)
 }

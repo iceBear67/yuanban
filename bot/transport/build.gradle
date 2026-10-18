@@ -4,12 +4,12 @@ plugins {
 }
 
 dependencies {
-    api("org.geysermc.mcprotocollib:protocol:26.2-20260907.143312-19") {
+    api(libs.mcprotocollib) {
         // 这些 jar 中的类位于 it.unimi.dsi.fastutil 包，与下面的 fastutil 同名
         exclude group: "com.nukkitx.fastutil"
     }
     // MCProtocolLib 的公开类型使用 fastutil（HolderSet.getHolders()、点击窗口数据包的变化槽位）
-    api("it.unimi.dsi:fastutil:8.5.19")
+    api(libs.fastutil)
     // 测试中的物品使用原版的物品编号
     testImplementation(project(":bot:data"))
 }

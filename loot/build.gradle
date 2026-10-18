@@ -3,10 +3,10 @@ plugins {
 }
 
 dependencies {
-    api("net.kyori:adventure-key:5.2.0")
-    api("net.minestom:minestom:2026.10.05-26.2")
+    api(libs.adventure.key)
+    api(libs.minestom)
     api(project(":dfu-codecs"))
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    testImplementation(libs.minestom.testing)
 }
 
 tasks.test {

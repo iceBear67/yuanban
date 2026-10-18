@@ -1,17 +1,17 @@
 dependencies {
     // 玩家由 bot 扮演
     api(project(":bot:runtime"))
-    api("net.minestom:minestom:2026.10.05-26.2")
+    api(libs.minestom)
     // @Story 组合了 JUnit 的 @Test 与 @ExtendWith，StoryExtension 实现 JUnit 的扩展接口
-    api(platform("org.junit:junit-bom:6.0.0"))
-    api("org.junit.jupiter:junit-jupiter-api")
+    api(platform(libs.junit.bom))
+    api(libs.junit.jupiter.api)
     // 期望中的比较使用 Kotest 的 Matcher
-    api("io.kotest:kotest-assertions-core:6.2.5")
-    api("org.jetbrains.kotlin:kotlin-stdlib")
+    api(libs.kotest.assertions.core)
+    api(libs.kotlin.stdlib)
     // 按照 KClass 取得 ServerSetup 的 object 实例或者调用无参构造方法
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation(libs.kotlin.reflect)
     // 运行示例故事，检查扩展给出的测试结论
-    testImplementation("org.junit.platform:junit-platform-testkit")
+    testImplementation(libs.junit.platform.testkit)
 }
 
 tasks.withType(Test).configureEach {

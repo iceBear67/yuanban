@@ -46,14 +46,36 @@ class BufferAndBatchTest {
     }
 
     @Test
-    void chunkBatchAnswerIsTwentyFiveOverMillisecondsPerChunk() {
+    void chunkBatchAnswerUsesTheVanillaWeightedAverage() {
+        var tracker = new ChunkBatchTracker();
+        // 新连接：每区块 2 毫秒的初值，回应 7 毫秒 / 2 毫秒 = 3.5
+        assertEquals(3.5f, tracker.finish(0, 0));
+        tracker.start(0);
+        // 10 毫秒 5 个区块：每区块 2 毫秒，与初值相同，估计值不变
+        assertEquals(3.5f, tracker.finish(10_000_000, 5));
+        tracker.start(100_000_000);
+        // 再一批每区块 8 毫秒：钳制在 2 毫秒的 3 倍，按权重 2 合并
+        assertEquals((float) (7_000_000 / ((2_000_000 * 2 + 6_000_000) / 3.0)), tracker.finish(132_000_000, 4));
+    }
+
+    @Test
+    void emptyChunkBatchKeepsTheEstimate() {
+        var tracker = new ChunkBatchTracker();
+        assertEquals(3.5f, tracker.finish(0, 0));
+        tracker.start(0);
+        // batchSize 为 0 不更新估计值，回应仍为 3.5，而不是 Infinity
+        assertEquals(3.5f, tracker.finish(10_000_000, 0));
+    }
+
+    @Test
+    void aNewConnectionStartsFromTheInitialEstimate() {
         var tracker = new ChunkBatchTracker();
         tracker.start(0);
-        // 10 毫秒 5 个区块：每区块 2 毫秒
-        assertEquals(12.5f, tracker.finish(10_000_000, 5));
-        tracker.start(100_000_000);
-        // 再一批每区块 8 毫秒：平均 5 毫秒
-        assertEquals(5f, tracker.finish(100_000_000 + 32_000_000, 4));
+        // 每区块 20 毫秒：钳制在 2 毫秒的 3 倍，估计值随之改变
+        tracker.finish(100_000_000, 5);
+        tracker.reset(0);
+        // 新连接的估计值回到每区块 2 毫秒
+        assertEquals(3.5f, tracker.finish(0, 0));
     }
 
     @Test

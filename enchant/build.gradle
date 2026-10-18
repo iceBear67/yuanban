@@ -1,11 +1,11 @@
 dependencies {
     api(project(":datapack-loader"))
     api(project(":item-tag"))
-    api("net.minestom:minestom:2026.10.05-26.2")
+    api(libs.minestom)
     // EnchantmentMut、ProviderEntry 的公开字段使用 dfu-codecs 的 HolderSet
     api(project(":dfu-codecs"))
-    implementation("com.google.guava:guava:33.6.0-jre")
-    testImplementation("net.minestom:testing:2026.10.05-26.2")
+    implementation(libs.guava)
+    testImplementation(libs.minestom.testing)
     testImplementation(testFixtures(project(":item-tag")))
 }
 
