@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.observe.builtin;
 
+import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.Bot;
 import io.ib67.yuanban.bot.BotRuntime;
 import io.ib67.yuanban.bot.MoveOptions;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -280,6 +282,9 @@ class BuiltinObserversTest {
             assertEquals(CloseReason.BY_OBSERVER, near.awaitClose(TIMEOUT));
             assertTrue(near.observer().met());
             assertFalse(forward.await(TIMEOUT));
+            // 观察者触发的取消与用户手动取消的取消原因不同
+            assertEquals(ActionCancelledException.BY_OBSERVER,
+                    assertThrows(CompletionException.class, () -> forward.future().join()).getCause().getMessage());
             assertTrue(TestViews.of(bot).player().position().distance(flag) <= 2.5);
 
             // 动作先结束：met 为 false

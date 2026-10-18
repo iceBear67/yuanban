@@ -1,5 +1,7 @@
 package io.ib67.yuanban.bot;
 
+import org.jetbrains.annotations.ApiStatus;
+
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
@@ -31,4 +33,12 @@ public interface Action {
      * 在其它线程调用时在下一轮调度中处理，在调度线程上调用时立即处理。
      */
     void cancel();
+
+    /**
+     * 以指定的原因取消动作，语义与 {@link #cancel()} 相同，{@link ActionCancelledException#getMessage()} 为 reason。
+     * 供内置 observer 标记自己的取消，使用者取消时用 {@link #cancel()}。
+     * 在其它线程调用时在下一轮调度中处理，在调度线程上调用时立即处理。
+     */
+    @ApiStatus.Internal
+    void cancel(String reason);
 }

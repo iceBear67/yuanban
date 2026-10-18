@@ -732,8 +732,8 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
         }
     }
 
-    void cancel(ActionImpl action) {
-        execute(() -> action.requestCancel(ActionCancelledException.BY_USER));
+    void cancel(ActionImpl action, String reason) {
+        execute(() -> action.requestCancel(reason));
     }
 
     private Action movementAction(String name, Function<ActionImpl, MovementAction> factory) {

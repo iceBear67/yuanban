@@ -265,6 +265,8 @@ public final class ProtocolMachine {
             throw new IllegalStateException("a new connection starts in " + bot.status() + ", expected LOGIN");
         }
         nextJoinCause = transfer ? WorldEntryCause.TRANSFER : WorldEntryCause.JOIN;
+        // 原版每个 ClientPacketListener 新建一个 ChunkBatchSizeCalculator，新连接从构造时的估计值开始
+        chunkBatches.reset(System.nanoTime());
         outbox.send(new ClientIntentionPacket(MinecraftCodec.CODEC.getProtocolVersion(), serverAddress, serverPort,
                 transfer ? HandshakeIntent.TRANSFER : HandshakeIntent.LOGIN));
         outbox.send(new ServerboundHelloPacket(bot.username(), offlineUuid(bot.username())));
@@ -1347,6 +1349,10 @@ public final class ProtocolMachine {
     }
 
     private void heldSlot(int slot) {
+        // 原版 handleSetHeldSlot：快捷栏槽位为 0 到 8，范围之外的值忽略
+        if (slot < 0 || slot > 8) {
+            return;
+        }
         var player = state.player();
         var old = player.heldSlot();
         player.heldSlot(slot);

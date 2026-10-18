@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.movement;
 
+import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.MoveOptions;
 import io.ib67.yuanban.bot.MovementMode;
 import io.ib67.yuanban.bot.state.ActionHandle;
@@ -11,10 +12,15 @@ import org.jetbrains.annotations.Nullable;
 /**
  * {@code jumpTo}：以落在目标方块顶面为目标起跳。着地时起跳；起跳前按目标的水平距离选择行走或疾跑
  * （未指定移动方式时，水平距离超过 2 格选择疾跑）；空中保持朝目标方向加速。起跳后再次着地即执行完毕；
- * 起跳的 tick 移动之后仍然着地（起跳没有离开地面）时同样执行完毕。
+ * 起跳的 tick 移动之后仍然着地（起跳没有离开地面）时同样执行完毕；起跳后 {@link #AIR_TIMEOUT_TICKS} 个 tick
+ * 仍未着地（水中、气泡柱、缓降下的长下落）时取消，避免永久占用移动队列。
  */
 public final class JumpToAction extends MovementAction {
     public static final double SPRINT_DISTANCE = 2;
+    /**
+     * 起跳后迟迟不着地时取消的 tick 数：一次跳跃通常不超过 20 tick，这里留出缓降等情况下的余量
+     */
+    public static final int AIR_TIMEOUT_TICKS = 100;
     /**
      * 空中与目标顶面中心的水平距离小于这个值时不再加速
      */
@@ -29,6 +35,10 @@ public final class JumpToAction extends MovementAction {
      */
     private boolean jumpTick;
     private boolean leftGround;
+    /**
+     * 起跳之后经过的 tick 数
+     */
+    private int airTicks;
 
     public JumpToAction(ActionHandle handle, Point target, MoveOptions options) {
         super(handle);
@@ -73,6 +83,10 @@ public final class JumpToAction extends MovementAction {
         }
         if (!onGround) {
             leftGround = true;
+            airTicks++;
+            if (airTicks >= AIR_TIMEOUT_TICKS) {
+                handle.cancelled(ActionCancelledException.AIR_TIMEOUT);
+            }
         } else if (leftGround) {
             handle.succeed();
         }

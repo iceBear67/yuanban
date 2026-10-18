@@ -24,6 +24,7 @@ import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.MoveToHotbarAction;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundAddEntityPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHeldSlotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerClosePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetSlotPacket;
@@ -307,6 +308,27 @@ class InventoryBotTest {
             assertEquals(3, TestViews.of(bot).player().heldSlot());
             changes.close();
             assertEquals(List.of(new HeldSlotChanged(0, 3)), changes.observer().items());
+        }
+    }
+
+    @Test
+    void setHeldSlotIgnoresSlotsOutsideTheHotbar() {
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "holder", new Pos(0.5, 0, 0.5));
+            var changes = bot.observe(Observers.observations(HeldSlotChanged.class));
+            // 原版 handleSetHeldSlot 用 Inventory.isHotbarSlot 判断 0 到 8，范围之外的值忽略：
+            // 9 会读到副手槽位，10 以上会越界
+            for (var invalid : List.of(9, 10, 45, -1)) {
+                peer.push(new ClientboundSetHeldSlotPacket(invalid));
+            }
+            peer.push(new ClientboundSetHeldSlotPacket(8));
+            peer.barrier();
+            assertEquals(8, TestViews.of(bot).player().heldSlot());
+            changes.close();
+            assertEquals(List.of(new HeldSlotChanged(0, 8)), changes.observer().items());
+            // bot 没有因越界的槽位结束，之后仍然可以正常交互
+            assertTrue(bot.selectHotbar(0).await(TestServer.TIMEOUT));
         }
     }
 }

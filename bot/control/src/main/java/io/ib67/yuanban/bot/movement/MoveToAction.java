@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /**
  * {@code moveTo}：在寻路线程上寻路，然后沿路径移动。玩家着地，与目标的水平距离进入 closeDistance，并且脚部与目标的站立高度
@@ -83,7 +84,15 @@ public final class MoveToAction extends MovementAction {
             if (!planning.isDone()) {
                 return MoveIntent.NONE;
             }
-            var nodes = planning.join();
+            List<PNode> nodes;
+            try {
+                nodes = planning.join();
+            } catch (CompletionException e) {
+                // 寻路计算失败只让这个动作以取消结束，与其它动作失败的口径一致
+                planning = null;
+                handle.cancelled(ActionCancelledException.PATH_FAILED);
+                return MoveIntent.NONE;
+            }
             planning = null;
             // 寻路期间服务端传送了玩家：这条路径从旧位置出发，不使用它，下面重新寻路
             if (!repathRequested && !usePath(nodes)) {

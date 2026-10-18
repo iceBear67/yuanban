@@ -13,9 +13,21 @@ public final class ActionCancelledException extends RuntimeException {
      */
     public static final String NO_PATH = "找不到路径";
     /**
+     * 寻路计算抛出异常
+     */
+    public static final String PATH_FAILED = "寻路计算失败";
+    /**
+     * 观察者因满足条件（距离、与动作绑定的其它条件）触发了这个动作的取消
+     */
+    public static final String BY_OBSERVER = "被观察者取消";
+    /**
      * 移动连续被阻挡
      */
     public static final String BLOCKED = "移动被阻挡";
+    /**
+     * {@code jumpTo} 起跳后长时间没有着地
+     */
+    public static final String AIR_TIMEOUT = "起跳后长时间没有着地";
     /**
      * 目标实体不在模型中
      */

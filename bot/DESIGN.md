@@ -813,10 +813,15 @@ public interface Action {
 
     /// 取消动作；对已结束的动作不做任何事
     void cancel();
+
+    /// 以指定的原因取消动作，语义与 cancel() 相同。供内置 observer 标记自己的取消
+    @ApiStatus.Internal
+    void cancel(String reason);
 }
 
 public final class ActionCancelledException extends RuntimeException {
-    /// 下表中各取消原因的常量：BY_USER、NO_PATH、BLOCKED、NO_ENTITY、CHUNK_NOT_LOADED、OUT_OF_RANGE、WORLD_REBUILT、PLAYER_DIED
+    /// 下表中各取消原因的常量：BY_USER、BY_OBSERVER、PATH_FAILED、AIR_TIMEOUT、NO_PATH、BLOCKED、NO_ENTITY、
+    /// CHUNK_NOT_LOADED、OUT_OF_RANGE、WORLD_REBUILT、PLAYER_DIED
     public ActionCancelledException(String reason) { super(reason); }
 }
 ```
@@ -827,6 +832,9 @@ public final class ActionCancelledException extends RuntimeException {
 |---|---|---|
 | 执行完毕：bot 把这个动作的执行过程走完了，每个动作的执行过程写在 8.4–8.6 中 | 正常完成 | 返回 true |
 | 用户调用 `cancel()`（`BY_USER`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| 内置 observer（`distanceWithIn`、`distanceOutOf`）因条件满足取消动作（`BY_OBSERVER`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| 寻路计算抛出异常（8.4，`PATH_FAILED`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| `jumpTo` 起跳后在空中超过 100 tick 仍未着地（8.4，`AIR_TIMEOUT`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 寻路找不到到达目标的路径（8.4，`NO_PATH`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（8.4，`BLOCKED`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（8.4、8.5，`NO_ENTITY`） | 以 `ActionCancelledException` 完成 | 返回 false |
@@ -910,7 +918,7 @@ public final class ActionCancelledException extends RuntimeException {
    - 路径上的方块被 Block Update 改变；
    - 服务端传送了玩家。
 
-   寻路期间（从开始寻路到取回结果的那个 tick）发生的情况同样处理：寻路使用开始时的世界快照与玩家位置，所以这期间的传送让这次的结果作废，取回之后不使用它，直接重新寻路；这期间被改变的方块先记下来，取回结果之后其中有方块在路径上时重新寻路。
+   寻路期间（从开始寻路到取回结果的那个 tick）发生的情况同样处理：寻路使用开始时的世界快照与玩家位置，所以这期间的传送让这次的结果作废，取回之后不使用它，直接重新寻路；这期间被改变的方块先记下来，取回结果之后其中有方块在路径上时重新寻路。寻路计算抛出异常时（例如世界快照中的方块状态编号超出 Minestom 的注册表），这个动作以 `PATH_FAILED` 取消，bot 继续。
 5. **执行完毕**：玩家着地，与目标的水平距离进入 `closeDistance`，并且脚部与目标的站立高度相差小于 1（与到达 `WALK` 节点的高度条件相同）。目标的站立高度与路径终点的计算相同：按 Minestom `PathGenerator.generate` 的方式，用 `GroundNodeGenerator.gravitySnap`（最多下落 100 格）把目标的高度换成整数的节点高度，找不到时保持原来的高度，再按第 3 步计算站立高度；每次寻路时用这次的世界快照重新计算。所以站在半砖上时脚部高度 0.5 与目标的站立高度相同，目标在正上方或者正下方的另一层时不算到达。
 
 **`moveForward(double blocks, MoveOptions)`**：
@@ -923,7 +931,7 @@ public final class ActionCancelledException extends RuntimeException {
 
 - 目标为一个方块位置，执行过程以「落在它的顶面」为目标计算起跳。
 - 着地时起跳；起跳前按目标的水平距离选择行走或疾跑（`MovementMode` 未指定时，水平距离超过 2 格选择疾跑）；空中保持朝目标顶面中心加速，水平距离小于 0.1 时不再加速。
-- 起跳后再次着地即执行完毕。起跳的 tick 移动之后仍然着地时（起跳没有离开地面，例如跳跃力为 0，或者头顶有方块）同样执行完毕。是否落在目标方块上由用户通过 observer 或查询判断。
+- 起跳后再次着地即执行完毕。起跳的 tick 移动之后仍然着地时（起跳没有离开地面，例如跳跃力为 0，或者头顶有方块）同样执行完毕。起跳后在空中超过 100 tick 仍未着地时（水中、气泡柱、缓降下的长下落）以 `AIR_TIMEOUT` 取消，避免永久占用移动队列。是否落在目标方块上由用户通过 observer 或查询判断。
 
 **`rotate(float yaw, float pitch)`**、**`lookAt(Point target)`**、**`lookAt(int entityId)`**：
 
@@ -1233,7 +1241,7 @@ wiki 记录了服务端对交互（4 格）与挖掘（6 格）的距离检查�
 
 - `Bot.inspect(Function<StateReader, T>)` 在调度线程上执行函数，多项读取在同一时刻完成。`StateReader` 是只读接口，函数返回值不应包含它给出的可变对象。
 - `StateReader` 的方法返回不可变快照：
-  - `PlayerSnapshot`（位置、朝向、速度、生命、饥饿、游戏模式为 MCProtocolLib 的 `GameMode`、属性为 `Map<AttributeType, Double>`、效果为 `Map<Effect, ActiveEffect>`、物品冷却为 `Map<Key, Integer>`、元数据为 `Map<Integer, EntityMetadata<?, ?>>`，命名的元数据条目用 `meta(EntityMeta<T>)` 读取）
+  - `PlayerSnapshot`（位置、朝向、速度、眼睛高度（站立 1.62、潜行 1.27，乘以 `minecraft:scale`）、生命、饥饿、游戏模式为 MCProtocolLib 的 `GameMode`、属性为 `Map<AttributeType, Double>`、效果为 `Map<Effect, ActiveEffect>`、物品冷却为 `Map<Key, Integer>`、元数据为 `Map<Integer, EntityMetadata<?, ?>>`，命名的元数据条目用 `meta(EntityMeta<T>)` 读取）
   - `WorldStateSnapshot`（World Age、难度为 MCProtocolLib 的 `Difficulty`、默认出生点、服务端视距与模拟距离、tick 状态、世界边框、雨量与雷暴强度）；不在任何世界中时 `worldState()` 抛出 `IllegalStateException`
   - 生物群系：`biome(x, y, z)` 或 `biome(Point)` 返回 `worldgen/biome` 注册表中的名称（`Key`），受待办 T1 影响
   - 连接的信息：`serverBrand()`（没有收到时为 null）、`serverLinks()`（MCProtocolLib 的 `ServerLink`）、`featureFlags()`（`List<Key>`），以及 `clocks()`（时钟名称到含小数部分的 tick 数）

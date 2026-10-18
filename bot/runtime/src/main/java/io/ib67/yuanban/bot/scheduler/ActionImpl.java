@@ -50,10 +50,15 @@ public final class ActionImpl implements Action, ActionHandle {
 
     @Override
     public void cancel() {
+        cancel(ActionCancelledException.BY_USER);
+    }
+
+    @Override
+    public void cancel(String reason) {
         if (future.isDone()) {
             return;
         }
-        bot.cancel(this);
+        bot.cancel(this, reason);
     }
 
     public BotInstance bot() {

@@ -2,8 +2,6 @@ package io.ib67.yuanban.story.vanilla
 
 import io.ib67.yuanban.bot.Action
 import io.ib67.yuanban.bot.BotTimeoutException
-import io.ib67.yuanban.bot.player.AttributeMap
-import io.ib67.yuanban.bot.player.LocalPlayer
 import io.ib67.yuanban.bot.view.StateReader
 import io.ib67.yuanban.story.EntityActor
 import io.ib67.yuanban.story.ExpectItem
@@ -63,16 +61,15 @@ internal fun PlayerActor.requireInInventory(material: Material) {
     }
 }
 
-/** 原版客户端的眼睛位置与交互距离：站立时眼睛高度为 1.62F 乘以 minecraft:scale，与原版相同以 float 计算 */
+/** 原版客户端的眼睛位置与交互距离：眼睛位置取快照中按 {@code minecraft:scale} 计算的高度 */
 internal class Reach(val eye: Vec, val block: Double, val entity: Double)
 
 internal fun PlayerActor.reach(): Reach = bot.inspect { state -> reachOf(state) }
 
 private fun reachOf(state: StateReader): Reach {
     val player = state.player()
-    fun attribute(type: AttributeType.Builtin) = player.attributes()[type] ?: AttributeMap.PLAYER_BASE.applyAsDouble(type)
-    val eyeHeight = LocalPlayer.STANDING_EYE_HEIGHT * attribute(AttributeType.Builtin.SCALE).toFloat()
-    val eye = player.position().asVec().add(0.0, eyeHeight.toDouble(), 0.0)
+    fun attribute(type: AttributeType.Builtin) = player.attributes()[type] ?: type.def
+    val eye = player.position().asVec().add(0.0, player.eyeHeight(), 0.0)
     return Reach(
         eye,
         attribute(AttributeType.Builtin.BLOCK_INTERACTION_RANGE),

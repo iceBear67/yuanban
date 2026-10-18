@@ -43,12 +43,13 @@ public final class RidingSeat {
     static final Set<EntityType> CAMELS = Set.of(EntityType.CAMEL, EntityType.CAMEL_HUSK);
     private static final Set<EntityType> CUBE_MOBS = Set.of(EntityType.SLIME, EntityType.MAGMA_CUBE);
     /**
-     * 本库识别幼年状态的载具类型（原版中都是 {@code AgeableMob}）；其余实体按成年处理
+     * 本库识别幼年状态的载具类型（原版中都是 {@code AgeableMob}）；其余实体按成年处理。
+     * 史莱姆与岩浆怪虽然在原版中继承 {@code AgeableMob}，但 {@code canBeABaby} 为 false，幼年标记恒为假，不列入
      */
     private static final Set<EntityType> AGEABLE = Set.of(EntityType.HORSE, EntityType.DONKEY, EntityType.MULE,
             EntityType.SKELETON_HORSE, EntityType.ZOMBIE_HORSE, EntityType.LLAMA, EntityType.TRADER_LLAMA,
             EntityType.CAMEL, EntityType.CAMEL_HUSK, EntityType.PIG, EntityType.STRIDER, EntityType.CHICKEN,
-            EntityType.HAPPY_GHAST, EntityType.NAUTILUS, EntityType.ZOMBIE_NAUTILUS, EntityType.SLIME, EntityType.MAGMA_CUBE);
+            EntityType.HAPPY_GHAST, EntityType.NAUTILUS, EntityType.ZOMBIE_NAUTILUS);
     static final Set<EntityType> BOATS = Arrays.stream(EntityType.values())
             .filter(type -> name(type).endsWith("_boat") || name(type).endsWith("_raft"))
             .collect(Collectors.toUnmodifiableSet());
@@ -90,7 +91,7 @@ public final class RidingSeat {
             // 原版 AbstractCubeMob：尺寸按大小缩放，挂点在顶面向下 size / 64 处，不随偏航角旋转
             int size = meta(vehicle, EntityMetaIndex.CUBE_SIZE);
             var height = (float) EntityTypeData.height(type) * size * scale;
-            return new Vec(0.0, height - 0.015625 * size * (scale * ageScale(type, baby)), 0.0);
+            return new Vec(0.0, height - 0.015625 * size * scale, 0.0);
         }
         if (CAMELS.contains(type)) {
             return camelPoint(vehicle, Math.max(index, 0), passengers.size(), scale, baby, yaw, gameTime);

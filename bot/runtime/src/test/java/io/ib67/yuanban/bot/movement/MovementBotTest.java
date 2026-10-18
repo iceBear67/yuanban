@@ -21,6 +21,8 @@ import io.ib67.yuanban.bot.observe.builtin.Observers;
 import io.ib67.yuanban.bot.state.Vectors;
 import io.ib67.yuanban.bot.scheduler.BotInstance;
 import io.ib67.yuanban.bot.view.EntityMetaIndex;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.pathfinding.PNode;
@@ -56,7 +58,13 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.play
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerRotationPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkSection;
+import org.geysermc.mcprotocollib.protocol.data.game.chunk.DataPalette;
+import org.geysermc.mcprotocollib.protocol.data.game.level.LightUpdateData;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityInfo;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientTickEndPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket;
@@ -72,6 +80,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -673,6 +682,64 @@ class MovementBotTest {
             assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().anyMatch(ServerboundPlayerInputPacket::isJump));
             assertTrue(peer.sentSince(mark, ServerboundPlayerInputPacket.class).stream().noneMatch(ServerboundPlayerInputPacket::isSprint));
         });
+    }
+
+    @Test
+    void jumpToIsCancelledWhenTheJumpNeverLands() {
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            bot.await(state -> state.player().onGround(), TIMEOUT);
+            // 飘浮让起跳之后一直不落地
+            peer.push(new ClientboundUpdateMobEffectPacket(TestServer.ENTITY_ID, Effect.LEVITATION, 20, 400,
+                    false, false, false, false));
+            peer.barrier();
+            var action = bot.jumpTo(new Vec(2, -1, 0));
+            assertFalse(action.await(TIMEOUT));
+            assertEquals(ActionCancelledException.AIR_TIMEOUT,
+                    assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage());
+            // 取消之后移动队列可以继续执行后面的动作
+            peer.push(new ClientboundRemoveMobEffectPacket(TestServer.ENTITY_ID, Effect.LEVITATION));
+            peer.barrier();
+            assertTrue(bot.lookAt(new Vec(0.5, 0.5, 0.5)).await(TIMEOUT));
+        });
+    }
+
+    @Test
+    void moveToIsCancelledWhenPathfindingThrows() {
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            // 相邻区块的区段带有超出 Minestom 注册表范围的状态编号：寻路线程读取这个区段时抛出异常
+            peer.push(invalidSectionChunk(1, 0));
+            peer.barrier();
+            var action = bot.moveTo(new Vec(34.5, 0, 0.5));
+            assertFalse(action.await(TIMEOUT));
+            assertEquals(ActionCancelledException.PATH_FAILED,
+                    assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage());
+            // 寻路失败只结束这个动作，bot 继续
+            assertTrue(bot.lookAt(new Vec(0.5, 0.5, 0.5)).await(TIMEOUT));
+        });
+    }
+
+    /**
+     * 区段序号 3（y 为 -16 到 -1）的每个方块的状态编号都超出 Minestom 的注册表范围，其余区段为空
+     */
+    private static ClientboundLevelChunkWithLightPacket invalidSectionChunk(int chunkX, int chunkZ) {
+        var buffer = Unpooled.buffer();
+        try {
+            var biomeCount = TestServer.biomeCount();
+            var biomes = DataPalette.createForBiome(0, biomeCount);
+            for (int section = 0; section < 384 / 16; section++) {
+                var invalid = section == 3;
+                var blocks = DataPalette.createForBlockState(
+                        invalid ? Block.statesCount() : Block.AIR.stateId(), Block.statesCount());
+                MinecraftTypes.writeChunkSection(buffer, new ChunkSection(invalid ? 4096 : 0, 0, blocks, biomes));
+            }
+            var data = ByteBufUtil.getBytes(buffer);
+            var light = new LightUpdateData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of());
+            return new ClientboundLevelChunkWithLightPacket(chunkX, chunkZ, data, Map.of(), new BlockEntityInfo[0], light);
+        } finally {
+            buffer.release();
+        }
     }
 
     @Test
