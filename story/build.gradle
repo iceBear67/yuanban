@@ -12,6 +12,7 @@ dependencies {
     implementation(libs.kotlin.reflect)
     // 运行示例故事，检查扩展给出的测试结论
     testImplementation(libs.junit.platform.testkit)
+    implementation(libs.junit.platform.launcher)
 }
 
 tasks.withType(Test).configureEach {
@@ -21,4 +22,15 @@ tasks.withType(Test).configureEach {
     }
     // JoinStories 中 Transfer 到测试服务端：服务端属性在共享 JVM 中只读，只能在启动 JVM 时设置
     systemProperty("minestom.accept-transfers", "true")
+}
+
+tasks.register("storyServer", JavaExec) {
+    description = "启动调试服务端，在游戏中运行 story 故事"
+    group = "verification"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "io.ib67.yuanban.story.debug.StoryServer"
+    standardInput = System.in
+    systemProperty("minestom.properties.mutable", "true")
+    dependsOn(":extractVanillaServer")
+    systemProperty("yuanban.vanilla-server", rootProject.ext.vanillaServerJar)
 }

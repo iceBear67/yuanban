@@ -61,7 +61,7 @@ final class ObserverHandleImpl<O extends Observer> implements ObserverHandle<O> 
     @Override
     public CloseReason awaitClose(Duration timeout) {
         bot.checkNotSchedulerThread("ObserverHandle.awaitClose");
-        var reason = Waits.await(entry.closed(), timeout, bot.pump(), "observer " + observer + " to close");
+        var reason = Waits.await(entry.closed(), timeout, bot.pump(), bot::activeNanos, "observer " + observer + " to close");
         if (reason == CloseReason.FAILED) {
             throw new ObserverFailureException(Objects.requireNonNull(entry.failure()));
         }

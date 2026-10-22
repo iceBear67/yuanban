@@ -36,7 +36,7 @@ public final class ActionImpl implements Action, ActionHandle {
     public boolean await(Duration timeout) {
         bot.checkNotSchedulerThread("Action.await");
         try {
-            Waits.await(future, timeout, bot.pump(), "action " + name);
+            Waits.await(future, timeout, bot.pump(), bot::activeNanos, "action " + name);
             return true;
         } catch (ActionCancelledException e) {
             return false;

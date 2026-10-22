@@ -49,6 +49,28 @@ public final class BotRuntime implements AutoCloseable {
         scheduler.suspended(false);
     }
 
+    /** 暂停全部 bot 的 tick。 */
+    public void suspendTicking() {
+        scheduler.suspendTicking();
+    }
+
+    /** 恢复全部 bot 的 tick。 */
+    public void resumeTicking() {
+        scheduler.resumeTicking();
+    }
+
+    /**
+     * 在暂停期间让每个 bot 执行指定次数的 tick。
+     *
+     * @return 按 bot 创建顺序排列的步进动作
+     */
+    public List<Action> stepTicks(int ticks) {
+        if (ticks <= 0) {
+            throw new IllegalArgumentException("ticks must be positive");
+        }
+        return scheduler.stepTicks(ticks);
+    }
+
     /**
      * 断开全部 bot（未结束的动作以 {@link BotDisconnectedException} 结束，observer 以 DISCONNECTED 关闭），
      * 等调度线程退出后返回

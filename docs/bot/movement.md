@@ -204,6 +204,8 @@ Minestom 的 `PPath.getState()` 只在包内可见，所以按节点列表判断
 
 `Bot.suspendMovement()`/`resumeMovement()` 控制单个 bot，`BotRuntime.suspendMovement()`/`resumeMovement()` 控制全部 bot；任意一级处于暂停状态，该 bot 的移动就暂停。两者都只设置标记，在下一轮调度中生效；实际状态改变时产生 `MovementSuspensionChanged`，`StateReader.movementSuspended()` 为实际状态。
 
+暂停移动与暂停 tick 相互独立。暂停 tick 时整个 `BotTicker` 不执行，暂停移动时仍会执行 tick，手部交互与一次性请求照常推进。
+
 **暂停期间停止**：
 
 - 移动计算整个不执行（包括插值），重力不生效，位置保持不变；骑乘时位置与速度不变，也不插值。

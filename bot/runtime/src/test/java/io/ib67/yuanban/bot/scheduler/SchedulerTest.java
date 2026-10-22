@@ -132,6 +132,42 @@ class SchedulerTest {
     }
 
     @Test
+    void suspendedRuntimeStepsImmediately() {
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "stepped", new Pos(0.5, 0, 0.5));
+            runtime.suspendTicking();
+            var suspended = bot.observe(Observers.condition(StateReader::tickingSuspended));
+            assertEquals(CloseReason.BY_OBSERVER, suspended.awaitClose(TIMEOUT));
+            var before = TestViews.of(bot).ticks();
+
+            var action = runtime.stepTicks(1).get(0);
+            assertTrue(action.await(TIMEOUT));
+            assertEquals(before + 1, TestViews.of(bot).ticks());
+        }
+    }
+
+    @Test
+    void cancellingSuspendedStepStopsFurtherTicks() throws Exception {
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "cancelstep", new Pos(0.5, 0, 0.5));
+            runtime.suspendTicking();
+            var suspended = bot.observe(Observers.condition(StateReader::tickingSuspended));
+            assertEquals(CloseReason.BY_OBSERVER, suspended.awaitClose(TIMEOUT));
+            var before = TestViews.of(bot).ticks();
+
+            var action = runtime.stepTicks(100).get(0);
+            action.cancel();
+            assertFalse(action.await(TIMEOUT));
+            var afterCancel = TestViews.of(bot).ticks();
+            assertTrue(afterCancel <= before + 1);
+            Thread.sleep(100);
+            assertEquals(afterCancel, TestViews.of(bot).ticks());
+        }
+    }
+
+    @Test
     void waitingThreadsShareThePump() throws Exception {
         var active = new AtomicInteger();
         var overlapped = new AtomicBoolean();

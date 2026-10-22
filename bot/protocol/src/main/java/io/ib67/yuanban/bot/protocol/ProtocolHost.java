@@ -21,6 +21,11 @@ public interface ProtocolHost {
 
     BotStatus status();
 
+    /** 活跃时间，不计入 BotRuntime 的 tick 暂停。 */
+    default long activeNanos() {
+        return System.nanoTime();
+    }
+
     /**
      * 协议状态机改变连接状态：Login Finished、Finish Configuration、Start Configuration
      *

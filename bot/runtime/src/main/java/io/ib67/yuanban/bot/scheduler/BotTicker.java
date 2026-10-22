@@ -35,7 +35,7 @@ final class BotTicker {
                 || player.gameMode() == GameMode.SPECTATOR
                 || player.dead();
         // 原版 ClientPacketListener.tick 中的 tickClientLoad：自 Login (play) 或 Respawn 起超过 30 秒时，条件不满足也发送
-        if (state.loadTracker().tick(ready, System.nanoTime())) {
+        if (state.loadTracker().tick(ready, bot.activeNanos())) {
             state.outbox().send(ServerboundPlayerLoadedPacket.INSTANCE);
             bot.markLoaded();
         }

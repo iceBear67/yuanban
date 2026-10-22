@@ -153,6 +153,10 @@ int picked = counter.read(PickupCounter::picked);
 
 暂停只停止速度与位置的计算（包括重力），`moveTo`、`moveForward`、`jumpTo` 不再推进。暂停期间在移动队列中轮到的 `moveTo`、`moveForward`、`jumpTo` 不开始（不寻路，不改变 `rotate`、`lookAt` 设置的朝向），恢复之后才开始，排在它们后面的移动动作随之等待。朝向、手部交互、一次性请求与协议应答照常进行。原版服务端会在玩家悬空 80 tick 之后踢出玩家（允许飞行的情况除外），Minestom 没有这项检查。
 
+### 暂停 tick 与步进
+
+`runtime.suspendTicking()` 暂停全部 bot 的 tick，`runtime.resumeTicking()` 恢复。暂停时入站数据包、自动应答与查询继续处理，一次性请求留在队列中。`runtime.stepTicks(n)` 返回按创建顺序排列的动作，让每个 bot 执行 n 次 tick；暂停与步进的实际状态可以通过 `StateReader.tickingSuspended()` 和 `TickingSuspensionChanged` 读取。
+
 ### 线程约定
 
 - 会阻塞的方法（`Action.await`、`ObservedAction.await`、`Bot.await`、`ObserverHandle.awaitClose`）在调度线程上调用时抛出 `IllegalStateException`，所以不能在 observer 的回调中调用。

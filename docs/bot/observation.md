@@ -36,6 +36,7 @@
 | `status()` | `BotStatus` |
 | `loaded()` | 自上次 Login (play) 或 Respawn 以来是否已经发送 Player Loaded |
 | `movementSuspended()` | 实际的暂停状态 |
+| `tickingSuspended()` | 实际的 tick 暂停状态 |
 | `ticks()` | bot 已经执行的 tick 数 |
 | `serverBrand()` | 最近一次收到的服务端 brand；没有收到时为 null |
 | `serverLinks()` | 最近一次收到的 Server Links，`List<ServerLink>`；没有收到时为空列表 |
@@ -104,6 +105,7 @@
 | | `ScoreChanged(String objective, String holder, Integer score)` | Update Score、Reset Score；移除时 `score` 为 null |
 | bot 自身 | `ActionCompleted(Action action, Throwable error)` | 动作结束；执行完毕时 `error` 为 null，其余为 `future()` 完成时的异常 |
 | | `MovementSuspensionChanged(boolean suspended)` | 实际的暂停状态改变 |
+| | `TickingSuspensionChanged(boolean suspended)` | 实际的 tick 暂停状态改变 |
 | | `BotTicked(long tick)` | 每次 tick 结束，`tick` 从 1 开始 |
 | | `StateUpdated()` | 一轮调度中该 bot 的状态有变化时一条，在这一轮的最后：应用了入站数据包、执行了一次性请求、执行了 tick，或者实际的暂停状态改变；注册 observer 与查询不算变化 |
 

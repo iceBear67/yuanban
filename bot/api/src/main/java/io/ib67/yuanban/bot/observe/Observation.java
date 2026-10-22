@@ -268,6 +268,12 @@ public sealed interface Observation {
     }
 
     /**
+     * bot 实际的 tick 暂停状态改变。
+     */
+    record TickingSuspensionChanged(boolean suspended) implements Observation {
+    }
+
+    /**
      * 一次 tick 结束。
      *
      * @param tick bot 已经执行的 tick 数，从 1 开始

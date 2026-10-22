@@ -1,11 +1,13 @@
 package io.ib67.yuanban.bot.scheduler;
 
 import io.ib67.yuanban.bot.BotOptions;
+import io.ib67.yuanban.bot.Action;
 import io.ib67.yuanban.bot.RuntimeOptions;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
@@ -19,10 +21,15 @@ public final class Scheduler {
     private final RuntimeOptions options;
     private final @Nullable WaitPump pump;
     private final CopyOnWriteArrayList<BotInstance> bots = new CopyOnWriteArrayList<>();
+    private final ConcurrentLinkedQueue<Runnable> runtimeRequests = new ConcurrentLinkedQueue<>();
+    private final Object activeClockLock = new Object();
     private final Thread thread;
     private volatile boolean closing;
     private volatile boolean running = true;
     private volatile boolean suspended;
+    private volatile boolean tickingSuspended;
+    private volatile long pausedSince;
+    private volatile long pausedNanos;
 
     public Scheduler(RuntimeOptions options) {
         this.options = options;
@@ -93,6 +100,65 @@ public final class Scheduler {
         wakeup();
     }
 
+    public void suspendTicking() {
+        request(() -> setTickingSuspended(true));
+    }
+
+    public void resumeTicking() {
+        request(() -> setTickingSuspended(false));
+    }
+
+    public List<Action> stepTicks(int ticks) {
+        if (closing) {
+            throw new IllegalStateException("the runtime is closed");
+        }
+        var actions = bots().stream().map(bot -> bot.registerStep(ticks)).map(action -> (Action) action).toList();
+        request(() -> actions.forEach(action -> ((BotInstance) actionBot(action)).activateStep(action, ticks)));
+        return actions;
+    }
+
+    private static BotInstance actionBot(Action action) {
+        return ((io.ib67.yuanban.bot.scheduler.ActionImpl) action).bot();
+    }
+
+    private void request(Runnable task) {
+        if (isSchedulerThread()) {
+            task.run();
+            return;
+        }
+        runtimeRequests.add(task);
+        wakeup();
+    }
+
+    private void setTickingSuspended(boolean value) {
+        synchronized (activeClockLock) {
+            if (tickingSuspended == value) return;
+            var now = System.nanoTime();
+            if (value) {
+                pausedSince = now;
+            } else {
+                pausedNanos += now - pausedSince;
+                pausedSince = 0;
+            }
+            tickingSuspended = value;
+        }
+        for (var bot : bots) bot.runtimeSuspensionChanged();
+    }
+
+    /** 故事时钟使用的活跃时间。 */
+    public long activeNanos() {
+        synchronized (activeClockLock) {
+            var now = System.nanoTime();
+            var paused = pausedNanos;
+            if (tickingSuspended) paused += now - pausedSince;
+            return now - paused;
+        }
+    }
+
+    boolean tickingSuspended() {
+        return tickingSuspended;
+    }
+
     /**
      * 断开全部 bot，等调度线程处理完最后一轮后退出
      *
@@ -122,6 +188,7 @@ public final class Scheduler {
         try {
             while (true) {
                 var stopping = closing;
+                runRuntimeRequests();
                 var next = Long.MAX_VALUE;
                 for (var bot : bots) {
                     next = Math.min(next, bot.round(System.nanoTime()));
@@ -145,5 +212,10 @@ public final class Scheduler {
                 bot.stopped();
             }
         }
+    }
+
+    private void runRuntimeRequests() {
+        Runnable request;
+        while ((request = runtimeRequests.poll()) != null) request.run();
     }
 }

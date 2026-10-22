@@ -32,6 +32,7 @@ import io.ib67.yuanban.bot.observe.CloseReason;
 import io.ib67.yuanban.bot.observe.Observation.ActionCompleted;
 import io.ib67.yuanban.bot.observe.Observation.HeldSlotChanged;
 import io.ib67.yuanban.bot.observe.Observation.MovementSuspensionChanged;
+import io.ib67.yuanban.bot.observe.Observation.TickingSuspensionChanged;
 import io.ib67.yuanban.bot.observe.Observation.PlayerLoaded;
 import io.ib67.yuanban.bot.observe.Observation.StateUpdated;
 import io.ib67.yuanban.bot.observe.Observer;
@@ -116,6 +117,7 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
     private final Set<ActionImpl> unfinished = ConcurrentHashMap.newKeySet();
     private final List<ActionImpl> joinedWaiters = new ArrayList<>();
     private final List<ActionImpl> loadedWaiters = new ArrayList<>();
+    private final List<Step> steps = new ArrayList<>();
     /**
      * 在调度线程上调用 joined()、loaded() 时已经发生过：在下一轮调度中执行完毕
      */
@@ -137,6 +139,7 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
     private int generation;
     private long nextTickNanos;
     private boolean suspended;
+    private boolean tickingSuspended;
     private boolean dirty;
 
     BotInstance(Scheduler scheduler, BotOptions options) {
@@ -185,6 +188,42 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
 
     boolean movementSuspended() {
         return suspended;
+    }
+
+    boolean tickingSuspended() {
+        return tickingSuspended;
+    }
+
+    @Override
+    public long activeNanos() {
+        return scheduler.activeNanos();
+    }
+
+    ActionImpl registerStep(int ticks) {
+        return newAction("stepTicks(" + ticks + ")");
+    }
+
+    void activateStep(Action action, int ticks) {
+        var stepAction = (ActionImpl) action;
+        if (stepAction.isDone()) {
+            return;
+        }
+        if (ended()) {
+            stepAction.terminate(endException());
+            return;
+        }
+        var step = new Step(stepAction, ticks);
+        steps.add(step);
+        stepAction.canceller(reason -> {
+            if (steps.remove(step)) {
+                stepAction.cancelled(reason);
+            }
+        });
+        scheduler.wakeup();
+    }
+
+    void runtimeSuspensionChanged() {
+        scheduler.wakeup();
     }
 
     @Override
@@ -361,14 +400,16 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
             runAll(requests);
             dispatcher.flush();
             if (!ended()) {
-                updateSuspension();
+                updateSuspension(now);
                 checkReadTimeout(now);
             }
-            if (!ended() && status == BotStatus.PLAY && state.loadTracker().loaded()) {
+            var tickDue = !ended() && tickDue(now);
+            if (!ended() && status == BotStatus.PLAY && state.loadTracker().loaded() && (!tickingSuspended || tickDue)) {
                 runOneShots();
             }
-            if (!ended() && tickDue(now)) {
+            if (tickDue) {
                 BotTicker.tick(this);
+                completeSteps();
                 dirty = true;
             }
             if (!ended()) {
@@ -470,13 +511,23 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
      * 任意一级处于暂停状态，该 bot 的移动就暂停；实际状态改变时产生 MovementSuspensionChanged，
      * 它是 {@link StateReader#movementSuspended()} 读到的状态，所以本轮同样产生 StateUpdated
      */
-    private void updateSuspension() {
-        var now = suspendRequested || scheduler.suspended();
-        if (now != suspended) {
-            suspended = now;
+    private void updateSuspension(long now) {
+        var movement = suspendRequested || scheduler.suspended();
+        if (movement != suspended) {
+            suspended = movement;
             dirty = true;
             if (dispatcher.wants(MovementSuspensionChanged.class)) {
-                dispatcher.emit(new MovementSuspensionChanged(now));
+                dispatcher.emit(new MovementSuspensionChanged(movement));
+            }
+            dispatcher.flush();
+        }
+        var ticking = scheduler.tickingSuspended();
+        if (ticking != tickingSuspended) {
+            tickingSuspended = ticking;
+            nextTickNanos = ticking ? 0 : now + tickPeriod();
+            dirty = true;
+            if (dispatcher.wants(TickingSuspensionChanged.class)) {
+                dispatcher.emit(new TickingSuspensionChanged(ticking));
             }
             dispatcher.flush();
         }
@@ -521,6 +572,11 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
             throw new IllegalStateException("invalid tick rate " + rate);
         }
         var period = (long) (1_000_000_000L / rate);
+        if (tickingSuspended && !steps.isEmpty()) {
+            nextTickNanos = now;
+            return true;
+        }
+        if (tickingSuspended) return false;
         if (nextTickNanos == 0) {
             nextTickNanos = now + period;
             return false;
@@ -533,6 +589,25 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
         }
         nextTickNanos += period;
         return true;
+    }
+
+    private long tickPeriod() {
+        var world = state.worldOrNull();
+        if (world == null) return 0;
+        var rate = Math.min(world.tickState().tickRate(), 20f);
+        if (!(rate > 0)) return 0;
+        return (long) (1_000_000_000L / rate);
+    }
+
+    private void completeSteps() {
+        for (var iterator = steps.iterator(); iterator.hasNext();) {
+            var step = iterator.next();
+            if (--step.remaining == 0) {
+                iterator.remove();
+                step.action.canceller(null);
+                step.action.succeed();
+            }
+        }
     }
 
     private void runOneShots() {
@@ -962,6 +1037,18 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
         if (!handle.observer().met()) {
             throw endException();
         }
+    }
+
+    private static final class Step {
+        private final ActionImpl action;
+        private int remaining;
+
+        private Step(ActionImpl action, int remaining) {
+            this.action = action;
+            this.remaining = remaining;
+        }
+
+        ActionImpl action() { return action; }
     }
 
     /**

@@ -53,6 +53,11 @@ final class StateReaderImpl implements StateReader {
     }
 
     @Override
+    public boolean tickingSuspended() {
+        return bot.tickingSuspended();
+    }
+
+    @Override
     public long ticks() {
         return state().ticks();
     }

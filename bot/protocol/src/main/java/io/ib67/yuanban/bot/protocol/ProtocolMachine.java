@@ -836,7 +836,7 @@ public final class ProtocolMachine {
         var info = new WorldInfo(++worldEpoch, world.dimension(), spawnInfo.getDimension(), cause);
         state.enterWorld(world, info);
         // 原版 startWaitingForNewLevel：开始等待加载，30 秒的超时从这里开始计算
-        state.loadTracker().start(System.nanoTime());
+        state.loadTracker().start(bot.activeNanos());
         bot.enteredWorld();
         localGameMode(spawnInfo.getGameMode());
         if (observations.wants(WorldEntered.class)) {

@@ -353,6 +353,7 @@ internal class StoryEnvImpl(
             if (actual !== route.instance) {
                 throw StepFailure("$username 加入之后位于 $actual，路由表中的 Instance 为 ${route.instance}")
             }
+            server.monitors.forEach { it.playerJoined(this, joined) }
             return joined
         } catch (e: StepFailure) {
             // 加入以 StepFailure 失败时断开 bot：attempt 捕获这个失败之后，这个 bot 不会再进入故事的世界

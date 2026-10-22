@@ -42,13 +42,13 @@
 | 2 | 取出入站队列的全部条目。`Received` 的代数与当前连接不同、或者 bot 已经结束时丢弃；否则先检查这条连接的握手已经发出（第 4 步的接入已经执行）、数据包属于当前连接状态对应的协议阶段，不满足时结束 bot（[协议状态机 · 连接阶段](protocol.md#连接阶段)），然后交给 `BundleBuffer`，得到一批数据包后逐个交给 `ProtocolMachine.handle`，处理过程中 bot 结束或者代数改变（Transfer）时停止处理这一批的其余数据包；每批之后投递观察记录。`Closed` 的代数为当前连接时，带异常的结束 bot（`fail`），不带异常的按「connection closed」断开 |
 | 3 | 完成上一轮在调度线程上调用、调用时已经发生过的 `joined()` 与 `loaded()` |
 | 4 | 执行 `requests` 中的任务（动作入队、取消、查询、等待 `joined`/`loaded`、新连接的接入、`disconnect`），然后投递观察记录 |
-| 5 | bot 没有结束时：根据 `Bot` 与 `BotRuntime` 两级的请求更新实际的暂停状态，改变时产生 `MovementSuspensionChanged`；检查 TCP 连接的读取超时 |
-| 6 | bot 处于 `PLAY` 并且已经加载时，按提交顺序执行全部一次性请求 |
+| 5 | bot 没有结束时：根据 `Bot` 与 `BotRuntime` 两级的请求更新实际的暂停状态，改变时产生 `MovementSuspensionChanged` 与 `TickingSuspensionChanged`；检查 TCP 连接的读取超时 |
+| 6 | bot 处于 `PLAY` 并且已经加载时，按提交顺序执行全部一次性请求；tick 暂停时只有本轮有步进 tick 才执行 |
 | 7 | tick 到期时执行 `BotTicker.tick` |
 | 8 | 把 `Outbox` 中的数据包交给连接，投递 `PacketSent`，安排写出即执行完毕的动作 |
 | 9 | 本轮应用了数据包、执行了一次性请求、执行了 tick，或者实际的暂停状态改变时，产生并投递 `StateUpdated` |
 
-整个 `round` 包在 `try` 中，任何异常都交给 `fail` 结束这个 bot。返回值为下一次需要调度这个 bot 的时间：下一次 tick 的时间与读取超时到期时间中较早的一个；bot 已经结束时为 `Long.MAX_VALUE`。
+整个 `round` 包在 `try` 中，任何异常都交给 `fail` 结束这个 bot。返回值为下一次需要调度这个 bot 的时间：下一次 tick 的时间与读取超时到期时间中较早的一个；bot 已经结束时为 `Long.MAX_VALUE`。暂停 tick 时，步进动作会让本轮立即执行 tick；恢复之后重新等待一个 tick 间隔。
 
 步骤 3 的存在是为了 `observeDuring(o, Bot::loaded)`：在调度线程上调用、已经发生过的 `joined()`、`loaded()` 推迟到下一轮执行完毕，这样 `observeDuring` 可以在动作结束之前把 observer 绑定到动作上。
 

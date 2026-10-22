@@ -9,6 +9,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * 阻塞等待：设置了推进函数时，到了推进的时间就在调用线程上执行一次（{@link WaitPump}：所有等待的线程共用，
@@ -28,14 +29,15 @@ final class Waits {
      * @throws RuntimeException    future 异常完成时的异常
      * @throws BotTimeoutException 超时
      */
-    static <T> T await(CompletableFuture<T> future, Duration timeout, @Nullable WaitPump pump, String what) {
-        var deadline = System.nanoTime() + timeout.toNanos();
+    static <T> T await(CompletableFuture<T> future, Duration timeout, @Nullable WaitPump pump,
+                        LongSupplier clock, String what) {
+        var deadline = clock.getAsLong() + timeout.toNanos();
         while (true) {
             var nextPump = 0L;
             if (!future.isDone() && pump != null) {
                 nextPump = pump.pumpIfDue();
             }
-            var now = System.nanoTime();
+            var now = clock.getAsLong();
             var remaining = deadline - now;
             try {
                 if (future.isDone()) {
@@ -44,7 +46,9 @@ final class Waits {
                 if (remaining <= 0) {
                     throw new BotTimeoutException("timed out after " + timeout + " waiting for " + what);
                 }
-                var wait = pump == null ? remaining : Math.min(remaining, Math.max(nextPump - now, MIN_WAIT_NANOS));
+                var wait = pump == null
+                        ? remaining
+                        : Math.min(remaining, Math.max(nextPump - System.nanoTime(), MIN_WAIT_NANOS));
                 return future.get(wait, TimeUnit.NANOSECONDS);
             } catch (TimeoutException _) {
                 // 继续推进并等待

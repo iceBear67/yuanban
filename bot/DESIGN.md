@@ -40,7 +40,7 @@
 | 动作请求 | 按类别分队列执行：移动、手部交互、一次性请求 |
 | `moveTo` | 使用 Minestom 的寻路（只依赖 `Block.Getter`，可以在 bot 的世界模型上运行）；另外提供直线移动 `moveForward`、跳跃 `jumpTo`、转向 `rotate` 与 `lookAt` |
 | 移动模拟 | 使用 Minestom 的 `PhysicsUtils` |
-| 公开接口 | 不提供按键输入，不提供时钟，只提供 movement suspension；暂停只停止速度与位置的计算，朝向照常更新和发送 |
+| 公开接口 | 不提供按键输入，不提供时钟；提供 movement suspension，以及全部 bot 的 tick 暂停与步进；暂停移动只停止速度与位置的计算，朝向照常更新和发送 |
 | 调度 | 每个 `BotRuntime` 一个调度线程，统一调度全部 bot |
 | Action | 只有 `await`、`future`、`cancel` 三个方法：`await` 在执行完毕时返回 true、被取消时返回 false，连接结束或 bot 因异常结束时抛出异常；取消原因作为 `future` 的异常给出；不返回值；动作在游戏中产生的效果由 observer 观察 |
 | 接收变化 | 统一用 `observe`：用户构造 observer 交给 bot，observer 选择订阅的观察记录类型（数据包或模型变化），`observe` 只负责更新 observer 的状态，没有单独的事件接口 |

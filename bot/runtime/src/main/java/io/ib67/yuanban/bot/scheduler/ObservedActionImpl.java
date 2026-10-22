@@ -45,7 +45,8 @@ final class ObservedActionImpl<O extends Observer> implements ObservedAction<O> 
         // observer 以 FAILED 关闭时不等动作结束
         var failed = closed.thenCompose(reason -> reason == CloseReason.FAILED
                 ? CompletableFuture.completedFuture(null) : new CompletableFuture<>());
-        Waits.await(CompletableFuture.anyOf(failed, both), timeout, impl.bot().pump(), "observed action " + action);
+        Waits.await(CompletableFuture.anyOf(failed, both), timeout, impl.bot().pump(), impl.bot()::activeNanos,
+                "observed action " + action);
         var failure = handle.failure();
         if (failure != null) {
             throw new ObserverFailureException(failure);
