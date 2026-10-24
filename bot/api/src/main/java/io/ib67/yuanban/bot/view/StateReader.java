@@ -33,9 +33,7 @@ public interface StateReader {
     /**
      * bot 实际是否暂停执行 tick。
      */
-    default boolean tickingSuspended() {
-        return false;
-    }
+    boolean tickingSuspended();
 
     /**
      * bot 已经执行的 tick 数

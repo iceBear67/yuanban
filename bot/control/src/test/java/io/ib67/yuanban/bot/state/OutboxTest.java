@@ -43,6 +43,11 @@ class OutboxTest {
         }
 
         @Override
+        public void cancelled(String reason, Throwable cause) {
+            throw new AssertionError("Outbox must not cancel an action");
+        }
+
+        @Override
         public void terminate(RuntimeException exception) {
             throw new AssertionError("Outbox must not terminate an action");
         }

@@ -8,7 +8,7 @@ import net.minestom.server.instance.Instance
 import net.minestom.server.coordinate.Pos
 import java.util.concurrent.ConcurrentHashMap
 
-/** Players whose usernames are not in the story routing table. */
+/** 用户名不在故事路由表中的玩家 */
 internal class DebugVisitors : io.ib67.yuanban.story.runtime.VisitorPolicy {
     private val players = ConcurrentHashMap.newKeySet<Player>()
     @Volatile
@@ -21,7 +21,10 @@ internal class DebugVisitors : io.ib67.yuanban.story.runtime.VisitorPolicy {
         event.spawningInstance = instance
         player.respawnPoint = Pos(0.5, 64.0, 0.5)
         player.gameMode = GameMode.SPECTATOR
-        player.sendMessage(Component.text("story commands: /story list, /story run, /story pause, /story resume, /story step, /story inspect, /story lobby"))
+        player.sendMessage(Component.text(
+            "story commands: /story list, /story run, /story pause, /story resume, /story step, " +
+                "/story inspect, /story watch <故事> [玩家], /story lobby",
+        ))
     }
 
     override fun isVisitor(player: Player): Boolean = player in players

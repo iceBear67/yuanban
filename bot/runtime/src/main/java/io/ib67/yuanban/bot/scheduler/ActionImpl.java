@@ -117,6 +117,16 @@ public final class ActionImpl implements Action, ActionHandle {
     }
 
     /**
+     * 调度线程：以取消结束，附带原始异常
+     */
+    public void cancelled(String reason, Throwable cause) {
+        var exception = new ActionCancelledException(reason, cause);
+        if (future.completeExceptionally(exception)) {
+            bot.actionEnded(this, exception);
+        }
+    }
+
+    /**
      * 调度线程：连接结束或 bot 因异常结束
      */
     public void terminate(RuntimeException exception) {

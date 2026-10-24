@@ -1,7 +1,6 @@
 package io.ib67.yuanban.bot.scheduler;
 
 import io.ib67.yuanban.bot.Action;
-import io.ib67.yuanban.bot.ActionCancelledException;
 import io.ib67.yuanban.bot.Bot;
 import io.ib67.yuanban.bot.BotDisconnectedException;
 import io.ib67.yuanban.bot.BotFailureException;
@@ -56,6 +55,7 @@ import io.ib67.yuanban.bot.transport.InboundSink;
 import io.ib67.yuanban.bot.transport.PacketDirection;
 import io.ib67.yuanban.bot.transport.TcpConnection;
 import io.ib67.yuanban.bot.view.StateReader;
+import io.ib67.yuanban.bot.world.ClientWorld;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Point;
 import org.cloudburstmc.math.vector.Vector3i;
@@ -567,16 +567,17 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
             nextTickNanos = 0;
             return false;
         }
-        var rate = Math.min(world.tickState().tickRate(), 20f);
-        if (!(rate > 0)) {
-            throw new IllegalStateException("invalid tick rate " + rate);
-        }
-        var period = (long) (1_000_000_000L / rate);
+        var period = periodOf(world);
         if (tickingSuspended && !steps.isEmpty()) {
             nextTickNanos = now;
             return true;
         }
-        if (tickingSuspended) return false;
+        if (tickingSuspended) {
+            // 暂停期间没有步进时不需要再被调度，nextTickNanos 为 0 使 round() 返回 Long.MAX_VALUE，
+            // 调度线程可以一直 park 到恢复或者下一次步进（这两者都会唤醒调度线程）
+            nextTickNanos = 0;
+            return false;
+        }
         if (nextTickNanos == 0) {
             nextTickNanos = now + period;
             return false;
@@ -593,9 +594,20 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
 
     private long tickPeriod() {
         var world = state.worldOrNull();
-        if (world == null) return 0;
+        if (world == null) {
+            return 0;
+        }
+        return periodOf(world);
+    }
+
+    /**
+     * 世界当前的 tick 周期：{@code 1000 / min(tickRate, 20)} 毫秒
+     */
+    private static long periodOf(ClientWorld world) {
         var rate = Math.min(world.tickState().tickRate(), 20f);
-        if (!(rate > 0)) return 0;
+        if (!(rate > 0)) {
+            throw new IllegalStateException("invalid tick rate " + rate);
+        }
         return (long) (1_000_000_000L / rate);
     }
 
@@ -1047,8 +1059,6 @@ public final class BotInstance implements Bot, ObservationHost, ProtocolHost {
             this.action = action;
             this.remaining = remaining;
         }
-
-        ActionImpl action() { return action; }
     }
 
     /**

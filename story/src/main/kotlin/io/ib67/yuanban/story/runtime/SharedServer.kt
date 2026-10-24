@@ -15,7 +15,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.reflect.KClass
@@ -27,15 +26,37 @@ internal fun interface PausePoint {
     fun reached(tick: Long)
 }
 
-/** 故事时钟：单调的真实时间减去暂停点暂停服务端的累计时间，单位为纳秒 */
+/**
+ * 故事时钟：单调的真实时间减去暂停点暂停服务端的累计时间，单位为纳秒。
+ * [startPause] 到 [endPause] 之间 [now] 保持不变，这段时间不计入故事时钟；线程安全
+ */
 internal class StoryClock {
-    private val paused = AtomicLong()
+    private val lock = Any()
+    private var pausedNanos = 0L
 
-    fun now(): Long = System.nanoTime() - paused.get()
+    /** 是否在暂停中；System.nanoTime() 可以是任何值，不能用它当标记 */
+    private var isPaused = false
 
-    /** 暂停点暂停服务端的时间不计入故事时钟 */
-    fun addPaused(nanos: Long) {
-        paused.addAndGet(nanos)
+    /** 暂停开始的时刻（未扣除历史暂停时间）；只在 [isPaused] 为 true 时有意义 */
+    private var pauseStartedAt = 0L
+
+    fun now(): Long = synchronized(lock) {
+        val at = if (isPaused) pauseStartedAt else System.nanoTime()
+        at - pausedNanos
+    }
+
+    /** 开始暂停：在 [endPause] 之前 [now] 保持这一刻的值 */
+    fun startPause() = synchronized(lock) {
+        check(!isPaused) { "故事时钟已经处于暂停中" }
+        pauseStartedAt = System.nanoTime()
+        isPaused = true
+    }
+
+    /** 结束暂停：这段暂停的时长累加到不计入故事时钟的时间里 */
+    fun endPause() = synchronized(lock) {
+        check(isPaused) { "故事时钟不在暂停中" }
+        pausedNanos += System.nanoTime() - pauseStartedAt
+        isPaused = false
     }
 }
 

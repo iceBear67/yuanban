@@ -12,7 +12,6 @@ dependencies {
     implementation(libs.kotlin.reflect)
     // 运行示例故事，检查扩展给出的测试结论
     testImplementation(libs.junit.platform.testkit)
-    implementation(libs.junit.platform.launcher)
 }
 
 tasks.withType(Test).configureEach {
@@ -24,10 +23,42 @@ tasks.withType(Test).configureEach {
     systemProperty("minestom.accept-transfers", "true")
 }
 
+// 调试服务端（io.ib67.yuanban.story.debug，storyServer 任务）的源码在 src/debug/kotlin，需要访问 main 中
+// internal 的类（StoryMonitor、PausePoint、StoryClock 等），以及 main 的全部依赖。
+// test 额外关联 debug：DebugMonitor 等类的单元测试直接写在 test 源码集里，需要访问 debug 中 internal 的类
+sourceSets {
+    debug {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+    test {
+        compileClasspath += sourceSets.debug.output
+        runtimeClasspath += sourceSets.debug.output
+    }
+}
+
+configurations {
+    debugImplementation.extendsFrom(api, implementation)
+    testImplementation.extendsFrom(debugImplementation)
+}
+
+dependencies {
+    // 发现并运行故事，只有调试服务端需要
+    debugImplementation(libs.junit.platform.launcher)
+}
+
+kotlin {
+    // 让 debug 的 Kotlin 编译关联 main：既提供 main 的 internal 可见性，也补上编译期的 Kotlin 元数据依赖
+    target.compilations.getByName("debug").associateWith(target.compilations.getByName("main"))
+    // test 关联 debug，原因同上
+    target.compilations.getByName("test").associateWith(target.compilations.getByName("debug"))
+}
+
 tasks.register("storyServer", JavaExec) {
     description = "启动调试服务端，在游戏中运行 story 故事"
     group = "verification"
-    classpath = sourceSets.test.runtimeClasspath
+    // debug 源码集的运行时类路径加上 test 的运行时类路径：调试服务端需要发现测试中的故事
+    classpath = sourceSets.debug.runtimeClasspath + sourceSets.test.runtimeClasspath
     mainClass = "io.ib67.yuanban.story.debug.StoryServer"
     standardInput = System.in
     systemProperty("minestom.properties.mutable", "true")

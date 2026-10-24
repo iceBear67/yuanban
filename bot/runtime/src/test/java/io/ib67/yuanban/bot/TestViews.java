@@ -50,6 +50,11 @@ public final class TestViews implements StateReader {
     }
 
     @Override
+    public boolean tickingSuspended() {
+        return bot.inspect(StateReader::tickingSuspended);
+    }
+
+    @Override
     public long ticks() {
         return bot.inspect(StateReader::ticks);
     }

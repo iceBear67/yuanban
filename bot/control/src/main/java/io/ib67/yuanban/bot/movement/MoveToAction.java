@@ -88,9 +88,9 @@ public final class MoveToAction extends MovementAction {
             try {
                 nodes = planning.join();
             } catch (CompletionException e) {
-                // 寻路计算失败只让这个动作以取消结束，与其它动作失败的口径一致
+                // 寻路计算失败只让这个动作以取消结束，与其它动作失败的口径一致；原始异常作为 cause 保留
                 planning = null;
-                handle.cancelled(ActionCancelledException.PATH_FAILED);
+                handle.cancelled(ActionCancelledException.PATH_FAILED, e.getCause());
                 return MoveIntent.NONE;
             }
             planning = null;
@@ -225,7 +225,14 @@ public final class MoveToAction extends MovementAction {
         follower = null;
         planningSnapshot = snapshot;
         planningBox = boundingBox;
-        targetHeight = PathPlanner.targetHeight(snapshot, target, boundingBox);
+        try {
+            targetHeight = PathPlanner.targetHeight(snapshot, target, boundingBox);
+        } catch (RuntimeException e) {
+            // 在调度线程上读取同一份快照：目标所在列有无效的方块状态编号时与寻路线程的处理口径一致，
+            // 以 PATH_FAILED 取消这个动作，不结束整个 bot
+            handle.cancelled(ActionCancelledException.PATH_FAILED, e);
+            return;
+        }
         targetChunkLoaded = controller.world().chunkLoaded(target.chunkX(), target.chunkZ());
         changedWhilePlanning.clear();
         planning = PathPlanner.plan(snapshot, player.position(), target, options.closeDistance(), options.maxDistance(),

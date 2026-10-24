@@ -54,4 +54,11 @@ public final class ActionCancelledException extends RuntimeException {
     public ActionCancelledException(String reason) {
         super(reason);
     }
+
+    /**
+     * 取消的原因来自另一个异常时附带原始异常（例如寻路计算失败时的 {@code PATH_FAILED}）
+     */
+    public ActionCancelledException(String reason, Throwable cause) {
+        super(reason, cause);
+    }
 }

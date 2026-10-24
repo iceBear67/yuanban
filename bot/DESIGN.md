@@ -42,7 +42,7 @@
 | 移动模拟 | 使用 Minestom 的 `PhysicsUtils` |
 | 公开接口 | 不提供按键输入，不提供时钟；提供 movement suspension，以及全部 bot 的 tick 暂停与步进；暂停移动只停止速度与位置的计算，朝向照常更新和发送 |
 | 调度 | 每个 `BotRuntime` 一个调度线程，统一调度全部 bot |
-| Action | 只有 `await`、`future`、`cancel` 三个方法：`await` 在执行完毕时返回 true、被取消时返回 false，连接结束或 bot 因异常结束时抛出异常；取消原因作为 `future` 的异常给出；不返回值；动作在游戏中产生的效果由 observer 观察 |
+| Action | 使用者使用 `await`、`future`、`cancel()` 三个方法：`await` 在执行完毕时返回 true、被取消时返回 false，连接结束或 bot 因异常结束时抛出异常；取消原因作为 `future` 的异常给出；不返回值；动作在游戏中产生的效果由 observer 观察。另有内部方法 `cancel(String)`（`@ApiStatus.Internal`），供内置 observer 带上取消原因 |
 | 接收变化 | 统一用 `observe`：用户构造 observer 交给 bot，observer 选择订阅的观察记录类型（数据包或模型变化），`observe` 只负责更新 observer 的状态，没有单独的事件接口 |
 | observer 的关闭 | 由 `observe` 返回的句柄关闭，或由 observer 自己关闭；世界重建时继续观察，连接断开时关闭；提供按世界自动切换状态的抽象类 `WorldBoundObserver` |
 | 成功的判断 | 库中没有通用的「成功」概念：用户检查 observer 的状态决定后续动作；能自行判断的 observer 在得出结论时关闭自己，并通过它自己的方法提供结论 |
@@ -487,7 +487,7 @@ public interface InboundSink {
 - 两个应答为 `ServerboundAcceptTeleportationPacket` 与 `ServerboundMovePlayerPosRotPacket`，不计入移动包的上一次发送记录，着地与顶住墙壁标记不变（9.2）。
 - Player Rotation 同样按相对标记计算：`isRelativeY()` 对应偏航角，`isRelativeX()` 对应俯仰角，俯仰角限制到 [-90, 90]。
 
-**Chunk Batch Received 的数值**（`ServerboundChunkBatchReceivedPacket`）：`ChunkBatchTracker` 在调度线程处理 Chunk Batch Start 时记录时间，在 Chunk Batch Finished 时用耗时除以批次中的区块数得到每区块毫秒数，保留最近 15 批，回应 `25 / 平均每区块毫秒数`（wiki Chunk Batch Finished）。耗时为 0 时结果为正无穷，原版服务端与 Minestom 都把它限制到各自的上限。
+**Chunk Batch Received 的数值**（`ServerboundChunkBatchReceivedPacket`）：`ChunkBatchTracker`（原版 `ChunkBatchSizeCalculator`）在调度线程处理 Chunk Batch Start 时记录时间，在 Chunk Batch Finished 时用耗时除以批次中的区块数得到每区块纳秒数，按指数加权平均合并到已有的估计值（初值为每区块 2 毫秒；新样本钳制在估计值的 1/3 到 3 倍之间，权重上限 49），回应 `7000000 / 平均每区块纳秒数`。空批次不更新估计值；每区块纳秒数为 0 时结果为正无穷，原版服务端与 Minestom 都把它限制到各自的上限。新连接时调用 `reset`，估计值回到初值（原版每个 `ClientPacketListener` 新建一个计数器）。
 
 #### 5.3 聊天与命令
 
@@ -834,7 +834,7 @@ public final class ActionCancelledException extends RuntimeException {
 | 用户调用 `cancel()`（`BY_USER`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 内置 observer（`distanceWithIn`、`distanceOutOf`）因条件满足取消动作（`BY_OBSERVER`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 寻路计算抛出异常（8.4，`PATH_FAILED`） | 以 `ActionCancelledException` 完成 | 返回 false |
-| `jumpTo` 起跳后在空中超过 100 tick 仍未着地（8.4，`AIR_TIMEOUT`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| `jumpTo` 起跳后在空中的第 100 个 tick 仍未着地（8.4，`AIR_TIMEOUT`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 寻路找不到到达目标的路径（8.4，`NO_PATH`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（8.4，`BLOCKED`） | 以 `ActionCancelledException` 完成 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（8.4、8.5，`NO_ENTITY`） | 以 `ActionCancelledException` 完成 | 返回 false |
@@ -931,7 +931,7 @@ public final class ActionCancelledException extends RuntimeException {
 
 - 目标为一个方块位置，执行过程以「落在它的顶面」为目标计算起跳。
 - 着地时起跳；起跳前按目标的水平距离选择行走或疾跑（`MovementMode` 未指定时，水平距离超过 2 格选择疾跑）；空中保持朝目标顶面中心加速，水平距离小于 0.1 时不再加速。
-- 起跳后再次着地即执行完毕。起跳的 tick 移动之后仍然着地时（起跳没有离开地面，例如跳跃力为 0，或者头顶有方块）同样执行完毕。起跳后在空中超过 100 tick 仍未着地时（水中、气泡柱、缓降下的长下落）以 `AIR_TIMEOUT` 取消，避免永久占用移动队列。是否落在目标方块上由用户通过 observer 或查询判断。
+- 起跳后再次着地即执行完毕。起跳的 tick 移动之后仍然着地时（起跳没有离开地面，例如跳跃力为 0，或者头顶有方块）同样执行完毕。起跳后在空中的第 100 个 tick 仍未着地时（水中、气泡柱、缓降下的长下落）以 `AIR_TIMEOUT` 取消，避免永久占用移动队列。是否落在目标方块上由用户通过 observer 或查询判断。
 
 **`rotate(float yaw, float pitch)`**、**`lookAt(Point target)`**、**`lookAt(int entityId)`**：
 

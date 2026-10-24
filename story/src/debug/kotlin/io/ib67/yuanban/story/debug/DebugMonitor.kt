@@ -13,6 +13,7 @@ import io.ib67.yuanban.story.StepRecord
 import io.ib67.yuanban.story.TickCheckRecord
 import io.ib67.yuanban.story.runtime.JoinedPlayer
 import io.ib67.yuanban.story.runtime.StoryEnv
+import io.ib67.yuanban.story.runtime.StoryEnvImpl
 import io.ib67.yuanban.story.runtime.StoryMonitor
 import net.minestom.server.event.Event
 import net.minestom.server.event.EventListener
@@ -21,7 +22,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
-/** Exposes story runtime state to debug commands and visitors. */
+/** 把故事运行时的状态暴露给调试命令与访客 */
 internal class DebugMonitor(private val pause: DebugPause, private val breakpoints: Breakpoints) : StoryMonitor {
     private val names = ConcurrentHashMap<StoryEnv, String>()
     private val runtimes = ConcurrentHashMap<StoryEnv, BotRuntime>()
@@ -33,8 +34,7 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
     @Volatile private var hold = false
 
     override fun storyStarted(story: StoryEnv) {
-        names[story] = story.javaClass.name
-        println("story started: ${names[story]}")
+        names[story] = story.name
         registerEventBreakpoints(story)
     }
 
@@ -43,14 +43,15 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
     }
 
     override fun playerJoining(story: StoryEnv, name: String, bot: Bot) {
-        val specs = breakpoints.all().mapNotNull(::parse).filter { it.player == name }
-        val observations = specs.filter { it.kind == Kind.OBSERVATION || it.kind == Kind.BLOCK }
+        val specs = breakpoints.all().map { it.spec }.filter { it.player == name }
+        val observations = specs.filter { it.kind == BreakpointKind.OBSERVATION || it.kind == BreakpointKind.BLOCK }
         if (observations.isNotEmpty()) {
             registerObservationBreakpoints(story, name, bot, observations)
         }
-        specs.filter { it.kind == Kind.PACKET || it.kind == Kind.SENT }.forEach { spec ->
-            val packetClass = loadPacket(spec.argument, spec.kind == Kind.PACKET)
-            val subscription = if (spec.kind == Kind.PACKET) {
+        specs.filter { it.kind == BreakpointKind.PACKET || it.kind == BreakpointKind.SENT }.forEach { spec ->
+            @Suppress("UNCHECKED_CAST")
+            val packetClass = spec.resolvedClass as Class<out MinecraftPacket>
+            val subscription = if (spec.kind == BreakpointKind.PACKET) {
                 Subscription.NONE.received(packetClass)
             } else {
                 Subscription.NONE.sent(packetClass)
@@ -87,32 +88,48 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
     }
 
     override fun stepStarted(story: StoryEnv, step: StepRecord) {
-        val spec = breakpoints.all().mapNotNull(::parse).firstOrNull { it.kind == Kind.STEP } ?: return
+        val spec = breakpoints.all().map { it.spec }.firstOrNull { it.kind == BreakpointKind.STEP } ?: return
         println("breakpoint ${spec.number}: step started ${step.text}")
         awaitNext()
     }
 
     override fun tickChecked(story: StoryEnv, check: TickCheckRecord) {
-        val spec = breakpoints.all().mapNotNull(::parse).firstOrNull { it.kind == Kind.MISMATCH } ?: return
+        val spec = breakpoints.all().map { it.spec }.firstOrNull { it.kind == BreakpointKind.MISMATCH } ?: return
         if (hasMismatch(check)) {
             println("breakpoint ${spec.number}: server and client results differ at tick ${check.tick}")
+            // 与 hit() 一致：立即暂停 bot 的 tick，否则 bot 会比服务端多执行一个 tick 才暂停
+            runtimes[story]?.suspendTicking()
             pause.requestPause()
         }
     }
 
     fun setHold(value: Boolean) {
         hold = value
-        if (!value) next()
+        if (!value) releaseAll()
     }
 
-    fun next() {
+    /**
+     * 唤醒最早的等待者；没有等待者时什么都不做
+     *
+     * @return 是否唤醒了一个等待者
+     */
+    fun next(): Boolean = synchronized(nextLock) {
+        val waiting = nextWaiters.firstOrNull() ?: return@synchronized false
+        nextWaiters.remove(waiting)
+        waiting.complete(Unit)
+        true
+    }
+
+    /** 唤醒全部等待者：hold 关闭或者故事被中止时，不需要逐个用 next 确认 */
+    fun releaseAll() {
         synchronized(nextLock) {
-            nextWaiters.firstOrNull()?.let {
-                nextWaiters.remove(it)
-                it.complete(Unit)
-            } ?: nextWaiters.add(CompletableFuture())
+            nextWaiters.forEach { it.complete(Unit) }
+            nextWaiters.clear()
         }
     }
+
+    /** 当前停在断点上、等待 next 的故事数量，供测试判断"故事已经停下"而不必靠 sleep */
+    fun pendingNextCount(): Int = synchronized(nextLock) { nextWaiters.size }
 
     fun status(): String = buildString {
         append("paused=").append(pause.isPaused()).append(", tick=").append(pause.tick()).append('\n')
@@ -134,16 +151,35 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
         return "$name\nserver: $server\nclient: $client"
     }
 
-    private fun awaitNext() {
-        val future = synchronized(nextLock) {
-            val existing = nextWaiters.firstOrNull()
-            if (existing != null) {
-                nextWaiters.remove(existing)
-                existing
-            } else {
-                CompletableFuture<Unit>().also(nextWaiters::add)
-            }
+    /** 这个故事中已经加入的玩家；没有加入任何玩家时为空 */
+    fun playersOf(story: StoryEnv): List<JoinedPlayer> = players[story]?.toList() ?: emptyList()
+
+    /** 按名称查找正在运行的故事 */
+    fun storyNamed(name: String): StoryEnv? = names.keys.firstOrNull { it.name == name }
+
+    /** 正在运行的全部故事名称 */
+    fun runningStories(): List<String> = names.values.toList()
+
+    /** 全部正在运行的故事中已经加入的玩家用户名 */
+    fun allPlayerNames(): List<String> = players.values.flatMap { it.map(JoinedPlayer::username) }
+
+    /**
+     * 中止全部正在运行的故事：通过 StoryEnvImpl 的 fail 交给每个故事一个说明「被调试命令中止」的异常，
+     * 并断开它的全部 bot（两者都促使故事线程尽快结束：fail 的异常在下一次 checkServerExceptions 时抛出，
+     * 断开 bot 让正在等待 bot 的调用立即失败）
+     */
+    fun stopAll() {
+        names.keys.toList().forEach { story ->
+            (story as StoryEnvImpl).fail(IllegalStateException("被调试命令中止"))
+            runtimes[story]?.bots()?.forEach { it.disconnect() }
         }
+    }
+
+    private fun awaitNext() {
+        // 每次调用都新建一个 future：如果取走已有的 future，两个故事同时停在断点上时，
+        // 后一个会取走前一个登记的 future，列表变空，next/hold off/stop 都唤醒不了，永久卡住
+        val future = CompletableFuture<Unit>()
+        synchronized(nextLock) { nextWaiters.add(future) }
         try {
             future.get()
         } catch (e: InterruptedException) {
@@ -158,7 +194,7 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
         story: StoryEnv,
         name: String,
         bot: Bot,
-        specs: List<Spec>,
+        specs: List<BreakpointSpec>,
     ) {
         val handle = bot.observe(object : Observer {
             override fun subscription() = Subscription.of(Observation::class.java)
@@ -172,10 +208,10 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
     }
 
     private fun registerEventBreakpoints(story: StoryEnv) {
-        breakpoints.all().mapNotNull(::parse).filter { it.kind == Kind.EVENT }.forEach { spec ->
-            val type = loadEvent(spec.argument)
+        breakpoints.all().map { it.spec }.filter { it.kind == BreakpointKind.EVENT }.forEach { spec ->
             @Suppress("UNCHECKED_CAST")
-            val listener = EventListener.of(type as Class<Event>) { event ->
+            val type = spec.resolvedClass as Class<Event>
+            val listener = EventListener.of(type) { event ->
                 println("breakpoint ${spec.number}: event ${event.javaClass.simpleName}: $event")
                 pause.requestPause()
             }
@@ -184,7 +220,7 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
         }
     }
 
-    private fun hit(story: StoryEnv, spec: Spec, detail: String) {
+    private fun hit(story: StoryEnv, spec: BreakpointSpec, detail: String) {
         println("breakpoint ${spec.number}: $detail")
         runtimes[story]?.suspendTicking()
         pause.requestPause()
@@ -198,9 +234,11 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
             "position=${player?.position()}"
     }
 
-    private fun matches(spec: Spec, observation: Observation): Boolean {
-        if (spec.kind == Kind.OBSERVATION) return observation.javaClass.simpleName.equals(spec.argument, ignoreCase = true)
-        if (spec.kind != Kind.BLOCK || observation !is Observation.BlockChanged) return false
+    private fun matches(spec: BreakpointSpec, observation: Observation): Boolean {
+        if (spec.kind == BreakpointKind.OBSERVATION) {
+            return observation.javaClass.simpleName.equals(spec.argument, ignoreCase = true)
+        }
+        if (spec.kind != BreakpointKind.BLOCK || observation !is Observation.BlockChanged) return false
         val coordinates = spec.arguments.mapNotNull(String::toDoubleOrNull)
         return coordinates.size == 3 && coordinates.zip(listOf(observation.pos.x(), observation.pos.y(), observation.pos.z()))
             .all { (expected, actual) -> expected == actual }
@@ -212,58 +250,4 @@ internal class DebugMonitor(private val pause: DebugPause, private val breakpoin
             client is SideResult.Checked && (client.value != server.value || client.passed != server.passed)
         }
     }
-
-    private fun parse(entry: Breakpoints.Entry): Spec? {
-        val words = entry.text.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
-        if (words.isEmpty()) return null
-        return when (words[0]) {
-            "step" -> Spec(entry.number, null, Kind.STEP, "", emptyList())
-            "mismatch" -> Spec(entry.number, null, Kind.MISMATCH, "", emptyList())
-            "event" -> require(words.size == 2) { "event breakpoint requires an event class name" }.let { Spec(entry.number, null, Kind.EVENT, words[1], emptyList()) }
-            else -> {
-                require(words.size >= 3) { "player breakpoint requires a player name, kind, and argument: ${entry.text}" }
-                val kind = when (words[1]) {
-                    "observation" -> Kind.OBSERVATION
-                    "packet" -> Kind.PACKET
-                    "sent" -> Kind.SENT
-                    "block" -> Kind.BLOCK
-                    else -> throw IllegalArgumentException("unknown breakpoint kind: ${words[1]}")
-                }
-                Spec(entry.number, words[0], kind, words[2], words.drop(2))
-            }
-        }
-    }
-
-    private fun loadPacket(name: String, received: Boolean): Class<out MinecraftPacket> {
-        val direction = if (received) "clientbound" else "serverbound"
-        val candidates = listOf(
-            "org.geysermc.mcprotocollib.protocol.packet.ingame.$direction.$name",
-            "org.geysermc.mcprotocollib.protocol.packet.common.$direction.$name",
-            "org.geysermc.mcprotocollib.protocol.packet.login.$direction.$name",
-            "org.geysermc.mcprotocollib.protocol.packet.configuration.$direction.$name",
-        )
-        @Suppress("UNCHECKED_CAST")
-        return candidates.asSequence().mapNotNull { runCatching { Class.forName(it) }.getOrNull() }
-            .firstOrNull() as? Class<out MinecraftPacket>
-            ?: throw IllegalArgumentException("packet class not found: $name")
-    }
-
-    private fun loadEvent(name: String): Class<*> = listOf(
-        "net.minestom.server.event.$name",
-        "net.minestom.server.event.player.$name",
-        "net.minestom.server.event.entity.$name",
-        "net.minestom.server.event.instance.$name",
-        "net.minestom.server.event.inventory.$name",
-        "net.minestom.server.event.server.$name",
-    ).asSequence().mapNotNull { runCatching { Class.forName(it) }.getOrNull() }.firstOrNull()
-        ?: throw IllegalArgumentException("event class not found: $name")
-
-    private enum class Kind { OBSERVATION, PACKET, SENT, BLOCK, EVENT, STEP, MISMATCH }
-    private data class Spec(
-        val number: Int,
-        val player: String?,
-        val kind: Kind,
-        val argument: String,
-        val arguments: List<String>,
-    )
 }

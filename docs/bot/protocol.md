@@ -124,7 +124,7 @@ Synchronize Vehicle Position 指向其它实体、指向本地玩家自己、指
 
 ## 区块批次
 
-`ChunkBatchTracker` 在调度线程处理 Chunk Batch Start 时记录时间，在 Chunk Batch Finished 时用耗时除以批次中的区块数得到每区块毫秒数，保留最近 15 批，回应 `25 / 平均每区块毫秒数`（wiki Chunk Batch Finished）。批次为空时不记录样本；耗时为 0 时结果为正无穷，原版服务端与 Minestom 都把它限制到各自的上限。
+`ChunkBatchTracker`（原版 `ChunkBatchSizeCalculator`）在调度线程处理 Chunk Batch Start 时记录时间，在 Chunk Batch Finished 时用耗时除以批次中的区块数得到每区块纳秒数，按指数加权平均合并到已有的估计值（初值为每区块 2 毫秒；新样本钳制在估计值的 1/3 到 3 倍之间，权重上限 49），回应 `7000000 / 平均每区块纳秒数`。批次为空时不更新估计值；每区块纳秒数为 0 时结果为正无穷，原版服务端与 Minestom 都把它限制到各自的上限。新连接时调用 `reset`，估计值回到初值（原版每个 `ClientPacketListener` 新建一个计数器）。
 
 ## Transfer
 

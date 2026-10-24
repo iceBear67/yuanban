@@ -6,20 +6,16 @@ import io.ib67.yuanban.story.ServerSetup
 import io.ib67.yuanban.story.runtime.ServerOwner
 import io.ib67.yuanban.story.runtime.SharedServer
 import io.ib67.yuanban.story.runtime.RunningServer
-import net.minestom.server.coordinate.Pos
 import net.minestom.server.event.player.PlayerDisconnectEvent
 import net.minestom.server.instance.block.Block
 import net.minestom.server.instance.generator.Generator
 import net.minestom.server.world.DimensionType
-import net.minestom.server.tag.TagHandler
-import net.kyori.adventure.identity.Identity
-import org.junit.platform.launcher.core.LauncherFactory
 import java.net.InetSocketAddress
 import java.util.Properties
 import java.util.concurrent.CompletableFuture
 import kotlin.reflect.KClass
 
-/** Debug server for running story tests in the game. */
+/** 调试服务端：在游戏里运行 story 故事 */
 object StoryServer {
     @JvmStatic
     fun main(args: Array<String>) { start(args).use { Thread.currentThread().join() } }
@@ -47,18 +43,18 @@ object StoryServer {
         server.process.eventHandler().addListener(PlayerDisconnectEvent::class.java) { visitors.disconnected(it.player) }
         val runner = StoryRunner { message -> visitors.all().forEach { it.sendMessage(net.kyori.adventure.text.Component.text(message)) }; println(message) }
         val commands = DebugCommands(visitors, pause, runner, monitor, breakpoints)
-        server.process.command().register(commands.command())
+        val command = commands.command()
+        server.process.command().register(command)
+        // 控制台使用 Minestom 自带的控制台发送者，这样回复能实际显示出来（Adventure 的 Audience 默认什么都不做）
+        val console = server.process.command().consoleSender
         Thread.ofPlatform().name("yuanban-story-console").daemon().start {
             while (server.process.isAlive) {
                 val line = readlnOrNull() ?: break
-                commands.execute(object : net.minestom.server.command.CommandSender {
-                    override fun tagHandler() = TagHandler.newHandler()
-                    override fun identity() = Identity.nil()
-                }, line)
+                server.process.command().execute(console, "story $line")
             }
         }
         println("story debug server: ${server.address}, ServerSetup=${setup?.qualifiedName ?: "none"}")
-        return Handle(server, commands.command())
+        return Handle(server, command, monitor, breakpoints, runner)
     }
 
     private fun createLobby(server: RunningServer) = CompletableFuture<net.minestom.server.instance.InstanceContainer>().also { result ->
@@ -84,7 +80,14 @@ object StoryServer {
         Thread.currentThread().contextClassLoader.getResourceAsStream("junit-platform.properties")?.use(properties::load)
     }
 
-    class Handle internal constructor(private val server: RunningServer, private val command: net.minestom.server.command.builder.Command) : AutoCloseable {
+    class Handle internal constructor(
+        private val server: RunningServer,
+        private val command: net.minestom.server.command.builder.Command,
+        /** 供测试直接驱动调试服务端（添加断点、运行故事、调用 next），不经过命令文本 */
+        internal val monitor: DebugMonitor,
+        internal val breakpoints: Breakpoints,
+        internal val runner: StoryRunner,
+    ) : AutoCloseable {
         val address: InetSocketAddress get() = server.address
         override fun close() {
             server.process.command().unregister(command)

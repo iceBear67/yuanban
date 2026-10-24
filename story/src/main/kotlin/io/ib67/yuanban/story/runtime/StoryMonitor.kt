@@ -5,29 +5,29 @@ import io.ib67.yuanban.bot.BotRuntime
 import io.ib67.yuanban.story.StepRecord
 import io.ib67.yuanban.story.TickCheckRecord
 
-/** Story monitor registered in SharedServer and called in registration order. */
+/** 故事监听器，登记在 SharedServer 中，按照登记顺序调用；抛出的异常使这个故事失败 */
 internal interface StoryMonitor {
-    /** On the test thread before the story body runs. */
+    /** 在测试线程上，故事的 body 执行之前 */
     fun storyStarted(story: StoryEnv) {}
 
-    /** On the thread that creates the BotRuntime, after creation. */
+    /** 在创建 BotRuntime 的线程上，创建之后 */
     fun runtimeCreated(story: StoryEnv, runtime: BotRuntime) {}
 
-    /** On the join or rejoin thread after the bot and mark observer are registered. */
+    /** 在调用 join 或者 rejoin 的线程上，bot 创建并注册标记 observer 之后、等待加入完成之前 */
     fun playerJoining(story: StoryEnv, name: String, bot: Bot) {}
 
-    /** Called on the join or rejoin thread after the player has completed joining. */
+    /** 在调用 join 或者 rejoin 的线程上，玩家完成加入之后 */
     fun playerJoined(story: StoryEnv, player: JoinedPlayer) {}
 
-    /** On the step thread before the step body runs. */
+    /** 在执行步骤的线程上，步骤的 body 执行之前 */
     fun stepStarted(story: StoryEnv, step: StepRecord) {}
 
-    /** On the step thread after the step completes. */
+    /** 在执行步骤的线程上，步骤结束之后（成功或者失败） */
     fun stepFinished(story: StoryEnv, step: StepRecord) {}
 
-    /** On the thread that produces a tick check result. */
+    /** 一个 tick 检查得出结果时，在得出结果的线程上 */
     fun tickChecked(story: StoryEnv, check: TickCheckRecord) {}
 
-    /** On the afterEach thread before cleanup; failure is null for a successful story. */
+    /** 在 afterEach 的线程上，清理之前；failure 为故事的失败，成功时为 null */
     fun storyFinishing(story: StoryEnv, failure: Throwable?) {}
 }

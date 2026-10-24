@@ -1,5 +1,6 @@
 package io.ib67.yuanban.bot.state;
 
+import io.ib67.yuanban.bot.ActionCancelledException;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,6 +37,13 @@ public interface ActionHandle {
      */
     @ApiStatus.Internal
     void cancelled(String reason);
+
+    /**
+     * 调度线程：以取消结束，附带原始异常作为 {@link ActionCancelledException} 的 cause
+     * （例如寻路计算失败时的原始异常）
+     */
+    @ApiStatus.Internal
+    void cancelled(String reason, Throwable cause);
 
     /**
      * 调度线程：连接结束或 bot 因异常结束

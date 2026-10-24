@@ -14,7 +14,6 @@ lombok = "9.7.0"
 mcprotocollib = "26.2-20260907.143312-19"
 minestom = "2026.10.05-26.2"
 minestom-data = "26.2-rv3"
-minestom-testing = "2026.10.05-26.2"
 download = "5.7.0"
 
 [libraries]
@@ -37,7 +36,7 @@ kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "
 mcprotocollib = { module = "org.geysermc.mcprotocollib:protocol", version.ref = "mcprotocollib" }
 minestom = { module = "net.minestom:minestom", version.ref = "minestom" }
 minestom-data = { module = "net.minestom:data", version.ref = "minestom-data" }
-minestom-testing = { module = "net.minestom:testing", version.ref = "minestom-testing" }
+minestom-testing = { module = "net.minestom:testing", version.ref = "minestom" }
 
 [plugins]
 download = { id = "de.undercouch.download", version.ref = "download" }

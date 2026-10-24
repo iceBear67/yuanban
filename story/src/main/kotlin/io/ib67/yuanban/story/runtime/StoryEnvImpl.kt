@@ -56,7 +56,7 @@ internal class StoryEnvImpl(
     override val isolated: Boolean,
 ) : StoryEnv {
     /** 类名与方法名，用于服务端异常的运行故事名单 */
-    val name = "${testClass.name}.$methodName"
+    override val name = "${testClass.name}.$methodName"
     override val process: ServerProcess get() = server.process
     override val address: InetSocketAddress get() = server.address
     override val defaults: StoryDefaults get() = server.defaults

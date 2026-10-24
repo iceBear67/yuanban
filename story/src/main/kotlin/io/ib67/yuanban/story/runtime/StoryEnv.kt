@@ -21,6 +21,8 @@ import kotlin.time.Duration
 
 /** 一个故事的运行时，词汇通过它使用服务端与 bot */
 interface StoryEnv {
+    /** 类名与方法名：JUnit 配置了并发执行，可能同时有多个故事在运行，用它区分 */
+    val name: String
     /** 故事所在的类或者外层类带有 @IsolatedJvm */
     val isolated: Boolean
     /** JVM 中的服务端进程，即 MinecraftServer.process() */

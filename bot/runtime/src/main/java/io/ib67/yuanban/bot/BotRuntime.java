@@ -60,7 +60,8 @@ public final class BotRuntime implements AutoCloseable {
     }
 
     /**
-     * 在暂停期间让每个 bot 执行指定次数的 tick。
+     * 在暂停期间让每个尚未结束的 bot 执行指定次数的 tick；已经断开的 bot 不会得到动作。
+     * 这 {@code ticks} 次 tick 连续执行，中间没有 tick 间隔。
      *
      * @return 按 bot 创建顺序排列的步进动作
      */

@@ -44,8 +44,10 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.junit.jupiter.api.Test;
 
+import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -165,6 +167,64 @@ class SchedulerTest {
             Thread.sleep(100);
             assertEquals(afterCancel, TestViews.of(bot).ticks());
         }
+    }
+
+    @Test
+    void stepTicksSkipsBotsThatHaveAlreadyDisconnected() {
+        try (var runtime = BotRuntime.create()) {
+            var peerA = new TestPeer();
+            var peerB = new TestPeer();
+            var ending = TestServer.joinedBot(runtime, peerA, "ending", new Pos(0.5, 0, 0.5));
+            var staying = TestServer.joinedBot(runtime, peerB, "staying", new Pos(0.5, 0, 0.5));
+            // Scheduler.bots 只增不减：断开的 bot 仍在列表中，不应该再得到步进动作
+            var closed = ending.observe(Observers.condition(_ -> false));
+            ending.disconnect();
+            assertEquals(CloseReason.DISCONNECTED, closed.awaitClose(TIMEOUT));
+
+            runtime.suspendTicking();
+            var suspended = staying.observe(Observers.condition(StateReader::tickingSuspended));
+            assertEquals(CloseReason.BY_OBSERVER, suspended.awaitClose(TIMEOUT));
+            var before = TestViews.of(staying).ticks();
+
+            var actions = runtime.stepTicks(1);
+            assertEquals(1, actions.size());
+            assertTrue(actions.get(0).await(TIMEOUT));
+            assertEquals(before + 1, TestViews.of(staying).ticks());
+        }
+    }
+
+    @Test
+    void suspendedTickingParksTheSchedulerThreadAfterAStep() throws Exception {
+        try (var runtime = BotRuntime.create()) {
+            var peer = new TestPeer();
+            var bot = TestServer.joinedBot(runtime, peer, "idle", new Pos(0.5, 0, 0.5));
+            runtime.suspendTicking();
+            var suspended = bot.observe(Observers.condition(StateReader::tickingSuspended));
+            assertEquals(CloseReason.BY_OBSERVER, suspended.awaitClose(TIMEOUT));
+            // 步进一次：round() 经历「有步进」到「暂停且没有步进」的转变。旧的 bug 会让 nextTickNanos 停在过去，
+            // 调度线程此后一直忙等（不会 park），体现为下面测得的 CPU 时间接近墙钟时间，而不是接近 0
+            var action = runtime.stepTicks(1).get(0);
+            assertTrue(action.await(TIMEOUT));
+
+            var scheduler = schedulerThread();
+            var threadBean = ManagementFactory.getThreadMXBean();
+            var before = threadBean.getThreadCpuTime(scheduler.threadId());
+            Thread.sleep(200);
+            var after = threadBean.getThreadCpuTime(scheduler.threadId());
+            // 忙等时这 200 毫秒几乎全部计入调度线程的 CPU 时间；park 之后的 CPU 时间增量应当很小
+            assertTrue(after - before < TimeUnit.MILLISECONDS.toNanos(50),
+                    "scheduler thread busy-spun while ticking was suspended: " + (after - before) + "ns in 200ms");
+        }
+    }
+
+    /**
+     * 测试串行执行，调度线程的名称带全局递增的序号：取当前存在的、序号最大的调度线程就是本测试创建的那个
+     */
+    private static Thread schedulerThread() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(t -> t.getName().startsWith("yuanban-bot-scheduler-"))
+                .max(Comparator.comparingInt(t -> Integer.parseInt(t.getName().substring("yuanban-bot-scheduler-".length()))))
+                .orElseThrow();
     }
 
     @Test

@@ -37,7 +37,9 @@ import org.geysermc.mcprotocollib.protocol.data.game.entity.attribute.AttributeT
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.Pose;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.IntEntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.LongEntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ObjectEntityMetadata;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
@@ -92,6 +94,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -713,8 +716,27 @@ class MovementBotTest {
             peer.barrier();
             var action = bot.moveTo(new Vec(34.5, 0, 0.5));
             assertFalse(action.await(TIMEOUT));
-            assertEquals(ActionCancelledException.PATH_FAILED,
-                    assertThrows(CompletionException.class, () -> action.future().join()).getCause().getMessage());
+            var cancelled = assertThrows(CompletionException.class, () -> action.future().join()).getCause();
+            assertEquals(ActionCancelledException.PATH_FAILED, cancelled.getMessage());
+            assertNotNull(cancelled.getCause());
+            // 寻路失败只结束这个动作，bot 继续
+            assertTrue(bot.lookAt(new Vec(0.5, 0.5, 0.5)).await(TIMEOUT));
+        });
+    }
+
+    @Test
+    void moveToIsCancelledWhenTheTargetColumnHasAnInvalidBlockState() {
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            // 目标所在区块的区段带有超出 Minestom 注册表范围的状态编号：plan() 在调度线程上计算目标的站立高度时
+            // 直接读取这个区段，不经过寻路线程
+            peer.push(invalidSectionChunk(1, 0));
+            peer.barrier();
+            var action = bot.moveTo(new Vec(20.5, 0, 0.5));
+            assertFalse(action.await(TIMEOUT));
+            var cancelled = assertThrows(CompletionException.class, () -> action.future().join()).getCause();
+            assertEquals(ActionCancelledException.PATH_FAILED, cancelled.getMessage());
+            assertNotNull(cancelled.getCause());
             // 寻路失败只结束这个动作，bot 继续
             assertTrue(bot.lookAt(new Vec(0.5, 0.5, 0.5)).await(TIMEOUT));
         });
@@ -1012,6 +1034,31 @@ class MovementBotTest {
             peer.barrier();
             waitTicks(peer, 2);
             assertEquals(0.77 - 0.6, TestViews.of(bot).player().position().y(), 1e-6);
+        });
+    }
+
+    @Test
+    void seatsOfSulfurCubesScaleBySizeAndBabyState() {
+        withBot(new Pos(0.5, 0, 0.5), (_, _, _) -> {
+        }, (peer, bot) -> {
+            // 硫磺立方体：原版 AbstractCubeMob.getPassengerAttachmentPoint，挂点在顶面向下 size / 64 × scale × ageScale 处；
+            // 幼年标记（AgeableMob 默认 canBeABaby 为 true，硫磺立方体没有覆盖）只影响这个偏移量，尺寸本身只按 size 缩放
+            peer.push(vehicle(330, EntityType.SULFUR_CUBE, new Pos(2.5, 0, 0.5)),
+                    new ClientboundSetEntityDataPacket(330, new EntityMetadata<?, ?>[]{
+                            new IntEntityMetadata(EntityMetaIndex.CUBE_SIZE.index(), MetadataTypes.INT, 3)}),
+                    passengers(330, TestServer.ENTITY_ID));
+            peer.barrier();
+            waitTicks(peer, 2);
+            var height = (float) EntityTypeData.height(EntityType.SULFUR_CUBE) * 3;
+            assertEquals(2.5, TestViews.of(bot).player().position().x(), 1e-9);
+            assertEquals(height - 0.015625 * 3 - 0.6, TestViews.of(bot).player().position().y(), 1e-6);
+
+            // 幼年：挂点的偏移量乘以 ageScale 0.5，尺寸本身不变
+            peer.push(new ClientboundSetEntityDataPacket(330, new EntityMetadata<?, ?>[]{
+                    new BooleanEntityMetadata(EntityMetaIndex.AGEABLE_IS_BABY.index(), MetadataTypes.BOOLEAN, true)}));
+            peer.barrier();
+            waitTicks(peer, 2);
+            assertEquals(height - 0.015625 * 3 * 0.5 - 0.6, TestViews.of(bot).player().position().y(), 1e-6);
         });
     }
 

@@ -152,7 +152,7 @@ int picked = counter.read(PickupCounter::picked);
 
 ## 暂停 tick 与步进
 
-`BotRuntime.suspendTicking()` 暂停全部 bot 的 tick，`resumeTicking()` 恢复。暂停时入站数据包、自动应答与查询继续处理；一次性请求等到恢复或步进时执行。`stepTicks(n)` 返回按创建顺序排列的动作，让每个 bot 执行 n 次 tick。
+`BotRuntime.suspendTicking()` 暂停全部 bot 的 tick，`resumeTicking()` 恢复。暂停时入站数据包、自动应答与查询继续处理；一次性请求等到恢复或步进时执行。`stepTicks(n)` 返回按创建顺序排列的动作，让每个尚未结束的 bot 执行 n 次 tick（已经断开的 bot 不会得到动作），这 n 次 tick 连续执行，中间没有 tick 间隔。
 
 ## 暂停移动
 

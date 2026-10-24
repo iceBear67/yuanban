@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * <ul>
  *     <li>默认的乘客挂点按玩家在载具乘客列表中的序号取（超出时取最后一个，原版 {@code EntityAttachments.getClamped}），
  *     随载具的偏航角旋转；活体载具的尺寸与挂点乘以 scale 属性，幼年时换成幼年的尺寸；</li>
- *     <li>船与竹筏、史莱姆与岩浆怪、骆驼按原版各自的计算覆盖默认值；马、驴、骡、骷髅马、僵尸马在默认值上加上
+ *     <li>船与竹筏、史莱姆、岩浆怪与硫磺立方体、骆驼按原版各自的计算覆盖默认值；马、驴、骡、骷髅马、僵尸马在默认值上加上
  *     人立动画的偏移；羊驼、矿车、鸡使用默认值；</li>
  *     <li>玩家的载具挂点为 (0, 0.6, 0) 乘以玩家的 scale 属性。</li>
  * </ul>
@@ -41,15 +41,16 @@ public final class RidingSeat {
     private static final Set<EntityType> REARING_HORSES = Set.of(EntityType.HORSE, EntityType.DONKEY, EntityType.MULE,
             EntityType.SKELETON_HORSE, EntityType.ZOMBIE_HORSE);
     static final Set<EntityType> CAMELS = Set.of(EntityType.CAMEL, EntityType.CAMEL_HUSK);
-    private static final Set<EntityType> CUBE_MOBS = Set.of(EntityType.SLIME, EntityType.MAGMA_CUBE);
+    private static final Set<EntityType> CUBE_MOBS = Set.of(EntityType.SLIME, EntityType.MAGMA_CUBE, EntityType.SULFUR_CUBE);
     /**
      * 本库识别幼年状态的载具类型（原版中都是 {@code AgeableMob}）；其余实体按成年处理。
-     * 史莱姆与岩浆怪虽然在原版中继承 {@code AgeableMob}，但 {@code canBeABaby} 为 false，幼年标记恒为假，不列入
+     * 史莱姆与岩浆怪虽然在原版中继承 {@code AgeableMob}，但 {@code canBeABaby} 为 false，幼年标记恒为假，不列入；
+     * 硫磺立方体没有覆盖 {@code canBeABaby}（继承 {@code AgeableMob} 默认的 true），幼年标记可能为真，列入
      */
     private static final Set<EntityType> AGEABLE = Set.of(EntityType.HORSE, EntityType.DONKEY, EntityType.MULE,
             EntityType.SKELETON_HORSE, EntityType.ZOMBIE_HORSE, EntityType.LLAMA, EntityType.TRADER_LLAMA,
             EntityType.CAMEL, EntityType.CAMEL_HUSK, EntityType.PIG, EntityType.STRIDER, EntityType.CHICKEN,
-            EntityType.HAPPY_GHAST, EntityType.NAUTILUS, EntityType.ZOMBIE_NAUTILUS);
+            EntityType.HAPPY_GHAST, EntityType.NAUTILUS, EntityType.ZOMBIE_NAUTILUS, EntityType.SULFUR_CUBE);
     static final Set<EntityType> BOATS = Arrays.stream(EntityType.values())
             .filter(type -> name(type).endsWith("_boat") || name(type).endsWith("_raft"))
             .collect(Collectors.toUnmodifiableSet());
@@ -88,10 +89,11 @@ public final class RidingSeat {
         var scale = (float) vehicle.attributes().value(AttributeType.Builtin.SCALE);
         var baby = AGEABLE.contains(type) && meta(vehicle, EntityMetaIndex.AGEABLE_IS_BABY);
         if (CUBE_MOBS.contains(type)) {
-            // 原版 AbstractCubeMob：尺寸按大小缩放，挂点在顶面向下 size / 64 处，不随偏航角旋转
+            // 原版 AbstractCubeMob：尺寸按大小缩放，挂点在顶面向下 size / 64 × scale × ageScale 处，不随偏航角旋转；
+            // 史莱姆与岩浆怪的幼年标记恒为假（ageScale 恒为 1），只有硫磺立方体会真正受幼年缩放影响
             int size = meta(vehicle, EntityMetaIndex.CUBE_SIZE);
             var height = (float) EntityTypeData.height(type) * size * scale;
-            return new Vec(0.0, height - 0.015625 * size * scale, 0.0);
+            return new Vec(0.0, height - 0.015625 * size * scale * ageScale(type, baby), 0.0);
         }
         if (CAMELS.contains(type)) {
             return camelPoint(vehicle, Math.max(index, 0), passengers.size(), scale, baby, yaw, gameTime);

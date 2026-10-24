@@ -28,8 +28,9 @@ public final class Scheduler {
     private volatile boolean running = true;
     private volatile boolean suspended;
     private volatile boolean tickingSuspended;
-    private volatile long pausedSince;
-    private volatile long pausedNanos;
+    // 只在 activeClockLock 的保护下读写，不需要 volatile
+    private long pausedSince;
+    private long pausedNanos;
 
     public Scheduler(RuntimeOptions options) {
         this.options = options;
@@ -112,13 +113,14 @@ public final class Scheduler {
         if (closing) {
             throw new IllegalStateException("the runtime is closed");
         }
-        var actions = bots().stream().map(bot -> bot.registerStep(ticks)).map(action -> (Action) action).toList();
-        request(() -> actions.forEach(action -> ((BotInstance) actionBot(action)).activateStep(action, ticks)));
+        // 已经结束的 bot 不需要步进动作：bots 只增不减，断开的 bot 仍在列表中
+        var actions = bots().stream().filter(bot -> !bot.ended()).<Action>map(bot -> bot.registerStep(ticks)).toList();
+        request(() -> actions.forEach(action -> actionBot(action).activateStep(action, ticks)));
         return actions;
     }
 
     private static BotInstance actionBot(Action action) {
-        return ((io.ib67.yuanban.bot.scheduler.ActionImpl) action).bot();
+        return ((ActionImpl) action).bot();
     }
 
     private void request(Runnable task) {
@@ -132,7 +134,9 @@ public final class Scheduler {
 
     private void setTickingSuspended(boolean value) {
         synchronized (activeClockLock) {
-            if (tickingSuspended == value) return;
+            if (tickingSuspended == value) {
+                return;
+            }
             var now = System.nanoTime();
             if (value) {
                 pausedSince = now;
@@ -145,12 +149,14 @@ public final class Scheduler {
         for (var bot : bots) bot.runtimeSuspensionChanged();
     }
 
-    /** 故事时钟使用的活跃时间。 */
+    /** 真实时间减去暂停 tick 的累计时间。 */
     public long activeNanos() {
         synchronized (activeClockLock) {
             var now = System.nanoTime();
             var paused = pausedNanos;
-            if (tickingSuspended) paused += now - pausedSince;
+            if (tickingSuspended) {
+                paused += now - pausedSince;
+            }
             return now - paused;
         }
     }

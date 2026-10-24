@@ -51,6 +51,9 @@ public interface Action {
 |---|---|---|
 | 执行完毕：bot 把这个动作的执行过程走完了 | 正常完成 | 返回 true |
 | 用户调用 `cancel()`（`BY_USER`） | 以 `ActionCancelledException` 完成 | 返回 false |
+| 内置 observer（`distanceWithIn`、`distanceOutOf`）因条件满足取消动作（`BY_OBSERVER`） | 同上 | 返回 false |
+| 寻路计算抛出异常（`PATH_FAILED`） | 同上 | 返回 false |
+| `jumpTo` 起跳后在空中的第 100 个 tick 仍未着地（`AIR_TIMEOUT`） | 同上 | 返回 false |
 | 寻路找不到到达目标的路径（`NO_PATH`） | 同上 | 返回 false |
 | 移动连续被阻挡，重新寻路次数用完（`BLOCKED`） | 同上 | 返回 false |
 | `lookAt(int entityId)`、`attack`、`interact` 的目标实体不在模型中（`NO_ENTITY`） | 同上 | 返回 false |
@@ -116,9 +119,9 @@ public interface Action {
 
 | 动作 | 执行过程 | 执行完毕 | 取消 |
 |---|---|---|---|
-| `moveTo(target)` | 开始时在寻路线程上寻路，之后每 tick 沿路径节点移动，必要时起跳；连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路 | 玩家着地，与目标的水平距离不大于 `closeDistance`，并且脚部与目标的站立高度相差小于 1 | 找不到路径，或者只能走到最近点并且已经走完：寻路时目标所在区块已加载为 `NO_PATH`，未加载为 `CHUNK_NOT_LOADED`；重新寻路超过 3 次：`BLOCKED`；移动范围涉及未加载区块：`CHUNK_NOT_LOADED` |
+| `moveTo(target)` | 开始时在寻路线程上寻路，之后每 tick 沿路径节点移动，必要时起跳；连续 20 tick 水平位移小于 0.05、路径上的方块被改变、服务端传送了玩家时重新寻路 | 玩家着地，与目标的水平距离不大于 `closeDistance`，并且脚部与目标的站立高度相差小于 1 | 找不到路径，或者只能走到最近点并且已经走完：寻路时目标所在区块已加载为 `NO_PATH`，未加载为 `CHUNK_NOT_LOADED`；重新寻路超过 3 次：`BLOCKED`；移动范围涉及未加载区块：`CHUNK_NOT_LOADED`；寻路计算抛出异常：`PATH_FAILED` |
 | `moveForward(blocks)` | 方向取开始时的水平朝向，或 `MoveOptions.direction` 的水平分量；沿直线移动，不寻路、不跳跃 | 累计水平位移达到 `blocks` | 连续 20 tick 水平位移小于 0.05：`BLOCKED`；`CHUNK_NOT_LOADED` |
-| `jumpTo(target)` | 以落在目标方块的顶面为目标：着地时起跳，起跳前按水平距离选择行走或疾跑（未指定移动方式时超过 2 格选择疾跑）；空中朝目标顶面中心加速，水平距离小于 0.1 时不再加速 | 起跳后再次着地；起跳的 tick 移动之后仍然着地（起跳没有离开地面，例如跳跃力为 0 或者头顶有方块） | `CHUNK_NOT_LOADED` |
+| `jumpTo(target)` | 以落在目标方块的顶面为目标：着地时起跳，起跳前按水平距离选择行走或疾跑（未指定移动方式时超过 2 格选择疾跑）；空中朝目标顶面中心加速，水平距离小于 0.1 时不再加速 | 起跳后再次着地；起跳的 tick 移动之后仍然着地（起跳没有离开地面，例如跳跃力为 0 或者头顶有方块） | `CHUNK_NOT_LOADED`；起跳后在空中的第 100 个 tick 仍未着地：`AIR_TIMEOUT` |
 | `rotate(yaw, pitch)` | 轮到它的那个 tick 设置朝向，单位为度，取值含义见 wiki Set Player Rotation | 设置朝向的 tick 结束时 | 无 |
 | `lookAt(point)` | 轮到它的那个 tick 由玩家眼睛位置指向目标计算一次朝向 | 同上 | 无 |
 | `lookAt(entityId)` | 目标取实体包围盒的中心 | 同上 | 实体不在模型中：`NO_ENTITY` |
