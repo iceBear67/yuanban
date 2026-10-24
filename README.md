@@ -2,6 +2,46 @@
 
 yuanban reimplements vanilla (aka. Notchian) Minecraft contents in Minestom.
 
+## Status
+
+Reimplementation status:
+
+ - Datapack loader framework is done.
+ - Redesigned recipe system, and datapack recipe loader/parser module.
+ - Datapack based tag loader
+ - Datapack based loot table
+ - Enchantments reimplementation.
+
+Framework status:
+
+ - Network protocol based player simulation (`bot`) library is mostly done. It creates bot and provides methods to simulate common player actions.  
+Further improvements are expected. Like pathfinding etc.
+
+For a detailed documentation, check [docs/bot/getting-started.md](docs/bot/getting-started.md)
+
+   - An extensible integration test framework based on `bot`. It provides DSL to define stories.  
+Stories are unit tests that describe expected server states after player interactions.
+```kotlin
+@Story
+fun `Spleef 竞技场中最后留下的玩家获胜`() = story {
+    val arena = arena("Spleef_Classic")
+    val alice = player("alice").also { it.joins(arena) }
+    val bob = player("bob").also { it.joins(arena) }
+
+    "bob 挖掉 alice 脚下的雪块，alice 坠入虚空淘汰" {
+        bob.breaks(alice.below)
+    }
+
+    // 断言竞技场胜利者
+    arena.winner shouldBe bob.username
+}
+```
+
+This testing framework helps us to write easily readable tests that guides agent as a ground fact. We call this executable specifications.    
+It should lay a foundation of automatic implementation and verification for vanilla features.
+
+For a detailed documentation (written by agents), check docs/story-testing.
+
 ## Vanilla server data in tests
 
 Several modules test against the data of the vanilla 26.2 server. The root project downloads the server bundle
